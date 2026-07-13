@@ -1,7 +1,7 @@
 import type { WorkosOrgAdminDirectory } from "./workos-directory.js";
 
 /**
- * Decide which WorkOS invitation id to persist for a member/supplier invite.
+ * Decide which WorkOS invitation id to persist for a member/fulfillment-operator invite.
  *
  * - If the caller already minted one, use it as-is. The Next dashboard sends
  *   WorkOS's invitation id from its own server action (it holds `WORKOS_API_KEY`),

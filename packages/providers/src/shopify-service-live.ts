@@ -946,7 +946,7 @@ type OrderUpdatePayload = {
   };
 };
 
-// Replaces a fulfillment's tracking info (the supplier portal's "fix the
+// Replaces a fulfillment's tracking info (the fulfillment partner portal's "fix the
 // tracking number" edit). Selects the same fulfillment fields as
 // GET_FULFILLMENT_QUERY so the payload reuses `mapFulfillment`. NOTE the
 // payload's `userErrors` is Shopify's base `UserError` — selecting `code`

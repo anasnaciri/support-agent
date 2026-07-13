@@ -985,7 +985,7 @@ describe("order.cancel tool", () => {
             refundPolicy: defaultRefundPolicy,
             discountPolicy: defaultDiscountPolicy,
             retentionDays: 730,
-            supplierEscalationSheet: null,
+            fulfillmentOperatorEscalationSheet: null,
             legalAcceptance: null,
             cancellationRestock,
           }),
@@ -1061,7 +1061,7 @@ describe("order.cancel tool", () => {
             refundPolicy: defaultRefundPolicy,
             discountPolicy: defaultDiscountPolicy,
             retentionDays: 730,
-            supplierEscalationSheet: null,
+            fulfillmentOperatorEscalationSheet: null,
             legalAcceptance: null,
             cancellationRestock: true,
           }),
@@ -1330,7 +1330,7 @@ describe("refund.recommend — tool wire-up", () => {
             refundPolicy: defaultRefundPolicy,
             discountPolicy: defaultDiscountPolicy,
             retentionDays: 730,
-            supplierEscalationSheet: null,
+            fulfillmentOperatorEscalationSheet: null,
             legalAcceptance: null,
           }),
         ],
@@ -1671,10 +1671,10 @@ describe("order.update_shipping_address tool", () => {
 });
 
 describe("order.update_tracking tool", () => {
-  // A supplier reshipped (or the carrier re-labelled the parcel) and reported
+  // A fulfillmentOperator reshipped (or the carrier re-labelled the parcel) and reported
   // a new tracking number; the agent syncs it onto the REAL fulfillment so the
   // order record and the ticket's tracking card stop pointing at the dead
-  // number. Fulfillment picking mirrors the supplier portal's rule.
+  // number. Fulfillment picking mirrors the fulfillmentOperator portal's rule.
   const fulfillment = (
     id: string,
     trackingNumber: string,
@@ -1758,7 +1758,7 @@ describe("order.update_tracking tool", () => {
     expect(capture.input).toEqual({
       fulfillmentId: "f-2",
       trackingNumber: "NEW-777",
-      // No carrier named by the supplier → the fulfillment's current one is
+      // No carrier named by the fulfillmentOperator → the fulfillment's current one is
       // carried over so the write never silently drops the carrier.
       trackingCompany: "DHL",
       // Customer communication goes through the agent's reply, never a
@@ -1859,7 +1859,7 @@ describe("order.update_tracking tool", () => {
     expectIssues(exit, ["FulfillmentUpdateFailed"]);
   });
 
-  it("declares write risk, ALLOW default (the supplier already holds ungated authority over tracking), and the permission toggle", () => {
+  it("declares write risk, ALLOW default (the fulfillmentOperator already holds ungated authority over tracking), and the permission toggle", () => {
     expect(shopifyUpdateTracking.name).toBe("order.update_tracking");
     expect(shopifyUpdateTracking.risk).toBe("write");
     expect(shopifyUpdateTracking.defaultPermission).toBe("allow");

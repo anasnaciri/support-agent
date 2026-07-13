@@ -111,7 +111,7 @@ export interface ShopifyAppConfig {
  *                             just without restocking — it must re-OAuth to
  *                             grant them.
  *      - `write_merchant_managed_fulfillment_orders` /
- *        `write_third_party_fulfillment_orders` → supplier portal tracking
+ *        `write_third_party_fulfillment_orders` → fulfillment partner portal tracking
  *                             edits via Shopify fulfillmentTrackingInfoUpdate,
  *                             which takes any ONE of these. Shopify also
  *                             requires the authorizing staff user to hold the
@@ -621,7 +621,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
       ),
     ),
   );
-  // TenantRepository (refund policy + supplier-escalation sheet) and
+  // TenantRepository (refund policy + fulfillment-operator-escalation sheet) and
   // TenantAgentOverridesService (per-agent model overrides) back the dashboard
   // settings-write endpoints (Path B). Both are DB-backed.
   const tenantRepo = TenantRepositoryLive.pipe(Layer.provide(dbLayer));

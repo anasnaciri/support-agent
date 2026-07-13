@@ -21,14 +21,14 @@ describe("ticketActionFeedback", () => {
     expect(ticketActionFeedback("resendApproval", "nothing_to_resend").tone).toBe(
       "info",
     );
-    expect(ticketActionFeedback("escalateSupplier", "escalated").tone).toBe(
+    expect(ticketActionFeedback("escalateFulfillmentOperator", "escalated").tone).toBe(
       "success",
     );
-    expect(ticketActionFeedback("escalateSupplier", "no_supplier").tone).toBe(
+    expect(ticketActionFeedback("escalateFulfillmentOperator", "no_fulfillment_operator").tone).toBe(
       "warning",
     );
     expect(
-      ticketActionFeedback("escalateSupplier", "already_escalated").tone,
+      ticketActionFeedback("escalateFulfillmentOperator", "already_escalated").tone,
     ).toBe("info");
   });
 

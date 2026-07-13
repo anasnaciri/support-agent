@@ -125,40 +125,40 @@ describe("buildContextRows", () => {
     expect(row).toMatchObject({ label: "Notes", multiline: true });
   });
 
-  it("renders the supplier update's note and proposed resolution as multiline rows", () => {
+  it("renders the fulfillment partner update's note and proposed resolution as multiline rows", () => {
     const rows = buildContextRows({
-      supplierUpdate: {
-        supplierId: "sup_1",
+      fulfillmentOperatorUpdate: {
+        fulfillmentOperatorId: "sup_1",
         note: "Replacement ships Monday\nfrom the EU warehouse",
         proposedResolution: "Send a replacement unit",
       },
     });
-    expect(byKey(rows, "supplierNote")).toMatchObject({
-      label: "Supplier note",
+    expect(byKey(rows, "fulfillmentOperatorNote")).toMatchObject({
+      label: "Fulfillment partner note",
       text: "Replacement ships Monday\nfrom the EU warehouse",
       multiline: true,
     });
-    expect(byKey(rows, "supplierProposedResolution")).toMatchObject({
-      label: "Supplier suggests",
+    expect(byKey(rows, "fulfillmentOperatorProposedResolution")).toMatchObject({
+      label: "Fulfillment partner suggests",
       text: "Send a replacement unit",
       multiline: true,
     });
     // bespoke rows, never the raw-JSON fallback dump
-    expect(byKey(rows, "supplierUpdate")).toBeUndefined();
+    expect(byKey(rows, "fulfillmentOperatorUpdate")).toBeUndefined();
   });
 
-  it("skips the supplier proposed-resolution row when the supplier left it empty", () => {
+  it("skips the fulfillment partner proposed-resolution row when the fulfillment partner left it empty", () => {
     const rows = buildContextRows({
-      supplierUpdate: { supplierId: "sup_1", note: "Out of stock", proposedResolution: null },
+      fulfillmentOperatorUpdate: { fulfillmentOperatorId: "sup_1", note: "Out of stock", proposedResolution: null },
     });
-    expect(byKey(rows, "supplierNote")).toMatchObject({ text: "Out of stock" });
-    expect(byKey(rows, "supplierProposedResolution")).toBeUndefined();
+    expect(byKey(rows, "fulfillmentOperatorNote")).toMatchObject({ text: "Out of stock" });
+    expect(byKey(rows, "fulfillmentOperatorProposedResolution")).toBeUndefined();
   });
 
-  it("renders no supplier rows for a malformed supplierUpdate blob", () => {
-    const rows = buildContextRows({ supplierUpdate: { note: "   " } });
-    expect(byKey(rows, "supplierNote")).toBeUndefined();
-    expect(byKey(rows, "supplierUpdate")).toBeUndefined();
+  it("renders no fulfillment partner rows for a malformed fulfillmentOperatorUpdate blob", () => {
+    const rows = buildContextRows({ fulfillmentOperatorUpdate: { note: "   " } });
+    expect(byKey(rows, "fulfillmentOperatorNote")).toBeUndefined();
+    expect(byKey(rows, "fulfillmentOperatorUpdate")).toBeUndefined();
   });
 
   it("renders the runtime-verified order email as its own labeled mono row", () => {
@@ -221,14 +221,14 @@ describe("buildContextCardRows", () => {
     photoSignals: { count: 2, withExif: 1, stripped: 1, anyStripped: true },
     riskFlags: ["refund_customer_mismatch"],
     notes: "Customer is patient but wants an answer this week.",
-    supplierUpdate: {
-      supplierId: "sup_1",
+    fulfillmentOperatorUpdate: {
+      fulfillmentOperatorId: "sup_1",
       note: "Replacement ships Monday",
       proposedResolution: "Send a replacement unit",
     },
   };
 
-  it("keeps only the ask / evidence / risk / notes / supplier rows — no sidebar duplicates or machinery", () => {
+  it("keeps only the ask / evidence / risk / notes / fulfillmentOperator rows — no sidebar duplicates or machinery", () => {
     const rows = buildContextCardRows(richContext, null);
     expect(rows.map((r) => r.key)).toEqual([
       "returnReason",
@@ -237,8 +237,8 @@ describe("buildContextCardRows", () => {
       "photoSignals",
       "riskFlags",
       "notes",
-      "supplierNote",
-      "supplierProposedResolution",
+      "fulfillmentOperatorNote",
+      "fulfillmentOperatorProposedResolution",
     ]);
   });
 

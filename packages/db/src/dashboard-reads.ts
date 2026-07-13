@@ -44,14 +44,14 @@ import type { DrizzleDb } from "./client.js";
 import {
   approvals,
   auditLog,
-  ticketSupplierEscalations,
+  ticketFulfillmentOperatorEscalations,
   tickets,
   connectorConnections,
   tenantAgentOverrides,
   tenantKnowledgeDocuments,
   tenants,
 } from "./schema.js";
-import { hasOpenEscalationForTicket } from "./supplier-store.js";
+import { hasOpenEscalationForTicket } from "./fulfillment-operator-store.js";
 import { getActiveReplyDeliveryForTicket } from "./reply-delivery-store.js";
 import { resurfaceableApprovedReply } from "./approved-not-sent.js";
 
@@ -437,15 +437,15 @@ export const ticketsList = async (
             ),
           ),
       ),
-      waitingSupplier: exists(
+      waitingFulfillmentOperator: exists(
         db
           .select({ one: sql`1` })
-          .from(ticketSupplierEscalations)
+          .from(ticketFulfillmentOperatorEscalations)
           .where(
             and(
-              eq(ticketSupplierEscalations.ticketId, tickets.id),
-              eq(ticketSupplierEscalations.tenantId, tickets.tenantId),
-              eq(ticketSupplierEscalations.status, "open"),
+              eq(ticketFulfillmentOperatorEscalations.ticketId, tickets.id),
+              eq(ticketFulfillmentOperatorEscalations.tenantId, tickets.tenantId),
+              eq(ticketFulfillmentOperatorEscalations.status, "open"),
             ),
           ),
       ),
@@ -473,7 +473,7 @@ export const ticketsList = async (
       updatedAt: r.updatedAt.toISOString(),
       waitingOn: {
         approval: Boolean(r.waitingApproval),
-        supplier: Boolean(r.waitingSupplier),
+        fulfillmentOperator: Boolean(r.waitingFulfillmentOperator),
       },
     })),
   };
@@ -557,11 +557,11 @@ export const ticketDetail = async (
   const resurfaceable = resurfaceableApprovedReply(auditEntries, approvalDetails);
 
   // Concurrent wait facts: approval derived from the rows we already loaded;
-  // supplier is one indexed lookup (cse_ticket_idx). A ticket parked
+  // fulfillmentOperator is one indexed lookup (cse_ticket_idx). A ticket parked
   // `waiting_for_approval` can also carry an open escalation.
   const waitingOn = {
     approval: approvalDetails.some((a) => a.status === "pending"),
-    supplier: await hasOpenEscalationForTicket(db, tenantId, ticketId),
+    fulfillmentOperator: await hasOpenEscalationForTicket(db, tenantId, ticketId),
   };
   const scenarioKey = (row.context as Record<string, unknown>)["scenarioKey"];
 

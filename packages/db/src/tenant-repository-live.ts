@@ -21,7 +21,7 @@ import {
   type RefundPolicy,
   type RefundPolicyMode,
   type ResolutionPolicy,
-  type SupplierEscalationSheet,
+  type FulfillmentOperatorEscalationSheet,
 } from "@support-agent/services";
 import { CurrentTxRef, DbClient } from "./db-client.js";
 import { tenants } from "./schema.js";
@@ -128,13 +128,13 @@ const decodeDiscountMode = (raw: unknown): DiscountPolicyMode => {
 };
 
 /**
- * Decode the persisted JSONB `supplierEscalationSheet` block. Returns
+ * Decode the persisted JSONB `fulfillmentOperatorEscalationSheet` block. Returns
  * `null` when the field is missing, malformed, or empty — agents check
  * for null and skip the sheet write in that case.
  */
-const decodeSupplierEscalationSheet = (
+const decodeFulfillmentOperatorEscalationSheet = (
   raw: unknown,
-): SupplierEscalationSheet | null => {
+): FulfillmentOperatorEscalationSheet | null => {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const spreadsheetId = r["spreadsheetId"];
@@ -217,7 +217,7 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly refundPolicy?: unknown;
                 readonly discountPolicy?: unknown;
                 readonly retentionDays?: unknown;
-                readonly supplierEscalationSheet?: unknown;
+                readonly fulfillmentOperatorEscalationSheet?: unknown;
                 readonly legalAcceptance?: unknown;
                 readonly rephraseModel?: unknown;
                 readonly cancellationRestock?: unknown;
@@ -243,8 +243,8 @@ export const TenantRepositoryLive = Layer.effect(
             rawDays > 0
               ? rawDays
               : DEFAULT_RETENTION_DAYS;
-          const supplierEscalationSheet = decodeSupplierEscalationSheet(
-            settings?.supplierEscalationSheet,
+          const fulfillmentOperatorEscalationSheet = decodeFulfillmentOperatorEscalationSheet(
+            settings?.fulfillmentOperatorEscalationSheet,
           );
           const legalAcceptance = decodeLegalAcceptance(
             settings?.legalAcceptance,
@@ -275,7 +275,7 @@ export const TenantRepositoryLive = Layer.effect(
             refundPolicy,
             discountPolicy,
             retentionDays,
-            supplierEscalationSheet,
+            fulfillmentOperatorEscalationSheet,
             legalAcceptance,
             rephraseModel,
             cancellationRestock,
@@ -340,14 +340,14 @@ export const TenantRepositoryLive = Layer.effect(
           }
         }),
 
-      setSupplierEscalationSheet: (tenantId, sheet) =>
+      setFulfillmentOperatorEscalationSheet: (tenantId, sheet) =>
         Effect.gen(function* () {
           const db = yield* pickDb;
           // Same shallow-merge as setRefundPolicy. Passing `null`
           // writes the JSONB null literal — the decoder treats null as
           // "no sheet configured" so this acts as a clear.
           const sheetJson = JSON.stringify({
-            supplierEscalationSheet: sheet,
+            fulfillmentOperatorEscalationSheet: sheet,
           });
           const result = yield* Effect.tryPromise({
             try: () =>
@@ -360,7 +360,7 @@ export const TenantRepositoryLive = Layer.effect(
                 .returning({ id: tenants.id }),
             catch: (cause) =>
               new TenantRepositoryDbError({
-                operation: "setSupplierEscalationSheet",
+                operation: "setFulfillmentOperatorEscalationSheet",
                 cause,
               }),
           });

@@ -40,7 +40,7 @@ import {
   MerchantNotificationService,
   PlatformMailServiceTest,
   ShopifyServiceTest,
-  SupplierEscalationServiceTest,
+  FulfillmentOperatorEscalationServiceTest,
   TenantAgentOverridesServiceTest,
   TenantRepositoryTest,
   TenantSettings,
@@ -65,7 +65,7 @@ const defaultTenantSettings = new TenantSettings({
   refundPolicy: defaultRefundPolicy,
   discountPolicy: defaultDiscountPolicy,
   retentionDays: 730,
-  supplierEscalationSheet: null,
+  fulfillmentOperatorEscalationSheet: null,
   legalAcceptance: null,
 });
 const tenantRepoDefault = TenantRepositoryTest({
@@ -438,7 +438,7 @@ const driveScenarioTicket = (
     refundPolicy: defaultRefundPolicy,
     discountPolicy: defaultDiscountPolicy,
     retentionDays: 730,
-    supplierEscalationSheet: null,
+    fulfillmentOperatorEscalationSheet: null,
     legalAcceptance: null,
     resolutionPolicy,
   });
@@ -526,7 +526,7 @@ describe("scenario envelope (slice 5) — runtime clamps the live agent", () => 
           label: "Delivery problem",
           builtin: true,
           enabledActions: [{ tool: "refund.create", permission: "ask" }],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
           notes: "Offer a refund for damaged deliveries.",
         },
       ],
@@ -549,7 +549,7 @@ describe("scenario envelope (slice 5) — runtime clamps the live agent", () => 
           label: "Delivery problem",
           builtin: true,
           enabledActions: [],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
           notes: "Handle the delivery problem.",
         },
       ],
@@ -580,7 +580,7 @@ const routingPolicy: ResolutionPolicy = {
       recognition: "Customer wants their money back.",
       builtin: true,
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
-      supplierMode: "none",
+      fulfillmentOperatorMode: "none",
       notes: "Check the order and the refund policy.",
     },
   ],
@@ -660,7 +660,7 @@ const driveTriage = (script: ReadonlyArray<LLMDecision>) =>
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
       resolutionPolicy: routingPolicy,
     }),
@@ -674,7 +674,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
       resolutionPolicy: {
         scenarios: [
@@ -684,7 +684,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             recognition: "Customer asks for tracking status.",
             builtin: true,
             enabledActions: [{ tool: "refund.create", permission: "allow" }],
-            supplierMode: "none",
+            fulfillmentOperatorMode: "none",
             notes: "Report the current carrier status.",
           },
           {
@@ -693,8 +693,8 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             recognition: "Tracking shows an exception.",
             builtin: true,
             enabledActions: [{ tool: "discount.create", permission: "ask" }],
-            supplierMode: "escalate_and_wait",
-            notes: "Use judgment about whether the supplier needs to act.",
+            fulfillmentOperatorMode: "escalate_and_wait",
+            notes: "Use judgment about whether the fulfillmentOperator needs to act.",
           },
         ],
       },
@@ -814,7 +814,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
       resolutionPolicy: {
         scenarios: [
@@ -823,7 +823,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             label: "Refund request",
             builtin: true,
             enabledActions: [{ tool: "refund.create", permission: "allow" }],
-            supplierMode: "none",
+            fulfillmentOperatorMode: "none",
             notes: "Issue the appropriate refund.",
           },
           {
@@ -831,7 +831,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             label: "Where is my order?",
             builtin: true,
             enabledActions: [],
-            supplierMode: "none",
+            fulfillmentOperatorMode: "none",
             notes: "Report tracking status without issuing a refund.",
           },
         ],
@@ -941,7 +941,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
       resolutionPolicy: {
         scenarios: [
@@ -950,7 +950,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             label: "Review refund",
             builtin: false,
             enabledActions: [{ tool: "refund.create", permission: "ask" }],
-            supplierMode: "none",
+            fulfillmentOperatorMode: "none",
             notes: "Ask before refunding.",
           },
           {
@@ -958,7 +958,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             label: "Trusted refund",
             builtin: false,
             enabledActions: [{ tool: "refund.create", permission: "allow" }],
-            supplierMode: "none",
+            fulfillmentOperatorMode: "none",
             notes: "Refund automatically.",
           },
         ],
@@ -1000,7 +1000,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
       resolutionPolicy: {
         scenarios: [
@@ -1009,7 +1009,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             label: "Trusted refund",
             builtin: false,
             enabledActions: [{ tool: "refund.create", permission: "allow" }],
-            supplierMode: "none",
+            fulfillmentOperatorMode: "none",
             notes: "Refund automatically.",
           },
           {
@@ -1017,7 +1017,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             label: "Review refund",
             builtin: false,
             enabledActions: [{ tool: "refund.create", permission: "ask" }],
-            supplierMode: "none",
+            fulfillmentOperatorMode: "none",
             notes: "Ask before refunding.",
           },
         ],
@@ -1047,13 +1047,13 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
     expect(out.result.type).toBe("PausedWaitingForApproval");
   });
 
-  it("denies supplier escalation after selecting a supplier-disabled scenario in the same run", async () => {
+  it("denies fulfillmentOperator escalation after selecting a fulfillment-operator-disabled scenario in the same run", async () => {
     const settings = new TenantSettings({
       notificationEmail: null,
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
       resolutionPolicy: {
         scenarios: [
@@ -1063,8 +1063,8 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             recognition: "Shipment is past the delivery window.",
             builtin: true,
             enabledActions: [],
-            supplierMode: "none",
-            notes: "Escalate every late shipment to the supplier.",
+            fulfillmentOperatorMode: "none",
+            notes: "Escalate every late shipment to the fulfillmentOperator.",
           },
         ],
       },
@@ -1073,14 +1073,14 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
     const out = await driveWithSettings(settings, [
       {
         type: "tool_call",
-        callId: "pick-supplier-disabled",
+        callId: "pick-fulfillment-operator-disabled",
         tool: "ticket.update_context",
         input: { scenarioKey: "late_shipment" },
       },
       {
         type: "tool_call",
-        callId: "forbidden-supplier-call",
-        tool: "supplier.escalate",
+        callId: "forbidden-fulfillment-operator-call",
+        tool: "fulfillment_operator.escalate",
         input: {
           problem: "Shipment is late; please check with the carrier.",
           orderRef: "#1001",
@@ -1089,7 +1089,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
           trackingNumber: "TRACK1001",
         },
       },
-      { type: "final_message", text: "Supplier escalation was unavailable." },
+      { type: "final_message", text: "FulfillmentOperator escalation was unavailable." },
     ]);
 
     expect(out.fetched.context["scenarioKey"]).toBe("late_shipment");
@@ -1147,7 +1147,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
         refundPolicy: defaultRefundPolicy,
         discountPolicy: defaultDiscountPolicy,
         retentionDays: 730,
-        supplierEscalationSheet: null,
+        fulfillmentOperatorEscalationSheet: null,
         legalAcceptance: null,
       }),
       [
@@ -1217,7 +1217,7 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
           recognition: "Customer wants their money back.",
           builtin: true,
           enabledActions: [{ tool: "refund.create", permission: "ask" }],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
           notes: "Check the order, then refund and tell the customer.",
         },
       ],
@@ -1227,7 +1227,7 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
       resolutionPolicy: smokePolicy,
     });
@@ -1370,7 +1370,7 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
 
 // ------------------------------------------------------------
 // Per-action approval — a ticket with PENDING actions never resolves; an
-// approved supplier escalation waits on the supplier (not resolution).
+// approved fulfillmentOperator escalation waits on the fulfillmentOperator (not resolution).
 // ------------------------------------------------------------
 const EXPIRES = new Date(Date.now() + 60_000);
 const AGENT_ID = AgentId("scenario-resolution-agent");
@@ -1426,14 +1426,14 @@ const seedParkedTicket = (repo: typeof TicketRepository.Service, threadId = "thr
   });
 
 describe("per-action approval — no ticket with pending actions resolves", () => {
-  it("does not execute an approved supplier escalation after its scenario disables suppliers", async () => {
+  it("does not execute an approved fulfillmentOperator escalation after its scenario disables fulfillmentOperators", async () => {
     const convo = makeConversationServiceTest({});
-    const supplierDisabledSettings = new TenantSettings({
+    const fulfillmentOperatorDisabledSettings = new TenantSettings({
       notificationEmail: null,
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
       resolutionPolicy: {
         scenarios: [
@@ -1442,7 +1442,7 @@ describe("per-action approval — no ticket with pending actions resolves", () =
             label: "Late shipment",
             builtin: true,
             enabledActions: [],
-            supplierMode: "none",
+            fulfillmentOperatorMode: "none",
             notes: "Escalate late shipments.",
           },
         ],
@@ -1462,7 +1462,7 @@ describe("per-action approval — no ticket with pending actions resolves", () =
             tenantId: TenantId(TENANT),
             ticketId: created.id,
             agentId: AGENT_ID,
-            tool: "supplier.escalate",
+            tool: "fulfillment_operator.escalate",
             proposedInput: {
               problem: "Shipment is late; please check with the carrier.",
               orderRef: "#1001",
@@ -1490,15 +1490,15 @@ describe("per-action approval — no ticket with pending actions resolves", () =
         }),
         partialLayer(
           convo,
-          [SupplierEscalationServiceTest({})],
-          supplierDisabledSettings,
+          [FulfillmentOperatorEscalationServiceTest({})],
+          fulfillmentOperatorDisabledSettings,
         ),
       ),
     );
 
     expect(out.result).toEqual({
       type: "HumanTakeoverRequired",
-      reason: "scenario_supplier_disabled",
+      reason: "scenario_fulfillment_operator_disabled",
     });
     expect(out.final.status).toBe("human_takeover");
   });
@@ -1510,7 +1510,7 @@ describe("per-action approval — no ticket with pending actions resolves", () =
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
       resolutionPolicy: {
         scenarios: [
@@ -1519,7 +1519,7 @@ describe("per-action approval — no ticket with pending actions resolves", () =
             label: "Where is my order?",
             builtin: true,
             enabledActions: [],
-            supplierMode: "none",
+            fulfillmentOperatorMode: "none",
             notes: "Report tracking status without issuing a refund.",
           },
         ],
@@ -1669,7 +1669,7 @@ describe("per-action approval — no ticket with pending actions resolves", () =
     ]);
   });
 
-  it("parks waiting_for_supplier (not resolved) when an approved action escalates to a supplier", async () => {
+  it("parks waiting_for_fulfillment_operator (not resolved) when an approved action escalates to a fulfillmentOperator", async () => {
     const convo = makeConversationServiceTest({});
     const out = await Effect.runPromise(
       Effect.provide(
@@ -1683,7 +1683,7 @@ describe("per-action approval — no ticket with pending actions resolves", () =
             tenantId: TenantId(TENANT),
             ticketId: created.id,
             agentId: AGENT_ID,
-            tool: "supplier.escalate",
+            tool: "fulfillment_operator.escalate",
             proposedInput: { problem: "unit damaged in transit, please reship" },
             reasoning: "",
             riskLevel: "medium",
@@ -1703,20 +1703,20 @@ describe("per-action approval — no ticket with pending actions resolves", () =
           const final = yield* repo.getById(created.id);
           return { result, final };
         }),
-        partialLayer(convo, [SupplierEscalationServiceTest({})]),
+        partialLayer(convo, [FulfillmentOperatorEscalationServiceTest({})]),
       ),
     );
 
-    expect(out.result.type).toBe("PausedWaitingForSupplier");
-    expect(out.final.status).toBe("waiting_for_supplier");
+    expect(out.result.type).toBe("PausedWaitingForFulfillmentOperator");
+    expect(out.final.status).toBe("waiting_for_fulfillment_operator");
   });
 
   // Concurrent waits, resume leg: the ticket still has an OPEN escalation (from a
   // PRIOR tick) while a reply approval was pending. Approving the last reply
-  // must NOT resolve the ticket out from under the still-open supplier wait — the
-  // row-derived `hasOpenEscalationForTicket` check parks it `waiting_for_supplier`
+  // must NOT resolve the ticket out from under the still-open fulfillmentOperator wait — the
+  // row-derived `hasOpenEscalationForTicket` check parks it `waiting_for_fulfillment_operator`
   // even though THIS bundle ran no escalate.
-  it("parks waiting_for_supplier (not resolved) when the ticket still has an open escalation, even if the approved bundle ran no escalate", async () => {
+  it("parks waiting_for_fulfillment_operator (not resolved) when the ticket still has an open escalation, even if the approved bundle ran no escalate", async () => {
     const convo = makeConversationServiceTest({});
     // Mutable: the fixture reads it at call-time, so we push the real (random)
     // ticket id in after seeding — the layer is built before the ticket exists.
@@ -1755,21 +1755,21 @@ describe("per-action approval — no ticket with pending actions resolves", () =
           return { result, final, sent: convo.handle.sent.length };
         }),
         partialLayer(convo, [
-          SupplierEscalationServiceTest({ openEscalationTicketIds: openIds }),
+          FulfillmentOperatorEscalationServiceTest({ openEscalationTicketIds: openIds }),
         ]),
       ),
     );
 
     // The approved reply still sent...
     expect(out.sent).toBe(1);
-    // ...but the ticket parks on the supplier, it does NOT resolve.
-    expect(out.result.type).toBe("PausedWaitingForSupplier");
-    expect(out.final.status).toBe("waiting_for_supplier");
+    // ...but the ticket parks on the fulfillmentOperator, it does NOT resolve.
+    expect(out.result.type).toBe("PausedWaitingForFulfillmentOperator");
+    expect(out.final.status).toBe("waiting_for_fulfillment_operator");
   });
 
   // Back-compat: with the service present but NO open escalation for the ticket,
   // approving the last action resolves as before (row-derived, not blanket).
-  it("resolves when the supplier service is present but the ticket has no open escalation", async () => {
+  it("resolves when the fulfillmentOperator service is present but the ticket has no open escalation", async () => {
     const convo = makeConversationServiceTest({});
     const out = await Effect.runPromise(
       Effect.provide(
@@ -1803,7 +1803,7 @@ describe("per-action approval — no ticket with pending actions resolves", () =
           const final = yield* repo.getById(created.id);
           return { result, final };
         }),
-        partialLayer(convo, [SupplierEscalationServiceTest({})]),
+        partialLayer(convo, [FulfillmentOperatorEscalationServiceTest({})]),
       ),
     );
 
@@ -1813,21 +1813,21 @@ describe("per-action approval — no ticket with pending actions resolves", () =
 });
 
 // Concurrent wait states: a tick that QUEUES an ask-gated action and then
-// escalates to the supplier holds BOTH waits. The bundle park must win
+// escalates to the fulfillmentOperator holds BOTH waits. The bundle park must win
 // (primaryWaitStatus precedence — the merchant is the next unblocker), or the
 // queued approval is orphaned: no waiting_for_approval status, no approval
 // email/ping, park guard 2.9 never fires, and a later dashboard approval
 // would resolve the ticket out from under the open escalation.
 describe("concurrent waits — escalate with a queued approval parks the bundle", () => {
   const escalatingLoopAgent = loopAgent({
-    tools: ["conversation.reply", "supplier.escalate"],
+    tools: ["conversation.reply", "fulfillment_operator.escalate"],
     permissionOverrides: {
       "conversation.reply": "ask",
-      "supplier.escalate": "allow",
+      "fulfillment_operator.escalate": "allow",
     },
   });
 
-  it("parks waiting_for_approval (not waiting_for_supplier) when a tick queues a reply then escalates", async () => {
+  it("parks waiting_for_approval (not waiting_for_fulfillment_operator) when a tick queues a reply then escalates", async () => {
     const script: ReadonlyArray<LLMDecision> = [
       {
         type: "tool_call",
@@ -1838,7 +1838,7 @@ describe("concurrent waits — escalate with a queued approval parks the bundle"
       {
         type: "tool_call",
         callId: "q1",
-        tool: "supplier.escalate",
+        tool: "fulfillment_operator.escalate",
         input: {
           problem: "Unit damaged in transit; replacement needed",
           orderRef: "#9001",
@@ -1851,7 +1851,7 @@ describe("concurrent waits — escalate with a queued approval parks the bundle"
     ];
 
     const out = await driveTicket(escalatingLoopAgent, script, [
-      SupplierEscalationServiceTest({}),
+      FulfillmentOperatorEscalationServiceTest({}),
     ]);
 
     // The queued reply is NOT orphaned: the bundle park ran.
@@ -1869,12 +1869,12 @@ describe("concurrent waits — escalate with a queued approval parks the bundle"
     ).not.toHaveLength(0);
   });
 
-  it("still parks waiting_for_supplier when the tick escalated with nothing queued", async () => {
+  it("still parks waiting_for_fulfillment_operator when the tick escalated with nothing queued", async () => {
     const script: ReadonlyArray<LLMDecision> = [
       {
         type: "tool_call",
         callId: "q0",
-        tool: "supplier.escalate",
+        tool: "fulfillment_operator.escalate",
         input: {
           problem: "Unit damaged in transit; replacement needed",
           orderRef: "#9002",
@@ -1886,11 +1886,11 @@ describe("concurrent waits — escalate with a queued approval parks the bundle"
     ];
 
     const out = await driveTicket(escalatingLoopAgent, script, [
-      SupplierEscalationServiceTest({}),
+      FulfillmentOperatorEscalationServiceTest({}),
     ]);
 
-    expect(out.result.type).toBe("PausedWaitingForSupplier");
-    expect(out.fetched.status).toBe("waiting_for_supplier");
+    expect(out.result.type).toBe("PausedWaitingForFulfillmentOperator");
+    expect(out.fetched.status).toBe("waiting_for_fulfillment_operator");
     expect(out.pending).toHaveLength(0);
   });
 });

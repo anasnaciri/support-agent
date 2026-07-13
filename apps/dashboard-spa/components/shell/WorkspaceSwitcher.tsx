@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { useSession } from "@/lib/session-context";
 
 interface Props {
-  /** "rail" = the dark merchant icon rail; "header" = the light supplier bar. */
+  /** "rail" = the dark merchant icon rail; "header" = the light fulfillment partner bar. */
   readonly variant?: "rail" | "header";
   /**
    * Where the menu opens relative to the trigger. Defaults per variant
@@ -20,9 +20,9 @@ interface Props {
 
 /**
  * The unified workspace menu. Lists EVERY workspace the user can reach —
- * merchant (their stores) AND supplier (merchants that escalate to them) — each
+ * merchant (their stores) AND fulfillmentOperator (merchants that escalate to them) — each
  * tagged by kind. Selecting one switches the active workspace and routes to that
- * surface (merchant dashboard vs the supplier portal). Reads the merged list
+ * surface (merchant dashboard vs the fulfillment partner portal). Reads the merged list
  * straight from the session so both shells share one source of truth.
  */
 export function WorkspaceSwitcher({ variant = "rail", menuPlacement }: Props) {
@@ -52,7 +52,7 @@ export function WorkspaceSwitcher({ variant = "rail", menuPlacement }: Props) {
   }, [open]);
 
   if (!active) return null;
-  // In the supplier header the switcher only earns its place with a choice.
+  // In the fulfillment partner header the switcher only earns its place with a choice.
   if (variant === "header" && workspaces.length < 2) return null;
 
   const menu = (
@@ -88,9 +88,9 @@ export function WorkspaceSwitcher({ variant = "rail", menuPlacement }: Props) {
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
               <span className="block truncate font-medium">{w.name}</span>
-              {w.kind === "supplier" ? (
+              {w.kind === "fulfillment_operator" ? (
                 <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
-                  Supplier
+                  Fulfillment partner
                 </span>
               ) : null}
             </span>

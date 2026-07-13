@@ -32,7 +32,7 @@ describe("parseResolutionForm", () => {
         [fieldName("delivery_issue", "enabled"), "on"],
         [fieldName("delivery_issue", "action:refund.create:enabled"), "on"],
         [fieldName("delivery_issue", "action:refund.create:permission"), "allow"],
-        [fieldName("delivery_issue", "supplierMode"), "notify_and_proceed"],
+        [fieldName("delivery_issue", "fulfillmentOperatorMode"), "notify_and_proceed"],
         [fieldName("delivery_issue", "notes"), "  ship fast  "],
       ],
     );
@@ -47,7 +47,7 @@ describe("parseResolutionForm", () => {
     expect(d.enabledActions).toEqual([
       { tool: "refund.create", permission: "allow" },
     ]);
-    expect(d.supplierMode).toBe("notify_and_proceed");
+    expect(d.fulfillmentOperatorMode).toBe("notify_and_proceed");
     expect(d.notes).toBe("ship fast");
   });
 
@@ -58,7 +58,7 @@ describe("parseResolutionForm", () => {
         [fieldName("custom_vip", "label"), "  VIP complaint  "],
         [fieldName("custom_vip", "recognition"), "  angry whale  "],
         [fieldName("custom_vip", "enabled"), "on"],
-        [fieldName("custom_vip", "supplierMode"), "none"],
+        [fieldName("custom_vip", "fulfillmentOperatorMode"), "none"],
       ],
     );
     const c = parseResolutionForm(get)[0]!;
@@ -104,12 +104,12 @@ describe("parseResolutionForm", () => {
     ]);
   });
 
-  it("defaults a missing/invalid supplier mode to none and an unchecked Active to false", () => {
+  it("defaults a missing/invalid fulfillmentOperator mode to none and an unchecked Active to false", () => {
     const get = formWith(["general_inquiry"], [
-      [fieldName("general_inquiry", "supplierMode"), "nope"],
+      [fieldName("general_inquiry", "fulfillmentOperatorMode"), "nope"],
     ]);
     const g = parseResolutionForm(get)[0]!;
-    expect(g.supplierMode).toBe("none");
+    expect(g.fulfillmentOperatorMode).toBe("none");
     expect(g.enabled).toBe(false);
     expect(g.notes).toBeNull();
   });

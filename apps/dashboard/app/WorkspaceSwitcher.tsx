@@ -11,15 +11,15 @@ import { switchWorkspaceAction } from "./workspace-actions";
 interface Props {
   readonly workspaces: ReadonlyArray<UnifiedWorkspace>;
   readonly activeWorkspaceId: string;
-  /** "rail" = the dark merchant icon rail; "header" = the light supplier bar. */
+  /** "rail" = the dark merchant icon rail; "header" = the light fulfillment partner bar. */
   readonly variant?: "rail" | "header";
 }
 
 /**
  * The unified workspace menu. Lists EVERY workspace the user can reach —
- * merchant (their stores) AND supplier (merchants that escalate to them), each
+ * merchant (their stores) AND fulfillmentOperator (merchants that escalate to them), each
  * tagged by kind. Switching (server action → cookie) routes to that surface
- * (merchant dashboard vs the supplier portal). Hidden when the org has none.
+ * (merchant dashboard vs the fulfillment partner portal). Hidden when the org has none.
  */
 export function WorkspaceSwitcher({
   workspaces,
@@ -81,9 +81,9 @@ export function WorkspaceSwitcher({
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-1.5">
                 <span className="block truncate font-medium">{w.name}</span>
-                {w.kind === "supplier" ? (
+                {w.kind === "fulfillment_operator" ? (
                   <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Supplier
+                    Fulfillment partner
                   </span>
                 ) : null}
               </span>

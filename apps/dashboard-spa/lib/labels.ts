@@ -16,7 +16,7 @@ const TICKET_STATUS_LABELS: Readonly<Record<string, string>> = {
   triaging: "Reviewing",
   in_progress: "In progress",
   waiting_for_customer: "Waiting on customer",
-  waiting_for_supplier: "Waiting on supplier",
+  waiting_for_fulfillment_operator: "Waiting on fulfillment partner",
   waiting_for_approval: "Needs approval",
   approved_action_running: "Finishing approved action",
   resolved: "Resolved",

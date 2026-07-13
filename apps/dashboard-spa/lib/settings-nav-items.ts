@@ -119,9 +119,9 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
         requires: "members.manage",
       },
       {
-        href: "/settings/suppliers",
-        label: "Suppliers",
-        match: prefix("/settings/suppliers"),
+        href: "/settings/fulfillment-operators",
+        label: "Fulfillment partners",
+        match: prefix("/settings/fulfillment-operators"),
         requires: "members.manage",
       },
     ],
@@ -139,13 +139,13 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
         href: "/settings/integrations",
         label: "Integrations",
         // Covers every provider, including the Google Sheets connector that
-        // hosts supplier escalation (reached via Integrations → manage) and
-        // its legacy /settings/supplier-escalation redirect URL.
+        // hosts fulfillment partner escalation (reached via Integrations → manage) and
+        // its /settings/fulfillment-operator-escalation redirect URL.
         match: (pathname) =>
           pathname === "/settings/integrations" ||
           pathname.startsWith("/settings/integrations/") ||
-          pathname === "/settings/supplier-escalation" ||
-          pathname.startsWith("/settings/supplier-escalation/"),
+          pathname === "/settings/fulfillment-operator-escalation" ||
+          pathname.startsWith("/settings/fulfillment-operator-escalation/"),
         requires: "settings.integrations",
       },
     ],

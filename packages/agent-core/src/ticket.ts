@@ -13,7 +13,7 @@ export type TicketStatus =
   | "triaging"
   | "in_progress"
   | "waiting_for_customer"
-  | "waiting_for_supplier"
+  | "waiting_for_fulfillment_operator"
   | "waiting_for_approval"
   | "approved_action_running"
   | "resolved"
@@ -26,7 +26,7 @@ export const TICKET_STATUSES: ReadonlyArray<TicketStatus> = [
   "triaging",
   "in_progress",
   "waiting_for_customer",
-  "waiting_for_supplier",
+  "waiting_for_fulfillment_operator",
   "waiting_for_approval",
   "approved_action_running",
   "resolved",
@@ -62,7 +62,7 @@ const RESTRICTED_TRANSITIONS: Partial<
     "triaging",
     "waiting_for_approval",
     "waiting_for_customer",
-    "waiting_for_supplier",
+    "waiting_for_fulfillment_operator",
     "human_takeover",
     "archived",
   ],
@@ -71,7 +71,7 @@ const RESTRICTED_TRANSITIONS: Partial<
     "triaging",
     "waiting_for_approval",
     "waiting_for_customer",
-    "waiting_for_supplier",
+    "waiting_for_fulfillment_operator",
     "human_takeover",
   ],
   failed: ["in_progress", "triaging", "human_takeover"],
@@ -93,7 +93,7 @@ export const isStatusTransitionAllowed = (
  * The statuses a human may set BY HAND from the dashboard ("change status
  * manually"). A curated subset of TICKET_STATUSES: the agent-internal lifecycle
  * states (`new`, `triaging`, `approved_action_running`) and the
- * machinery-driven parks (`waiting_for_supplier` needs an escalation row;
+ * machinery-driven parks (`waiting_for_fulfillment_operator` needs an escalation row;
  * `waiting_for_approval` needs a pending approval; `human_takeover` has its own
  * "Take over" action) are deliberately NOT offered — a person doesn't drive
  * those directly. Picking one of these is still re-checked against
@@ -133,26 +133,26 @@ export const allowedManualStatusTargets = (
 
 export type WaitStatus = Extract<
   TicketStatus,
-  "waiting_for_approval" | "waiting_for_supplier"
+  "waiting_for_approval" | "waiting_for_fulfillment_operator"
 >;
 
 /**
- * A ticket can be waiting on approval AND on a supplier at once — both facts are
+ * A ticket can be waiting on approval AND on a fulfillment partner at once — both facts are
  * row-derived (pending approval rows, open escalation rows), but the single
  * `tickets.status` carries the PRIMARY wait: approval wins because the merchant
- * is the next unblocker, while the supplier wait is passive (the open
+ * is the next unblocker, while the fulfillment partner wait is passive (the open
  * escalation row + notify outbox carry it independently of status). Every
  * site that must choose between the two parks calls this, so the precedence
  * lives in exactly one place. Null = not waiting on either.
  */
 export const primaryWaitStatus = (waits: {
   readonly approvalPending: boolean;
-  readonly supplierOpen: boolean;
+  readonly fulfillmentOperatorOpen: boolean;
 }): WaitStatus | null =>
   waits.approvalPending
     ? "waiting_for_approval"
-    : waits.supplierOpen
-      ? "waiting_for_supplier"
+    : waits.fulfillmentOperatorOpen
+      ? "waiting_for_fulfillment_operator"
       : null;
 
 export type TicketPriority = "low" | "normal" | "high" | "urgent";

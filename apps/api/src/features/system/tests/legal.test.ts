@@ -33,8 +33,8 @@ describe("renderDataProcessingNoticeHtml", () => {
     expect(html).toContain("IMAP/SMTP");
   });
 
-  it("discloses supplier sharing as merchant-directed, not subprocessing", () => {
-    expect(html).toContain("supplier");
+  it("discloses fulfillment partner sharing as merchant-directed, not subprocessing", () => {
+    expect(html).toContain("fulfillment partner");
     expect(html).toContain("merchant's instructions");
   });
 

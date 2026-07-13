@@ -117,7 +117,7 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
   **Fix:** real outbox (event row in the same tx; relay publishes + marks delivered), or at minimum mark `firedAt` only after successful enqueue (duplicate fire is safe under ticket-key FIFO; lost fire is not).
 
 - [x] **L4. Several `HumanTakeoverRequired` paths change nothing — invisible stuck tickets.**
-  `max_turns_exceeded` (`agent-runtime.ts:1186-1189`), `wait_for_customer`/`escalate_supplier` (:899-911), and **approved-tool-failed** (:495-504) return a result the worker only logs (`apps/worker/src/index.ts:74-83`).
+  `max_turns_exceeded` (`agent-runtime.ts:1186-1189`), `wait_for_customer`/`escalate_fulfillment_operator` (:899-911), and **approved-tool-failed** (:495-504) return a result the worker only logs (`apps/worker/src/index.ts:74-83`).
   **Fix:** every such path transitions the ticket to `human_takeover` (in tx, with audit) before returning — as the BYOK-credential path already does (:792-828).
 
 - [x] **L5. Connectors go dark silently on refresh/renewal failure — no alerting.**

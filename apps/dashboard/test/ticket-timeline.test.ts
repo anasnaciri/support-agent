@@ -215,12 +215,12 @@ describe("curatedTimelineEvent", () => {
       "The approved action is no longer available.",
     );
 
-    const supplierItem = curatedTimelineEvent(
-      entry("ticket.escalated_to_human", { reason: "supplier_unreachable" }),
+    const fulfillmentOperatorItem = curatedTimelineEvent(
+      entry("ticket.escalated_to_human", { reason: "fulfillment_operator_unreachable" }),
       null,
     ) as { description: string | null };
-    expect(supplierItem.description).toBe(
-      "The supplier could not be reached.",
+    expect(fulfillmentOperatorItem.description).toBe(
+      "The fulfillment partner could not be reached.",
     );
   });
 

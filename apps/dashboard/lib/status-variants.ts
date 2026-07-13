@@ -18,7 +18,7 @@ export const ticketStatusVariant = (status: string): Variant => {
       // on the off-white background.
       return "warning";
     case "waiting_for_customer":
-    case "waiting_for_supplier":
+    case "waiting_for_fulfillment_operator":
       return "muted";
     case "new":
     case "triaging":

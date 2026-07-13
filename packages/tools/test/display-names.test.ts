@@ -45,9 +45,11 @@ describe("tool display names", () => {
     const byName = new Map(ALL_TOOLS.map((t) => [t.name, t.displayName]));
     expect(byName.get("conversation.reply")).toBe("Reply to the customer");
     expect(byName.get("order.cancel")).toBe("Cancel and refund the order");
-    expect(byName.get("supplier.escalate")).toBe("Ask the supplier for help");
-    expect(byName.get("supplier.add_sheet_row")).toBe(
-      "Log the issue with the supplier",
+    expect(byName.get("fulfillment_operator.escalate")).toBe(
+      "Ask the fulfillment partner for help",
+    );
+    expect(byName.get("fulfillment_operator.add_sheet_row")).toBe(
+      "Log the issue with the fulfillment partner",
     );
     expect(byName.get("refund.recommend")).toBe("Recommend a refund");
   });

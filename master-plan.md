@@ -122,7 +122,7 @@ type DomainEvent =
       managerId: string;
       reason?: string;
     }
-  | { type: "supplier.updated"; ticketId: string; payload: SupplierUpdate }
+  | { type: "fulfillment_operator.updated"; ticketId: string; payload: FulfillmentOperatorUpdate }
   | { type: "tracking.changed"; orderId: string; payload: TrackingEvent }
   | {
       type: "timer.expired";
@@ -161,7 +161,7 @@ External signal (webhook, cron, manager click)
         ├─ Completed              → ticket.resolved
         ├─ PausedWaitingForCustomer → ticket.waiting_for_customer
         ├─ PausedWaitingForApproval → ticket.waiting_for_approval (+ approval row created)
-        ├─ PausedWaitingForSupplier → ticket.waiting_for_supplier
+        ├─ PausedWaitingForFulfillmentOperator → ticket.waiting_for_fulfillment_operator
         ├─ Failed                 → ticket.failed, alert
         └─ HumanTakeoverRequired  → ticket.human_takeover
 ```
@@ -234,9 +234,9 @@ AgentRuntime.handle(event):
       ConversationService.reply(decision.message)   // already permission-checked
       return PausedWaitingForCustomer
 
-    if decision.type === "escalate_supplier":
-      SupplierService.escalate(decision.payload)
-      return PausedWaitingForSupplier
+    if decision.type === "escalate_fulfillment_operator":
+      FulfillmentOperatorService.escalate(decision.payload)
+      return PausedWaitingForFulfillmentOperator
 
   return HumanTakeoverRequired("max_turns_exceeded")
 ```
@@ -462,7 +462,7 @@ export type LLMDecision =
       readonly reason: string;
     }
   | { readonly type: "wait_for_customer"; readonly message: OutboundEmail }
-  | { readonly type: "escalate_supplier"; readonly payload: SupplierPayload };
+  | { readonly type: "escalate_fulfillment_operator"; readonly payload: FulfillmentOperatorPayload };
 ```
 
 ### Provider Implementations
@@ -494,7 +494,7 @@ tools:
   [
     conversation.reply,
     conversation.ask_customer,
-    supplier.addSheetRow,
+    fulfillmentOperator.addSheetRow,
     ticket.updateStatus,
     refund.recommend,
   ]
@@ -502,7 +502,7 @@ permissions:
   conversation.reply: ask
   refund.recommend: allow
 mode: primary
-handoffs: [refund-review, supplier-escalation]
+handoffs: [refund-review, fulfillment-operator-escalation]
 ```
 
 The registry builds an `Effect.Effect<LLMService>` per agent by composing the right provider Layer. Fallback is handled by `Effect.orElse`:
@@ -708,7 +708,7 @@ The first hit wins. Input-pattern policies allow rules like "refunds under $25 �
   "shopify.fulfillment.read": "allow",
   "tracking.lookup": "allow",
   "conversation.ask_customer": "allow",
-  "supplier.add_sheet_row": "allow",
+  "fulfillment_operator.add_sheet_row": "allow",
   "ticket.update_status": "allow",
   "ticket.mark_waiting": "allow",
 
@@ -734,7 +734,7 @@ ToolExecutor sees ask permission
 ApprovalService.create({
   ticketId, agentId, tool, input,
   reasoning: "Customer reports damaged product, photos attached.
-              Proposing replacement + supplier escalation.",
+              Proposing replacement + fulfillment-operator escalation.",
   riskLevel: "low",
   expiresAt: now + 24h,
 })
@@ -787,7 +787,7 @@ The dashboard is the rich interface. Slack and email approvals are first-class f
 [bot] Approval needed — Ticket #1234
 Customer: Sarah Chen
 Order: #1045 — Item damaged
-Agent recommends: replacement + supplier escalation
+Agent recommends: replacement + fulfillment-operator escalation
 [ View ] [ Approve ] [ Reject ] [ Take over ]
 ```
 
@@ -808,7 +808,7 @@ export type TicketStatus =
   | "triaging"
   | "in_progress"
   | "waiting_for_customer"
-  | "waiting_for_supplier"
+  | "waiting_for_fulfillment_operator"
   | "waiting_for_approval"
   | "approved_action_running"
   | "resolved"
@@ -862,12 +862,12 @@ export type TicketStatus =
 | `new`                     | first agent turn starts             | —                       | `triaging`                  |
 | `triaging`                | triage agent returns classification | —                       | `in_progress`               |
 | `in_progress`             | agent emits `wait_for_customer`     | message sent            | `waiting_for_customer`      |
-| `in_progress`             | agent emits `escalate_supplier`     | supplier record created | `waiting_for_supplier`      |
+| `in_progress`             | agent emits `escalate_fulfillment_operator` | operator request created | `waiting_for_fulfillment_operator` |
 | `in_progress`             | tool requires `ask` permission      | approval created        | `waiting_for_approval`      |
 | `in_progress`             | agent returns `final_message`       | —                       | `resolved`                  |
 | `waiting_for_customer`    | `customer.replied`                  | —                       | `in_progress`               |
 | `waiting_for_customer`    | `timer.expired` (3 days)            | follow-up policy        | `in_progress` or `resolved` |
-| `waiting_for_supplier`    | `supplier.updated`                  | —                       | `in_progress`               |
+| `waiting_for_fulfillment_operator` | `fulfillment_operator.updated` | —                  | `in_progress`               |
 | `waiting_for_approval`    | `approval.approved`                 | —                       | `approved_action_running`   |
 | `waiting_for_approval`    | `approval.rejected`                 | —                       | `in_progress`               |
 | `approved_action_running` | action completed                    | more steps pending      | `in_progress`               |
@@ -941,7 +941,7 @@ CREATE TABLE tickets (
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at         TIMESTAMPTZ,
   CONSTRAINT tickets_status_check CHECK (status IN (
-    'new','triaging','in_progress','waiting_for_customer','waiting_for_supplier',
+    'new','triaging','in_progress','waiting_for_customer','waiting_for_fulfillment_operator',
     'waiting_for_approval','approved_action_running','resolved','failed','human_takeover'
   ))
 );
@@ -1215,7 +1215,7 @@ The dashboard is the merchant's daily home, not a settings page. Optimized for a
 │  Today                                                            │
 │  ──────────────────────────────────────────────────────────────  │
 │  AI handled 37 tickets · 12 waiting for customer · 4 waiting     │
-│  for supplier · 6 need approval · 2 need human takeover          │
+│  for fulfillment partner · 6 need approval · 2 need human takeover │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
 │  │  6 Need Approval  →                                      │    │
@@ -1224,7 +1224,7 @@ The dashboard is the merchant's daily home, not a settings page. Optimized for a
 │  │  2 Need Human Takeover  →                                │    │
 │  └──────────────────────────────────────────────────────────┘    │
 │                                                                   │
-│  Inbox · In Progress · Waiting Customer · Waiting Supplier ·     │
+│  Inbox · In Progress · Waiting Customer · Waiting Partner ·      │
 │  Resolved Today · All Tickets                                       │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -1236,14 +1236,14 @@ The dashboard is the merchant's daily home, not a settings page. Optimized for a
 | **Inbox**                       | Newly arrived, not yet picked up by the agent. Rarely populated; useful for diagnostics. |
 | **In Progress by AI**           | Tickets the agent is actively working on. Live updates.                                    |
 | **Waiting for Customer**        | Sorted by oldest first; SLA color-coded.                                                 |
-| **Waiting for Supplier**        | Grouped by supplier; aging visible.                                                      |
+| **Waiting for Fulfillment Partner** | Grouped by fulfillment partner; aging visible.                                               |
 | **Needs Approval**              | The most important screen; sorted by risk × age.                                         |
 | **Needs Human Takeover**        | Failures, hard escalations.                                                              |
 | **Resolved**                    | Past week by default; searchable history.                                                |
 | **Audit Log**                   | Per-tenant chronological log; filterable.                                                |
 | **Settings → Agents**           | Each agent's config (prompt, model, tools, permissions); version history.                |
 | **Settings → Tool Permissions** | Global allow/ask/deny matrix with input-conditional rules.                               |
-| **Settings → Integrations**     | Shopify, email provider, Slack, suppliers, plugins.                                      |
+| **Settings → Integrations**     | Shopify, email provider, Slack, fulfillment partners, plugins.                           |
 
 ### Internal admin app
 
@@ -1270,7 +1270,7 @@ Every admin mutation must write an audit row and must avoid rendering raw secret
 │                │ • Agent: asked customer for photos              │
 │ Order panel    │ • Customer replied with 3 photos                │
 │ ─ #1045        │ • Tool: ticket.update_context  ✓ photos saved    │
-│ ─ items        │ • Agent proposes: refund $42 + supplier note   │
+│ ─ items        │ • Agent proposes: refund $42 + partner note    │
 │ ─ tracking     │   [ Approval pending ]   ◀── you are here      │
 │ ─ fulfillment  │                                                 │
 │                │                                                 │
@@ -1374,7 +1374,7 @@ The runtime therefore resolves logistics work in this order:
 2. Resolve its **Fulfillment Route** from provider evidence (for Shopify, the
    fulfillment order's assigned location/service), then explicit merchant
    mappings such as SKU/vendor/location. An absent or ambiguous route falls
-   back to the merchant; it never silently selects a default supplier.
+   back to the merchant; it never silently selects a default fulfillment operator.
 3. Determine the current **Resolution Owner**. Before dispatch this is usually
    the Fulfillment Operator; in transit it may be the carrier or the operator
    that owns the carrier contract; for a marketplace-managed order it may be
@@ -1419,12 +1419,12 @@ mainly observes Amazon order/report state and follows marketplace policy.
 Amazon Multi-Channel Fulfillment for an off-Amazon order makes Amazon a 3PL:
 SP-API Fulfillment Outbound capabilities include status/tracking, proof of
 delivery, eligible update/cancel operations, and returns. A replacement is a
-new fulfillment action subject to merchant policy, not a generic "email the
-supplier" escalation. Amazon seller-fulfilled (`MFN`) orders remain routed to
+new fulfillment action subject to merchant policy, not a generic fulfillment
+operator escalation. Amazon seller-fulfilled (`MFN`) orders remain routed to
 the seller's actual Fulfillment Operator, even if the seller separately enrolls
 in Customer Service by Amazon.
 
-### Example: Google Sheets supplier escalation plugin
+### Example: Google Sheets fulfillment-operator escalation plugin
 
 ```ts
 // @platform/plugin-google-sheets/index.ts
@@ -1436,7 +1436,7 @@ const SheetsService = /* Effect Tag for Google Sheets API */;
 
 const addRow = defineTool({
   name: "google_sheets.add_row",
-  description: "Append a row to a configured Google Sheet. Use for supplier escalation tracking.",
+  description: "Append a row to a configured Google Sheet. Use for fulfillment-operator escalation tracking.",
   inputSchema: Schema.Struct({
     sheetId: Schema.String,
     values: Schema.Array(Schema.String),
@@ -1454,7 +1454,7 @@ const addRow = defineTool({
 export default definePlugin({
   id: "google-sheets",
   version: "1.0.0",
-  description: "Append rows to Google Sheets for supplier and ops workflows.",
+  description: "Append rows to Google Sheets for fulfillment and ops workflows.",
   tools: [addRow],
   services: GoogleSheetsServiceLive,
   configSchema: Schema.Struct({
@@ -1556,7 +1556,7 @@ missing-package-agent:
 
   Customer replies "yes still missing, checked with everyone"
     EVENT customer.replied → ticket resumes
-    LLM call → decision: tool_call supplier.add_sheet_row({
+    LLM call → decision: tool_call fulfillment_operator.add_sheet_row({
       sheet: lost_package_log,
       values: [orderId, customerEmail, trackingNumber, claimDate]
     })
@@ -1762,8 +1762,8 @@ ai-support-ops/
 │  │  │  ├─ PlatformMailService.ts      # platform/system mail only
 │  │  │  ├─ ShopifyService.ts
 │  │  │  ├─ ShippingService.ts
-│  │  │  ├─ SupplierService.ts
-│  │  │  ├─ SupplierSheetService.ts
+│  │  │  ├─ FulfillmentOperatorService.ts
+│  │  │  ├─ FulfillmentOperatorSheetService.ts
 │  │  │  ├─ LLMService.ts               # tag (the abstraction)
 │  │  │  ├─ TicketRepository.ts
 │  │  │  ├─ ApprovalRepository.ts
@@ -1801,7 +1801,7 @@ ai-support-ops/
 │  │  │  │  ├─ getOrder.ts
 │  │  │  │  └─ getFulfillment.ts
 │  │  │  ├─ tracking/lookup.ts
-│  │  │  ├─ supplier/
+│  │  │  ├─ fulfillment-operator/
 │  │  │  │  ├─ createTicket.ts
 │  │  │  │  └─ addSheetRow.ts
 │  │  │  ├─ refund/
@@ -1820,7 +1820,7 @@ ai-support-ops/
 │  │  │  ├─ missing-package.ts
 │  │  │  ├─ damaged-product.ts
 │  │  │  ├─ refund-review.ts
-│  │  │  ├─ supplier-escalation.ts
+│  │  │  ├─ fulfillment-operator-escalation.ts
 │  │  │  └─ prompts/
 │  │  │     ├─ support-triage.md
 │  │  │     ├─ missing-package.md
@@ -1914,7 +1914,7 @@ export type TicketStatus =
   | "triaging"
   | "in_progress"
   | "waiting_for_customer"
-  | "waiting_for_supplier"
+  | "waiting_for_fulfillment_operator"
   | "waiting_for_approval"
   | "approved_action_running"
   | "resolved"
@@ -2041,8 +2041,8 @@ export type LLMDecision =
     }
   | { readonly type: "wait_for_customer"; readonly message: OutboundEmailDraft }
   | {
-      readonly type: "escalate_supplier";
-      readonly payload: SupplierEscalationPayload;
+      readonly type: "escalate_fulfillment_operator";
+      readonly payload: FulfillmentOperatorEscalationPayload;
     };
 
 // ============================================================
@@ -2083,7 +2083,7 @@ export type WorkflowResult =
       readonly type: "PausedWaitingForApproval";
       readonly approvalId: ApprovalId;
     }
-  | { readonly type: "PausedWaitingForSupplier" }
+  | { readonly type: "PausedWaitingForFulfillmentOperator" }
   | {
       readonly type: "Failed";
       readonly reason: string;
@@ -2128,9 +2128,9 @@ export type DomainEvent =
       readonly reason?: string;
     }
   | {
-      readonly type: "supplier.updated";
+      readonly type: "fulfillment_operator.updated";
       readonly ticketId: TicketId;
-      readonly payload: SupplierUpdate;
+      readonly payload: FulfillmentOperatorUpdate;
     }
   | {
       readonly type: "tracking.changed";
@@ -2358,13 +2358,13 @@ const runTick = (
           );
           return { type: "PausedWaitingForCustomer" } as const;
 
-        case "escalate_supplier":
+        case "escalate_fulfillment_operator":
           yield* exec.run(
-            "supplier.create_ticket",
+            "fulfillment_operator.create_ticket",
             decision.payload,
             makeCtx(ticketRow, agent),
           );
-          return { type: "PausedWaitingForSupplier" } as const;
+          return { type: "PausedWaitingForFulfillmentOperator" } as const;
 
         case "tool_call": {
           const tool = tools.get(decision.tool);
@@ -2603,7 +2603,7 @@ The agent has more power than a chatbot. The threat model must match.
 
 ### 19.8 Race conditions on the same ticket
 
-**Risk:** two events arrive simultaneously (e.g. customer reply + supplier update); both workers try to advance the ticket.
+**Risk:** two events arrive simultaneously (e.g. customer reply + fulfillment operator update); both workers try to advance the ticket.
 
 **Mitigations:**
 
@@ -2621,14 +2621,14 @@ The agent has more power than a chatbot. The threat model must match.
 - **Canary rollout.** A new agent version handles 10% of tickets for 24h before full rollout.
 - **One-click rollback.** Versions live in `agent_configs`; rolling back is changing the active pointer.
 
-### 19.10 Supplier escalation abuse
+### 19.10 Fulfillment operator escalation abuse
 
-**Risk:** an attacker repeatedly opens damaged-product tickets against a competitor's supplier to flood their sheet.
+**Risk:** an attacker repeatedly opens damaged-product tickets against a competitor's fulfillment operator to flood their sheet.
 
 **Mitigations:**
 
 - **Customer reputation signals.** First-time customer + high refund request → higher risk score → escalates approval threshold.
-- **Per-customer rate limits on supplier records.**
+- **Per-customer rate limits on fulfillment operator records.**
 - **Manager review for repeat damaged-product claims** from same customer within a window.
 
 ### 19.11 Compliance and record-keeping
@@ -2727,7 +2727,7 @@ Deliverable: policy is real, not theoretical.
 Deliverable: the agent handles three real categories end-to-end.
 
 - Agents: `missing-package-agent`, `damaged-product-agent`, `refund-review-agent`.
-- Tools: `supplier.add_sheet_row` (Google Sheets first-party plugin), `refund.recommend`, `refund.create`, `tracking.lookup`.
+- Tools: `fulfillment_operator.add_sheet_row` (Google Sheets first-party plugin), `refund.recommend`, `refund.create`, `tracking.lookup`.
 - Evidence upload (object storage), photo handling in customer replies.
 - Timer service for follow-ups (`timer.expired` event).
 - Replay/test mode for agents against historical tickets.
@@ -2792,7 +2792,7 @@ Deliverable: ready for first paying merchant.
 
 - One provider only in v1; abstraction kept, but only `AnthropicProviderLive` shipped.
 - One conversation connector in v1 (Gmail), with platform/system mail kept separate.
-- Google Sheets supplier escalation only; no first-party plugins for Klaviyo/Gorgias yet.
+- Google Sheets fulfillment operator escalation only; no first-party plugins for Klaviyo/Gorgias yet.
 - Slack approvals only; defer email-link approvals.
 - Manual onboarding (engineer-assisted) before self-serve.
 

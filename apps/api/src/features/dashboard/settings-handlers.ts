@@ -359,7 +359,7 @@ export const handleDashboardShopCurrency = async (
 };
 
 // GET /dashboard/settings — resolved tenant settings (refund policy +
-// supplier-escalation sheet + notification email). Defaults are applied by
+// fulfillment-operator-escalation sheet + notification email). Defaults are applied by
 // getSettings; a transient error falls back to platform defaults.
 export const handleDashboardSettings = async (
   cfg: ApiConfig,
@@ -380,7 +380,7 @@ export const handleDashboardSettings = async (
             notificationEmail: null,
             refundPolicy: defaultRefundPolicy,
             discountPolicy: defaultDiscountPolicy,
-            supplierEscalationSheet: null,
+            fulfillmentOperatorEscalationSheet: null,
             legalAcceptance: null,
             cancellationRestock: true,
             shippingFacts: null,
@@ -395,7 +395,7 @@ export const handleDashboardSettings = async (
     notificationEmail: settings.notificationEmail,
     refundPolicy: settings.refundPolicy,
     discountPolicy: settings.discountPolicy,
-    supplierEscalationSheet: settings.supplierEscalationSheet,
+    fulfillmentOperatorEscalationSheet: settings.fulfillmentOperatorEscalationSheet,
     legalAcceptance: settings.legalAcceptance,
     // Restock-on-cancel flag for the refund-policy page's "Order
     // cancellations" checkbox. Defaults-on-read in getSettings ⇒ true.
@@ -419,7 +419,7 @@ const scenarioToView = (s: ScenarioPolicy) => ({
     tool: a.tool,
     permission: a.permission,
   })),
-  supplierMode: s.supplierMode,
+  fulfillmentOperatorMode: s.fulfillmentOperatorMode,
   notes: s.notes ?? null,
 });
 

@@ -109,11 +109,11 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set([
   "liveTrackingStatus",
   "trackingFulfillmentId",
   "notes",
-  "supplierUpdate",
+  "fulfillmentOperatorUpdate",
 ]);
 
 /** The keys the floating context card shows — the customer's ask, evidence
- *  signals, risk flags, notes, and the supplier's answer to an escalation.
+ *  signals, risk flags, notes, and the fulfillment partner's answer to an escalation.
  *  Everything else in the context is either
  *  already rendered by the Customer/Order/Tracking panels and the ticket header
  *  (email, order, category, tracking) or internal runtime machinery
@@ -125,9 +125,9 @@ const CARD_KEYS: ReadonlySet<string> = new Set([
   "photoSignals",
   "riskFlags",
   "notes",
-  "supplierNote",
-  "supplierProposedResolution",
-  "supplierAttachments",
+  "fulfillmentOperatorNote",
+  "fulfillmentOperatorProposedResolution",
+  "fulfillmentOperatorAttachments",
 ]);
 
 /** Normalize an order ref for equality: trim, strip a leading #, lowercase. */
@@ -288,42 +288,42 @@ export const buildContextRows = (
   if (notes)
     rows.push({ key: "notes", label: "Notes", text: notes, multiline: true });
 
-  // Stamped by `recordSupplierUpdate` (packages/db supplier-store) when a
-  // supplier answers an escalation: { supplierId, note, proposedResolution }.
-  // Both fields are supplier-typed free text; the internal supplierId is
+  // Stamped by `recordFulfillmentOperatorUpdate` (packages/db fulfillment-operator-store) when a
+  // fulfillment partner answers an escalation: { fulfillmentOperatorId, note, proposedResolution }.
+  // Both fields are fulfillment-operator-typed free text; the internal fulfillmentOperatorId is
   // deliberately not shown.
-  const supplierUpdate = recordOf(context["supplierUpdate"]);
-  const supplierNote = supplierUpdate ? asString(supplierUpdate["note"]) : null;
-  if (supplierNote)
+  const fulfillmentOperatorUpdate = recordOf(context["fulfillmentOperatorUpdate"]);
+  const fulfillmentOperatorNote = fulfillmentOperatorUpdate ? asString(fulfillmentOperatorUpdate["note"]) : null;
+  if (fulfillmentOperatorNote)
     rows.push({
-      key: "supplierNote",
-      label: "Supplier note",
-      text: supplierNote,
+      key: "fulfillmentOperatorNote",
+      label: "Fulfillment partner note",
+      text: fulfillmentOperatorNote,
       multiline: true,
     });
-  const supplierProposedResolution = supplierUpdate
-    ? asString(supplierUpdate["proposedResolution"])
+  const fulfillmentOperatorProposedResolution = fulfillmentOperatorUpdate
+    ? asString(fulfillmentOperatorUpdate["proposedResolution"])
     : null;
-  if (supplierProposedResolution)
+  if (fulfillmentOperatorProposedResolution)
     rows.push({
-      key: "supplierProposedResolution",
-      label: "Supplier suggests",
-      text: supplierProposedResolution,
+      key: "fulfillmentOperatorProposedResolution",
+      label: "Fulfillment partner suggests",
+      text: fulfillmentOperatorProposedResolution,
       multiline: true,
     });
-  // Files the supplier uploaded with the update ({ id, filename }[]); only
+  // Files the fulfillment partner uploaded with the update ({ id, filename }[]); only
   // the filenames matter to the operator — ids are internal handles.
-  const supplierAttachments = supplierUpdate
-    ? supplierUpdate["attachments"]
+  const fulfillmentOperatorAttachments = fulfillmentOperatorUpdate
+    ? fulfillmentOperatorUpdate["attachments"]
     : null;
-  if (Array.isArray(supplierAttachments) && supplierAttachments.length > 0) {
-    const names = supplierAttachments
+  if (Array.isArray(fulfillmentOperatorAttachments) && fulfillmentOperatorAttachments.length > 0) {
+    const names = fulfillmentOperatorAttachments
       .map((a) => (a && typeof a === "object" ? asString((a as Record<string, unknown>)["filename"]) : null))
       .filter((n): n is string => n !== null && n.length > 0);
     if (names.length > 0)
       rows.push({
-        key: "supplierAttachments",
-        label: "Supplier files",
+        key: "fulfillmentOperatorAttachments",
+        label: "Fulfillment partner files",
         text: names.join(", "),
       });
   }

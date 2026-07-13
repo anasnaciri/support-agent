@@ -77,8 +77,8 @@ export const isDisconnectProvider = (p: string): p is DisconnectProvider =>
   (CONNECTOR_PROVIDERS as ReadonlyArray<string>).includes(p);
 
 // A1 reference with mandatory sheet-name prefix (mirrors the dashboard's
-// supplier-escalation form validation).
-export const SUPPLIER_RANGE_RE = /^[^!]+![A-Z]+\d*(:[A-Z]+\d*)?$/;
+// fulfillment-operator-escalation form validation).
+export const FULFILLMENT_OPERATOR_RANGE_RE = /^[^!]+![A-Z]+\d*(:[A-Z]+\d*)?$/;
 
 export const handleDashboardLlmConnect = async (
   cfg: ApiConfig,
@@ -315,8 +315,8 @@ export const handleDashboardDiscountPolicy = async (
   return sendJson(res, 200, { ok: true });
 };
 
-// POST /dashboard/supplier-sheet — set the missing-package escalation sheet.
-export const handleDashboardSupplierSheet = async (
+// POST /dashboard/fulfillment-operator-sheet — set the missing-package escalation sheet.
+export const handleDashboardFulfillmentOperatorSheet = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
@@ -335,14 +335,14 @@ export const handleDashboardSupplierSheet = async (
   if (!spreadsheetId) {
     return sendJson(res, 400, { error: "missing_spreadsheet_id" });
   }
-  if (!SUPPLIER_RANGE_RE.test(range)) {
+  if (!FULFILLMENT_OPERATOR_RANGE_RE.test(range)) {
     return sendJson(res, 400, { error: "bad_range" });
   }
   await Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
         const repo = yield* TenantRepository;
-        yield* repo.setSupplierEscalationSheet(TenantId(auth.tenantId), {
+        yield* repo.setFulfillmentOperatorEscalationSheet(TenantId(auth.tenantId), {
           spreadsheetId,
           range,
           description: description.length > 0 ? description : null,
@@ -354,8 +354,8 @@ export const handleDashboardSupplierSheet = async (
   return sendJson(res, 200, { ok: true });
 };
 
-// POST /dashboard/supplier-sheet/clear — clear the escalation sheet.
-export const handleDashboardSupplierSheetClear = async (
+// POST /dashboard/fulfillment-operator-sheet/clear — clear the escalation sheet.
+export const handleDashboardFulfillmentOperatorSheetClear = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
@@ -367,7 +367,7 @@ export const handleDashboardSupplierSheetClear = async (
     Effect.provide(
       Effect.gen(function* () {
         const repo = yield* TenantRepository;
-        yield* repo.setSupplierEscalationSheet(TenantId(auth.tenantId), null);
+        yield* repo.setFulfillmentOperatorEscalationSheet(TenantId(auth.tenantId), null);
       }),
       layer,
     ),

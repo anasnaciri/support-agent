@@ -13,7 +13,7 @@ import {
   findTenantIdByWorkosOrg,
   findWorkspaceForOrg,
   getMemberAccess,
-  getSupplierForUser,
+  getFulfillmentOperatorForUser,
   type DrizzleDb,
 } from "@support-agent/db";
 import { type RbacPermissionId } from "@support-agent/dashboard-contracts";
@@ -196,20 +196,20 @@ export const authenticateDashboard = async (
   return result;
 };
 
-// Per-request memo for the supplier auth path (parallels kDashAuth) so the RBAC
-// guard in supplierGet/supplierPost and the handler share ONE resolution.
-const kSupplierAuth = Symbol("supplierAuth");
+// Per-request memo for the fulfillment partner auth path (parallels kDashAuth) so the RBAC
+// guard in fulfillmentOperatorGet/fulfillment-operatorPost and the handler share ONE resolution.
+const kFulfillmentOperatorAuth = Symbol("fulfillmentOperatorAuth");
 
 /**
- * Org-INDEPENDENT supplier auth. Verify the credential for IDENTITY ONLY, then
+ * Org-INDEPENDENT fulfillmentOperator auth. Verify the credential for IDENTITY ONLY, then
  * resolve the tenant purely from the `x-workspace-id` header VALIDATED BY THE
- * SUPPLIER BINDING (a `suppliers` row for this user in that workspace). The
- * JWT's `org_id` is deliberately NOT consulted — a supplier reaches a merchant's
+ * FULFILLMENT_OPERATOR BINDING (a `fulfillmentOperators` row for this user in that workspace). The
+ * JWT's `org_id` is deliberately NOT consulted — a fulfillment partner reaches a merchant's
  * tenant because they're bound to it, not because they belong to that WorkOS org
- * (a supplier serves merchants across many orgs). A workspace the supplier isn't
+ * (a fulfillment partner serves merchants across many orgs). A workspace the fulfillment partner isn't
  * bound to → 404 (disclosure-safe, mirrors `findWorkspaceForOrg`).
  */
-export const resolveSupplierAuth = async (
+export const resolveFulfillmentOperatorAuth = async (
   layer: ApiLayer,
   req: FastifyRequest,
 ): Promise<DashboardAuthResult> => {
@@ -236,10 +236,10 @@ export const resolveSupplierAuth = async (
   }
   const workspaceId = parsed.workspaceId;
   const userId = parsed.userId;
-  const supplier = await runWithDb(layer, (db) =>
-    getSupplierForUser(db, workspaceId, userId),
+  const fulfillmentOperator = await runWithDb(layer, (db) =>
+    getFulfillmentOperatorForUser(db, workspaceId, userId),
   );
-  if (!supplier) {
+  if (!fulfillmentOperator) {
     return { ok: false, status: 404, error: "workspace_not_found" };
   }
   return {
@@ -252,20 +252,20 @@ export const resolveSupplierAuth = async (
   };
 };
 
-export const authenticateSupplier = async (
+export const authenticateFulfillmentOperator = async (
   _cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
 ): Promise<DashboardAuthResult> => {
   const store = req as unknown as Record<symbol, DashboardAuthResult | undefined>;
-  const cached = store[kSupplierAuth];
+  const cached = store[kFulfillmentOperatorAuth];
   if (cached) return cached;
-  const result = await resolveSupplierAuth(layer, req);
-  store[kSupplierAuth] = result;
+  const result = await resolveFulfillmentOperatorAuth(layer, req);
+  store[kFulfillmentOperatorAuth] = result;
   return result;
 };
 
-export type SupplierIdentityResult =
+export type FulfillmentOperatorIdentityResult =
   | {
       readonly ok: true;
       readonly userId: string;
@@ -275,14 +275,14 @@ export type SupplierIdentityResult =
   | { readonly ok: false; readonly status: number; readonly error: string };
 
 /**
- * Identity-only auth for the supplier bootstrap endpoint
- * (`GET /dashboard/supplier/workspaces`): verify the credential and require a
+ * Identity-only auth for the fulfillment partner bootstrap endpoint
+ * (`GET /dashboard/fulfillment-operator/workspaces`): verify the credential and require a
  * user, but require NO `x-workspace-id` and consult NO org — the caller lists
  * the workspaces the user is bound to across all orgs.
  */
-export const authenticateSupplierIdentity = async (
+export const authenticateFulfillmentOperatorIdentity = async (
   req: FastifyRequest,
-): Promise<SupplierIdentityResult> => {
+): Promise<FulfillmentOperatorIdentityResult> => {
   const verifier = getDashboardVerifier(req);
   if (!verifier) {
     return { ok: false, status: 503, error: "dashboard_api_not_configured" };

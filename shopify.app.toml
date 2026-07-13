@@ -82,7 +82,7 @@ embedded = false
 # without them still gets the refund modal, minus restocking, until re-OAuth.
 #
 # write_merchant_managed_fulfillment_orders / write_third_party_fulfillment_orders
-# → supplier portal tracking edits via fulfillmentTrackingInfoUpdate, which
+# → fulfillment partner portal tracking edits via fulfillmentTrackingInfoUpdate, which
 # accepts any ONE of Shopify's three fulfillment-order write scopes. We skip the
 # third (`write_assigned_fulfillment_orders`): it is for apps registered as a
 # Shopify fulfillment service, which this app is not. Shopify ALSO requires the

@@ -55,7 +55,7 @@ describeIfDb("TenantAgentOverridesServiceLive — tool permissions", () => {
         Effect.gen(function* () {
           const s = yield* TenantAgentOverridesService;
           yield* s.setToolPermission(tenantId, agentX, "conversation.reply", "ask");
-          yield* s.setToolPermission(tenantId, agentX, "supplier.add_sheet_row", "allow");
+          yield* s.setToolPermission(tenantId, agentX, "fulfillment_operator.add_sheet_row", "allow");
           yield* s.setToolPermission(tenantId, agentX, "conversation.reply", "allow");
           return yield* s.getForTenant(tenantId);
         }),
@@ -64,7 +64,7 @@ describeIfDb("TenantAgentOverridesServiceLive — tool permissions", () => {
     );
     expect(map.get(agentX)?.toolPermissions).toEqual({
       "conversation.reply": "allow",
-      "supplier.add_sheet_row": "allow",
+      "fulfillment_operator.add_sheet_row": "allow",
     });
   });
 
@@ -75,7 +75,7 @@ describeIfDb("TenantAgentOverridesServiceLive — tool permissions", () => {
         Effect.gen(function* () {
           const s = yield* TenantAgentOverridesService;
           yield* s.setToolPermission(tenantId, agentX, "conversation.reply", "allow");
-          yield* s.setToolPermission(tenantId, agentX, "supplier.add_sheet_row", "allow");
+          yield* s.setToolPermission(tenantId, agentX, "fulfillment_operator.add_sheet_row", "allow");
           yield* s.clearToolPermission(tenantId, agentX, "conversation.reply");
           return yield* s.getForTenant(tenantId);
         }),
@@ -83,7 +83,7 @@ describeIfDb("TenantAgentOverridesServiceLive — tool permissions", () => {
       ),
     );
     expect(map.get(agentX)?.toolPermissions).toEqual({
-      "supplier.add_sheet_row": "allow",
+      "fulfillment_operator.add_sheet_row": "allow",
     });
   });
 

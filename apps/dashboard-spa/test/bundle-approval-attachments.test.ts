@@ -40,7 +40,7 @@ describe("BundleApprovalBar attachments", () => {
       attachments: [
         {
           id: "att-1",
-          source: "supplier",
+          source: "fulfillment_operator",
           filename: "return-label.pdf",
           contentType: "application/pdf",
           sizeBytes: 1234,

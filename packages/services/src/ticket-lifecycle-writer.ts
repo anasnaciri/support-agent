@@ -119,7 +119,7 @@ export interface ParkForWaitInput {
   readonly callId: string;
 }
 
-export type ParkForSupplierManualOutcome =
+export type ParkForFulfillmentOperatorManualOutcome =
   | { readonly kind: "parked"; readonly toStatus: TicketStatus }
   | {
       readonly kind: "transition_not_allowed";
@@ -127,15 +127,15 @@ export type ParkForSupplierManualOutcome =
     };
 
 /**
- * A manager escalating a ticket to the supplier BY HAND from the ticket page. The
- * caller (db layer) writes the `ticket_supplier_escalations` row first; this
+ * A manager escalating a ticket to the fulfillment partner BY HAND from the ticket page. The
+ * caller (db layer) writes the `ticket_fulfillment_operator_escalations` row first; this
  * parks the ticket and records the audit row. Bridges `human_takeover →
- * in_progress → waiting_for_supplier` (like resolve's bridge) so §10 is never
+ * in_progress → waiting_for_fulfillment_operator` (like resolve's bridge) so §10 is never
  * bypassed, and leaves a `waiting_for_approval` ticket where it is — approval
  * wins the single primary status under concurrent waits; the open escalation
- * row carries the supplier wait on its own.
+ * row carries the fulfillmentOperator wait on its own.
  */
-export interface ParkForSupplierManualInput {
+export interface ParkForFulfillmentOperatorManualInput {
   readonly ticketId: TicketId;
   readonly tenantId: TenantId;
   readonly actor: AuditActor;
@@ -308,13 +308,13 @@ export class TicketLifecycleWriter extends Context.Tag("TicketLifecycleWriter")<
       input: ParkForWaitInput,
     ) => Effect.Effect<Ticket, TicketLifecycleWriterError>;
 
-    readonly parkWaitingForSupplier: (
+    readonly parkWaitingForFulfillmentOperator: (
       input: ParkForWaitInput,
     ) => Effect.Effect<Ticket, TicketLifecycleWriterError>;
 
-    readonly parkWaitingForSupplierManually: (
-      input: ParkForSupplierManualInput,
-    ) => Effect.Effect<ParkForSupplierManualOutcome, TicketLifecycleWriterError>;
+    readonly parkWaitingForFulfillmentOperatorManually: (
+      input: ParkForFulfillmentOperatorManualInput,
+    ) => Effect.Effect<ParkForFulfillmentOperatorManualOutcome, TicketLifecycleWriterError>;
 
     readonly reopenForCustomerReply: (
       input: ReopenForCustomerReplyInput,
@@ -403,7 +403,7 @@ const replyDeliveryDraftId = (
 
 // A ticket should only ever have ONE pending customer-email draft awaiting
 // approval: a newly-created draft supersedes any older still-pending one (the
-// situation may have changed since the old draft, e.g. a supplier replied). This
+// situation may have changed since the old draft, e.g. a fulfillmentOperator replied). This
 // is enforced wherever a reply approval is created (park OR queue), so it holds
 // for every agent and path — not just the autonomous loop.
 const REPLY_DRAFT_TOOL = "conversation.reply";
@@ -719,12 +719,12 @@ export const TicketLifecycleWriterLive = Layer.effect(
           }),
         ),
 
-      parkWaitingForSupplier: (input) =>
+      parkWaitingForFulfillmentOperator: (input) =>
         tx.run(
           Effect.gen(function* () {
             const updated = yield* tickets.transitionStatus(
               input.ticketId,
-              "waiting_for_supplier",
+              "waiting_for_fulfillment_operator",
               {
                 tenantId: input.tenantId,
                 reason: input.tool,
@@ -734,27 +734,27 @@ export const TicketLifecycleWriterLive = Layer.effect(
               tenantId: updated.tenantId,
               ticketId: updated.id,
               actor: { type: "agent", id: input.agentId },
-              action: "ticket.waiting_for_supplier",
+              action: "ticket.waiting_for_fulfillment_operator",
               details: { tool: input.tool, callId: input.callId },
             });
             return updated;
           }),
         ),
 
-      parkWaitingForSupplierManually: (input) =>
+      parkWaitingForFulfillmentOperatorManually: (input) =>
         tx.run(
           Effect.gen(function* () {
             let current = yield* tickets.getById(input.ticketId, input.tenantId);
 
             // Approval stays the primary wait under concurrent waits — the
-            // escalation row (written by the caller) carries the supplier
+            // escalation row (written by the caller) carries the fulfillmentOperator
             // wait, so only the audit row lands here.
             if (current.status === "waiting_for_approval") {
               yield* audit.record({
                 tenantId: current.tenantId,
                 ticketId: current.id,
                 actor: input.actor,
-                action: "ticket.waiting_for_supplier",
+                action: "ticket.waiting_for_fulfillment_operator",
                 details: {
                   reason: input.reason,
                   escalationId: input.escalationId,
@@ -766,7 +766,7 @@ export const TicketLifecycleWriterLive = Layer.effect(
 
             if (current.status === "human_takeover") {
               // Same bridge as resolve: the direct human_takeover →
-              // waiting_for_supplier jump is illegal under §10.
+              // waiting_for_fulfillment_operator jump is illegal under §10.
               current = yield* tickets.transitionStatus(
                 current.id,
                 "in_progress",
@@ -778,7 +778,7 @@ export const TicketLifecycleWriterLive = Layer.effect(
             }
 
             if (
-              !isStatusTransitionAllowed(current.status, "waiting_for_supplier")
+              !isStatusTransitionAllowed(current.status, "waiting_for_fulfillment_operator")
             ) {
               return {
                 kind: "transition_not_allowed" as const,
@@ -788,7 +788,7 @@ export const TicketLifecycleWriterLive = Layer.effect(
 
             const updated = yield* tickets.transitionStatus(
               current.id,
-              "waiting_for_supplier",
+              "waiting_for_fulfillment_operator",
               {
                 tenantId: current.tenantId,
                 reason: input.reason,
@@ -798,7 +798,7 @@ export const TicketLifecycleWriterLive = Layer.effect(
               tenantId: updated.tenantId,
               ticketId: updated.id,
               actor: input.actor,
-              action: "ticket.waiting_for_supplier",
+              action: "ticket.waiting_for_fulfillment_operator",
               details: {
                 reason: input.reason,
                 escalationId: input.escalationId,

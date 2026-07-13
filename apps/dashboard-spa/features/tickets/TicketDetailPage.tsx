@@ -96,7 +96,7 @@ const RESOLVE_HIDDEN = new Set([
   "archived",
   "failed",
   "waiting_for_approval",
-  "waiting_for_supplier",
+  "waiting_for_fulfillment_operator",
   "approved_action_running",
 ]);
 
@@ -608,14 +608,14 @@ export function TicketDetailPage() {
     (typeof context["notes"] === "string" ? context["notes"] : null);
 
   // Concurrent wait states: a ticket parked waiting_for_approval can ALSO carry
-  // an open supplier escalation (status shows the primary wait). Key the
-  // supplier facts off the row-derived flag, falling back to the status for an
+  // an open fulfillment partner escalation (status shows the primary wait). Key the
+  // fulfillmentOperator facts off the row-derived flag, falling back to the status for an
   // older api that doesn't send waitingOn.
-  const waitingOnSupplier =
-    ticketRow.waitingOn?.supplier ?? ticketRow.status === "waiting_for_supplier";
-  // Manual escalation: hidden while already with the supplier; `failed` is the
+  const waitingOnFulfillmentOperator =
+    ticketRow.waitingOn?.fulfillmentOperator ?? ticketRow.status === "waiting_for_fulfillment_operator";
+  // Manual escalation: hidden while already with the fulfillment partner; `failed` is the
   // one status the state machine refuses to park from.
-  const canEscalateSupplier = !waitingOnSupplier && ticketRow.status !== "failed";
+  const canEscalateFulfillmentOperator = !waitingOnFulfillmentOperator && ticketRow.status !== "failed";
 
   // "Block sender" needs an address to block AND the blocklist permission
   // (the api derives the address server-side; this only decides visibility).
@@ -628,8 +628,8 @@ export function TicketDetailPage() {
       ? "This ticket is closed. Reopen it from the status menu to reply."
       : ticketRow.status === "failed"
         ? "This ticket is closed. Reopen it from the status menu to reply."
-        : waitingOnSupplier
-          ? "Waiting on the supplier. Take over to reply to the customer."
+        : waitingOnFulfillmentOperator
+          ? "Waiting on the fulfillment partner. Take over to reply to the customer."
           : "The agent is handling this conversation. Take over to reply yourself.";
 
   // Composer routing: a single reply draft awaiting approval fills the input
@@ -823,7 +823,7 @@ export function TicketDetailPage() {
             canTakeOver={canTakeOver}
             canResume={canResume}
             showRetrySend={showRetrySend}
-            canEscalateSupplier={canEscalateSupplier}
+            canEscalateFulfillmentOperator={canEscalateFulfillmentOperator}
             canBlockSender={canBlockSender}
             statusTargets={ticketRow.manualStatusTargets ?? []}
             refundSlot={

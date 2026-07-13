@@ -379,7 +379,7 @@ describe("trackingDestinationMismatchFlag", () => {
   // Regression: prod ticket 03649e6f (2026-07-12). 17track returned the ISO
   // alpha-2 code while Shopify's order carries the country NAME; the raw
   // string comparison false-flagged a mismatch, and the injected directive
-  // then suppressed a legitimate supplier escalation.
+  // then suppressed a legitimate fulfillmentOperator escalation.
   it("does not flag an ISO alpha-2 code against the same country's name", () => {
     expect(trackingDestinationMismatchFlag("US", "United States")).toBeNull();
     expect(trackingDestinationMismatchFlag("United States", "US")).toBeNull();
@@ -519,7 +519,7 @@ describe("trackingDestinationDirective", () => {
     });
     expect(d.toLowerCase()).toContain("different order");
     expect(d.toLowerCase()).toContain("merchant.notify");
-    expect(d).toContain("supplier.escalate");
-    expect(d).toContain("when supplier escalation is enabled");
+    expect(d).toContain("fulfillment_operator.escalate");
+    expect(d).toContain("when fulfillment operator escalation is enabled");
   });
 });

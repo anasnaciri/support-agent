@@ -50,7 +50,7 @@ import {
   connectionsList,
   DbClient,
   editTicketDetails,
-  escalateTicketToSupplier,
+  escalateTicketToFulfillmentOperator,
   getActiveReplyDeliveryForTicket,
   getMemberAccess,
   restampTicketLiveTracking,
@@ -101,7 +101,7 @@ import {
 import { pickTrackingSource } from "./ticket-tracking-source.js";
 import {
   resolveCanonicalOrder,
-  supplierOrderProjection,
+  fulfillmentOperatorOrderProjection,
 } from "./escalation-projection.js";
 import {
   classifyOrderRef,
@@ -922,17 +922,17 @@ export const handleDashboardResolveTicket = async (
   return sendJson(res, outcome.kind === "ticket_not_found" ? 404 : 200, outcome);
 };
 
-// POST /dashboard/tickets/:id/escalate-supplier — manager hands the ticket to the
-// workspace's supplier by hand ("Escalate to supplier" in the ticket-page menu).
-// Same machinery as the agent's supplier.escalate tool: the escalation row is
-// the notify outbox (worker cron emails the supplier), and the ticket parks in
-// waiting_for_supplier — bridging from human_takeover, or staying parked on
+// POST /dashboard/tickets/:id/escalate-fulfillment-operator — manager hands the ticket to the
+// workspace's fulfillment partner by hand from the ticket-page menu.
+// Same machinery as the agent's fulfillment_operator.escalate tool: the escalation row is
+// the notify outbox (worker cron emails the fulfillment partner), and the ticket parks in
+// waiting_for_fulfillment_operator — bridging from human_takeover, or staying parked on
 // approval when that's the primary wait. The problem statement is required:
-// it's what the supplier sees in the portal + email. The order projection
+// it's what the fulfillment partner sees in the portal + email. The order projection
 // (ref, ship city/country, tracking) is auto-filled from the ticket's
 // canonically-bound order — best-effort, so an unreachable Shopify never
 // blocks the escalation.
-export const handleDashboardEscalateSupplier = async (
+export const handleDashboardEscalateFulfillmentOperator = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
@@ -963,13 +963,13 @@ export const handleDashboardEscalateSupplier = async (
           (ctx.context ?? {}) as Record<string, unknown>,
         );
         return yield* Effect.promise(() =>
-          escalateTicketToSupplier(db, {
+          escalateTicketToFulfillmentOperator(db, {
             ticketId: id,
             tenantId: auth.tenantId,
             managerId: auth.userId!,
             problem,
             reason,
-            ...supplierOrderProjection(order),
+            ...fulfillmentOperatorOrderProjection(order),
           }),
         );
       }),
@@ -979,7 +979,7 @@ export const handleDashboardEscalateSupplier = async (
   const status =
     outcome.kind === "ticket_not_found"
       ? 404
-      : outcome.kind === "no_supplier" ||
+      : outcome.kind === "no_fulfillment_operator" ||
           outcome.kind === "transition_not_allowed"
         ? 409
         : 200; // escalated | already_escalated
@@ -1721,9 +1721,9 @@ export const handleDashboardTicketAttachmentUpload = async (
 };
 
 // GET /dashboard/tickets/:id/attachments — the ticket's attachment index
-// (merchant + supplier uploads and ingested inbound files), oldest first.
+// (merchant + fulfillmentOperator uploads and ingested inbound files), oldest first.
 // Backs the composer's picker so a teammate can attach an already-uploaded
-// file (e.g. the supplier's label) without re-uploading it.
+// file (e.g. the fulfillment partner's label) without re-uploading it.
 export const handleDashboardTicketAttachments = async (
   cfg: ApiConfig,
   layer: ApiLayer,

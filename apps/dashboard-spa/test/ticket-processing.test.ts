@@ -15,7 +15,7 @@ describe("isTicketProcessing", () => {
   it("is false for parked, waiting, and terminal states", () => {
     expect(isTicketProcessing("new")).toBe(false);
     expect(isTicketProcessing("waiting_for_customer")).toBe(false);
-    expect(isTicketProcessing("waiting_for_supplier")).toBe(false);
+    expect(isTicketProcessing("waiting_for_fulfillment_operator")).toBe(false);
     expect(isTicketProcessing("waiting_for_approval")).toBe(false);
     expect(isTicketProcessing("human_takeover")).toBe(false);
     expect(isTicketProcessing("resolved")).toBe(false);

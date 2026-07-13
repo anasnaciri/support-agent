@@ -18,9 +18,9 @@ import { agentHandoff } from "./agent/handoff.js";
 import { conversationFetchThread } from "./conversation/fetch-thread.js";
 import { conversationReply } from "./conversation/reply.js";
 import { conversationAskCustomer } from "./conversation/ask-customer.js";
-import { supplierAddSheetRow } from "./supplier/add-sheet-row.js";
-import { supplierReadSheetColumns } from "./supplier/read-sheet-columns.js";
-import { supplierEscalate } from "./supplier/escalate.js";
+import { fulfillmentOperatorAddSheetRow } from "./fulfillment-operator/add-sheet-row.js";
+import { fulfillmentOperatorReadSheetColumns } from "./fulfillment-operator/read-sheet-columns.js";
+import { fulfillmentOperatorEscalate } from "./fulfillment-operator/escalate.js";
 import { trackingLookup } from "./tracking/lookup.js";
 import { knowledgeSearch } from "./knowledge/search.js";
 import { merchantNotify } from "./merchant/notify.js";
@@ -44,9 +44,9 @@ export * from "./agent/handoff.js";
 export * from "./conversation/fetch-thread.js";
 export * from "./conversation/reply.js";
 export * from "./conversation/ask-customer.js";
-export * from "./supplier/add-sheet-row.js";
-export * from "./supplier/read-sheet-columns.js";
-export * from "./supplier/escalate.js";
+export * from "./fulfillment-operator/add-sheet-row.js";
+export * from "./fulfillment-operator/read-sheet-columns.js";
+export * from "./fulfillment-operator/escalate.js";
 export * from "./tracking/lookup.js";
 export * from "./knowledge/search.js";
 export * from "./merchant/notify.js";
@@ -87,9 +87,9 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
   shopifyOrderCancel as AnyTool,
   shopifyUpdateShippingAddress as AnyTool,
   shopifyUpdateTracking as AnyTool,
-  supplierReadSheetColumns as AnyTool,
-  supplierAddSheetRow as AnyTool,
-  supplierEscalate as AnyTool,
+  fulfillmentOperatorReadSheetColumns as AnyTool,
+  fulfillmentOperatorAddSheetRow as AnyTool,
+  fulfillmentOperatorEscalate as AnyTool,
   trackingLookup as AnyTool,
   knowledgeSearch as AnyTool,
   merchantNotify as AnyTool,

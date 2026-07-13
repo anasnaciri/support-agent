@@ -18,7 +18,7 @@ import {
   handleDashboardTicketAttachmentUrl,
   handleDashboardEditTicketDetails,
   handleDashboardEditShippingAddress,
-  handleDashboardEscalateSupplier,
+  handleDashboardEscalateFulfillmentOperator,
   handleDashboardIssueRefund,
   handleDashboardCancelOrder,
   handleDashboardRefundContext,
@@ -94,8 +94,8 @@ import {
   handleDashboardRefundPolicy,
   handleDashboardCancellationRestock,
   handleDashboardDiscountPolicy,
-  handleDashboardSupplierSheet,
-  handleDashboardSupplierSheetClear,
+  handleDashboardFulfillmentOperatorSheet,
+  handleDashboardFulfillmentOperatorSheetClear,
 } from "./connect-handlers.js";
 
 export const registerDashboardRoutes = (
@@ -232,7 +232,7 @@ export const registerDashboardRoutes = (
   // endpoints below are permission-gated.
   dashboardGet(
     "/dashboard/settings",
-    "Resolved tenant settings (refund policy + supplier sheet)",
+    "Resolved tenant settings (refund policy + fulfillment partner sheet)",
     handleDashboardSettings,
   );
   dashboardGet(
@@ -317,9 +317,9 @@ export const registerDashboardRoutes = (
     "orders.edit",
   );
   dashboardPost(
-    "/dashboard/tickets/:id/escalate-supplier",
-    "Escalate a ticket to the workspace's supplier by hand (manager)",
-    handleDashboardEscalateSupplier,
+    "/dashboard/tickets/:id/escalate-fulfillment-operator",
+    "Escalate a ticket to the workspace's fulfillment partner by hand (manager)",
+    handleDashboardEscalateFulfillmentOperator,
     "tickets.set_status",
   );
   dashboardPost(
@@ -594,15 +594,15 @@ export const registerDashboardRoutes = (
     "settings.agents",
   );
   dashboardPost(
-    "/dashboard/supplier-sheet",
-    "Set the supplier-escalation sheet",
-    handleDashboardSupplierSheet,
+    "/dashboard/fulfillment-operator-sheet",
+    "Set the fulfillment partner-escalation sheet",
+    handleDashboardFulfillmentOperatorSheet,
     "settings.integrations",
   );
   dashboardPost(
-    "/dashboard/supplier-sheet/clear",
-    "Clear the supplier-escalation sheet",
-    handleDashboardSupplierSheetClear,
+    "/dashboard/fulfillment-operator-sheet/clear",
+    "Clear the fulfillment partner-escalation sheet",
+    handleDashboardFulfillmentOperatorSheetClear,
     "settings.integrations",
   );
   dashboardPost(

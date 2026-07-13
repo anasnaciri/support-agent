@@ -2,7 +2,7 @@ import type { AgentId, TenantId } from "./ids.js";
 import type {
   MessageAttachment,
   OutboundMessageDraft,
-  SupplierEscalationPayload,
+  FulfillmentOperatorEscalationPayload,
 } from "./payloads.js";
 
 export type JsonSchema = Readonly<Record<string, unknown>>;
@@ -109,7 +109,7 @@ export type LLMDecision =
       readonly usage?: LLMUsage;
     }
   | {
-      readonly type: "escalate_supplier";
-      readonly payload: SupplierEscalationPayload;
+      readonly type: "escalate_fulfillment_operator";
+      readonly payload: FulfillmentOperatorEscalationPayload;
       readonly usage?: LLMUsage;
     };

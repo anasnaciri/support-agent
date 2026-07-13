@@ -55,7 +55,7 @@ const settingsWith = (maxValidityDays: number): TenantSettings =>
     refundPolicy: defaultRefundPolicy,
     discountPolicy: { ...defaultDiscountPolicy, maxValidityDays },
     retentionDays: 730,
-    supplierEscalationSheet: null,
+    fulfillmentOperatorEscalationSheet: null,
     legalAcceptance: null,
   });
 

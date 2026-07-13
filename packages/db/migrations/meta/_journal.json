@@ -337,6 +337,13 @@
       "when": 1783959100000,
       "tag": "0047_scenario_key_source_of_truth",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1783959200000,
+      "tag": "0048_fulfillment_operator_domain",
+      "breakpoints": true
     }
   ]
 }

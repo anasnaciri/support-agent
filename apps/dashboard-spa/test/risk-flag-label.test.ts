@@ -24,9 +24,9 @@ describe("riskFlagLabel", () => {
     );
   });
 
-  it("humanises the supplier-unreachable flag", () => {
-    expect(riskFlagLabel("supplier_unreachable")).toBe(
-      "Supplier could not be reached",
+  it("humanises the fulfillment partner-unreachable flag", () => {
+    expect(riskFlagLabel("fulfillment_operator_unreachable")).toBe(
+      "Fulfillment partner could not be reached",
     );
   });
 
@@ -84,7 +84,7 @@ describe("buildRiskFlagBadges", () => {
       buildRiskFlagBadges([
         "refund_customer_mismatch",
         "duplicate_photo_seen_in_ticket_abc",
-        "supplier_unreachable",
+        "fulfillment_operator_unreachable",
         "duplicate_photo_seen_in_ticket_def",
       ]),
     ).toEqual([
@@ -93,7 +93,7 @@ describe("buildRiskFlagBadges", () => {
         text: "Duplicate photo seen in 2 tickets",
         ticketIds: ["abc", "def"],
       },
-      { text: "Supplier could not be reached" },
+      { text: "Fulfillment partner could not be reached" },
     ]);
   });
 

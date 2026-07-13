@@ -29,7 +29,7 @@ import { registerTelegramRoutes } from "./features/telegram/routes.js";
 import { registerApprovalRoutes } from "./features/approvals/routes.js";
 import { registerDashboardRoutes } from "./features/dashboard/routes.js";
 import { registerMemberRoutes } from "./features/members/routes.js";
-import { registerSupplierRoutes } from "./features/suppliers/routes.js";
+import { registerFulfillmentOperatorRoutes } from "./features/fulfillment-operators/routes.js";
 import { registerAdminRoutes } from "./features/admin/routes.js";
 import { registerSystemRoutes } from "./features/system/routes.js";
 
@@ -165,7 +165,7 @@ export const startServer = async (
   registerApprovalRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);
   registerMemberRoutes(app, ctx);
-  registerSupplierRoutes(app, ctx);
+  registerFulfillmentOperatorRoutes(app, ctx);
   registerAdminRoutes(app, ctx);
   registerSystemRoutes(app, ctx);
 

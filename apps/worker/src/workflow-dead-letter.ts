@@ -45,7 +45,7 @@ const eventTicketRef = (
     case "customer.replied":
     case "approval.approved":
     case "approval.rejected":
-    case "supplier.updated":
+    case "fulfillment_operator.updated":
     case "timer.expired":
     case "manual.takeover":
     case "ticket.resumed":

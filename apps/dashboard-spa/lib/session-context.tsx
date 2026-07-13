@@ -17,8 +17,8 @@ import {
 
 import {
   getMeSession,
-  getSupplierSession,
-  getSupplierWorkspaces,
+  getFulfillmentOperatorSession,
+  getFulfillmentOperatorWorkspaces,
   getWorkspaces,
 } from "./api-client";
 import { UnauthorizedError } from "./errors";
@@ -38,17 +38,17 @@ import { useAppNavigate, usePathname } from "./navigation";
 // (localStorage, default-tolerant), and the member's effective permissions for
 // nav gating. Gates the whole authed area — children only render once resolved.
 //
-// UNIFIED switcher: a person can be a MERCHANT in one workspace and a SUPPLIER in
+// UNIFIED switcher: a person can be a MERCHANT in one workspace and a FULFILLMENT_OPERATOR in
 // another (org-independent binding). We source two lists — the org-scoped
-// merchant workspaces and the binding-anchored supplier workspaces — and merge
+// merchant workspaces and the binding-anchored fulfillment partner workspaces — and merge
 // them, each entry tagged by kind. The surface/mode is a property of the ACTIVE
 // workspace, so permissions load from POST /me/session (merchant) or GET
-// /supplier/session (supplier) depending on which kind is active.
+// /fulfillment-operator/session (fulfillmentOperator) depending on which kind is active.
 
 const readStoredWorkspace = (): string | undefined => {
   try {
-    // A supplier notification deep-link (?w=<tenantId>) pins the workspace so a
-    // multi-merchant supplier lands on the right one; it wins over the stored
+    // A fulfillmentOperator notification deep-link (?w=<tenantId>) pins the workspace so a
+    // multi-merchant fulfillmentOperator lands on the right one; it wins over the stored
     // pick and is persisted so it sticks after the param is gone. A ?w the user
     // isn't bound to is harmless — pickActiveWorkspace falls back to default.
     const fromUrl = new URLSearchParams(window.location.search).get("w");
@@ -108,10 +108,10 @@ export const pickActiveWorkspaceForPath = (
   pathname: string,
 ): UnifiedWorkspace | null => {
   const stored = storedId ? workspaces.find((w) => w.id === storedId) : null;
-  if (pathname.startsWith("/supplier")) {
-    if (stored?.kind === "supplier") return stored;
-    const supplier = workspaces.find((w) => w.kind === "supplier");
-    if (supplier) return supplier;
+  if (pathname.startsWith("/fulfillment-operator")) {
+    if (stored?.kind === "fulfillment_operator") return stored;
+    const fulfillmentOperator = workspaces.find((w) => w.kind === "fulfillment_operator");
+    if (fulfillmentOperator) return fulfillmentOperator;
   }
   return (pickActiveWorkspace(workspaces, storedId) as UnifiedWorkspace | null);
 };
@@ -157,22 +157,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     queryFn: () => getWorkspaces(),
     enabled: bootstrapReady,
   });
-  // Binding-anchored supplier workspaces (cross-org). This call also completes
+  // Binding-anchored fulfillment partner workspaces (cross-org). This call also completes
   // the cross-tenant bootstrap server-side; staleTime keeps it from re-running
   // (and re-hitting WorkOS) on every render.
-  const supplierWorkspacesQuery = useQuery({
-    queryKey: qk.supplierWorkspaces,
-    queryFn: () => getSupplierWorkspaces(),
+  const fulfillmentOperatorWorkspacesQuery = useQuery({
+    queryKey: qk.fulfillmentOperatorWorkspaces,
+    queryFn: () => getFulfillmentOperatorWorkspaces(),
     enabled: bootstrapReady,
     staleTime: 300_000,
   });
 
   const merchantWorkspaces = workspacesQuery.data?.workspaces ?? [];
-  const supplierWorkspaces = supplierWorkspacesQuery.data?.workspaces ?? [];
+  const fulfillmentOperatorWorkspaces = fulfillmentOperatorWorkspacesQuery.data?.workspaces ?? [];
 
   // Probe merchant access on the org's default workspace: only if the user is a
   // real merchant there do we surface the org's merchant workspaces (else the
-  // org-scoped list would over-list to a pure supplier who merely belongs to the
+  // org-scoped list would over-list to a pure fulfillment partner who merely belongs to the
   // merchant's WorkOS org). When the active workspace IS this default, the query
   // below dedupes with it (same key).
   const merchantDefaultId = merchantWorkspaces[0]?.id;
@@ -186,33 +186,33 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const workspaces = useMemo(
-    () => mergeWorkspaces(merchantWorkspaces, supplierWorkspaces, isMerchant),
-    [merchantWorkspaces, supplierWorkspaces, isMerchant],
+    () => mergeWorkspaces(merchantWorkspaces, fulfillmentOperatorWorkspaces, isMerchant),
+    [merchantWorkspaces, fulfillmentOperatorWorkspaces, isMerchant],
   );
   const active = useMemo(
     () => pickActiveWorkspaceForPath(workspaces, storedId, pathname),
     [workspaces, storedId, pathname],
   );
-  const activeIsSupplier = active?.kind === "supplier";
+  const activeIsFulfillmentOperator = active?.kind === "fulfillment_operator";
 
   // Permissions follow the active workspace's kind. Merchant → POST /me/session
-  // (org-resolved). Supplier → GET /supplier/session (binding-anchored; the
+  // (org-resolved). FulfillmentOperator → GET /fulfillment-operator/session (binding-anchored; the
   // merchant endpoint would 404 for a different org's tenant).
   const activeMeQuery = useQuery({
-    queryKey: active && !activeIsSupplier ? qk.me(active.id) : ["me", "none"],
+    queryKey: active && !activeIsFulfillmentOperator ? qk.me(active.id) : ["me", "none"],
     queryFn: () => getMeSession({ workspaceId: active!.id }),
-    enabled: Boolean(active) && !activeIsSupplier,
+    enabled: Boolean(active) && !activeIsFulfillmentOperator,
   });
-  const activeSupplierSessionQuery = useQuery({
+  const activeFulfillmentOperatorSessionQuery = useQuery({
     queryKey:
-      active && activeIsSupplier
-        ? qk.supplierSession(active.id)
-        : ["supplier-session", "none"],
-    queryFn: () => getSupplierSession({ workspaceId: active!.id }),
-    enabled: Boolean(active) && activeIsSupplier,
+      active && activeIsFulfillmentOperator
+        ? qk.fulfillmentOperatorSession(active.id)
+        : ["fulfillment-operator-session", "none"],
+    queryFn: () => getFulfillmentOperatorSession({ workspaceId: active!.id }),
+    enabled: Boolean(active) && activeIsFulfillmentOperator,
   });
-  const activePerms = activeIsSupplier
-    ? activeSupplierSessionQuery.data
+  const activePerms = activeIsFulfillmentOperator
+    ? activeFulfillmentOperatorSessionQuery.data
     : activeMeQuery.data;
 
   const setActiveWorkspace = useCallback(
@@ -228,14 +228,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       for (const prefix of workspaceScopedKeyPrefixes) {
         void queryClient.invalidateQueries({ queryKey: [prefix] });
       }
-      // Route to the target's surface. Switching INTO a supplier workspace →
-      // the portal; switching a merchant workspace while on the supplier portal
+      // Route to the target's surface. Switching INTO a fulfillment partner workspace →
+      // the portal; switching a merchant workspace while on the fulfillment partner portal
       // → back to the merchant home. Merchant→merchant stays on the current
       // route (its data just refetches under the new workspace).
       const target = workspaces.find((w) => w.id === id);
-      if (target?.kind === "supplier") {
-        nav.replace(surfaceHomeForKind("supplier"));
-      } else if (pathname.startsWith("/supplier")) {
+      if (target?.kind === "fulfillment_operator") {
+        nav.replace(surfaceHomeForKind("fulfillment_operator"));
+      } else if (pathname.startsWith("/fulfillment-operator")) {
         nav.replace(surfaceHomeForKind("merchant"));
       }
     },
@@ -259,11 +259,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [needsOnboarding, nav, pathname]);
 
   // Both workspace lists resolved but the user has NO workspace of either kind
-  // → onboarding. Gated on both queries settling so a supplier-only user isn't
+  // → onboarding. Gated on both queries settling so a fulfillment-partner-only user isn't
   // bounced while their binding list is still loading.
   const listsSettled =
     workspacesQuery.isSuccess &&
-    (supplierWorkspacesQuery.isSuccess || supplierWorkspacesQuery.isError);
+    (fulfillmentOperatorWorkspacesQuery.isSuccess || fulfillmentOperatorWorkspacesQuery.isError);
   const workspaceRedirectTarget = workspaceBootstrapRedirectTarget({
     bootstrapReady,
     listsSettled,
@@ -294,13 +294,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // final before we resolve permissions) and the active-workspace permissions.
   if (
     workspacesQuery.isLoading ||
-    supplierWorkspacesQuery.isLoading ||
+    fulfillmentOperatorWorkspacesQuery.isLoading ||
     (Boolean(merchantDefaultId) && merchantMeQuery.isLoading)
   ) {
     return <Splash label="Loading your workspace…" />;
   }
   if (!active) return <Splash label="Setting up your workspace…" />;
-  if (activeIsSupplier ? activeSupplierSessionQuery.isLoading : activeMeQuery.isLoading) {
+  if (activeIsFulfillmentOperator ? activeFulfillmentOperatorSessionQuery.isLoading : activeMeQuery.isLoading) {
     return <Splash label="Loading your workspace…" />;
   }
 

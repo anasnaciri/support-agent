@@ -94,15 +94,15 @@ export interface TodaySummary {
  * The two wait facts a ticket can hold AT ONCE (concurrent wait states). A ticket's
  * `status` is the single "who acts next" pointer (`primaryWaitStatus` —
  * approval wins), but a ticket parked `waiting_for_approval` can ALSO carry an
- * open supplier escalation. Both facts are row-derived (pending `approvals`
- * rows / open `ticket_supplier_escalations` rows) and surfaced here so the
- * dashboard can render a second "waiting on supplier" chip without re-deriving
+ * open fulfillment partner escalation. Both facts are row-derived (pending `approvals`
+ * rows / open `ticket_fulfillment_operator_escalations` rows) and surfaced here so the
+ * dashboard can render a second "waiting on fulfillment partner" chip without re-deriving
  * anything. Optional on the wire: an older api that doesn't send it just omits
  * the extra chip.
  */
 export interface TicketWaitingOn {
   readonly approval: boolean;
-  readonly supplier: boolean;
+  readonly fulfillmentOperator: boolean;
 }
 
 export interface TicketListRow {
@@ -113,7 +113,7 @@ export interface TicketListRow {
   readonly currentAgentId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
-  /** Derived concurrent wait facts (approval + supplier); see {@link TicketWaitingOn}. */
+  /** Derived concurrent wait facts (approval + fulfillmentOperator); see {@link TicketWaitingOn}. */
   readonly waitingOn?: TicketWaitingOn;
   // Row-display enrichments (all same-row on `tickets`, no joins). Optional so a
   // dashboard built against a newer contract still renders against an older api
@@ -167,7 +167,7 @@ export interface TicketDetailTicket {
    * status.
    */
   readonly manualStatusTargets: ReadonlyArray<string>;
-  /** Derived concurrent wait facts (approval + supplier); see {@link TicketWaitingOn}. */
+  /** Derived concurrent wait facts (approval + fulfillmentOperator); see {@link TicketWaitingOn}. */
   readonly waitingOn?: TicketWaitingOn;
 }
 
@@ -252,7 +252,7 @@ export interface DashboardConversationAttachment {
 }
 
 /**
- * An attachment indexed on a ticket (uploaded by a teammate or supplier, or
+ * An attachment indexed on a ticket (uploaded by a teammate or fulfillmentOperator, or
  * ingested from an inbound customer message). `id` is the only handle
  * clients ever pass back — storage keys stay server-side.
  */
@@ -261,7 +261,7 @@ export interface TicketAttachmentSummary {
   readonly filename: string;
   readonly contentType: string;
   readonly sizeBytes: number;
-  readonly source: "inbound" | "supplier" | "merchant";
+  readonly source: "inbound" | "fulfillment_operator" | "merchant";
   readonly createdAt: string;
 }
 
@@ -764,28 +764,28 @@ export interface WorkspacesResponse {
 }
 
 // The workspace switcher spans BOTH roles: one person can be a MERCHANT in one
-// workspace and a SUPPLIER in another (org-independent binding). Each entry is
+// workspace and a FULFILLMENT_OPERATOR in another (org-independent binding). Each entry is
 // tagged so the switcher routes to the right surface and the session loads the
-// right permissions. Merchant entries come from the org-scoped list; supplier
+// right permissions. Merchant entries come from the org-scoped list; fulfillmentOperator
 // entries from the binding-anchored list (cross-org). Shared by both dashboards.
 
-export type WorkspaceKind = "merchant" | "supplier";
+export type WorkspaceKind = "merchant" | "fulfillment_operator";
 
 export interface UnifiedWorkspace extends WorkspaceSummary {
   readonly kind: WorkspaceKind;
 }
 
 /**
- * Merge the merchant + supplier workspace lists into one switcher list. Merchant
+ * Merge the merchant + fulfillment partner workspace lists into one switcher list. Merchant
  * entries are included only when the user actually has merchant access
  * (`includeMerchant` — else the org-scoped list would over-list workspaces to a
- * pure supplier who merely belongs to the merchant's WorkOS org). A workspace in
+ * pure fulfillment partner who merely belongs to the merchant's WorkOS org). A workspace in
  * both lists is a merchant entry (merchant wins). Order: merchant first (already
- * default-ordered), then supplier-only workspaces.
+ * default-ordered), then fulfillment-partner-only workspaces.
  */
 export const mergeWorkspaces = (
   merchant: ReadonlyArray<WorkspaceSummary>,
-  supplier: ReadonlyArray<WorkspaceSummary>,
+  fulfillmentOperator: ReadonlyArray<WorkspaceSummary>,
   includeMerchant: boolean,
 ): ReadonlyArray<UnifiedWorkspace> => {
   const out: UnifiedWorkspace[] = [];
@@ -796,16 +796,16 @@ export const mergeWorkspaces = (
       seen.add(w.id);
     }
   }
-  for (const w of supplier) {
+  for (const w of fulfillmentOperator) {
     if (seen.has(w.id)) continue;
-    out.push({ ...w, kind: "supplier" });
+    out.push({ ...w, kind: "fulfillment_operator" });
   }
   return out;
 };
 
 /** Where selecting a workspace of this kind lands the user. */
 export const surfaceHomeForKind = (kind: WorkspaceKind): string =>
-  kind === "supplier" ? "/supplier/tickets" : "/";
+  kind === "fulfillment_operator" ? "/fulfillment-operator/tickets" : "/";
 
 export interface CreateWorkspaceResult {
   readonly workspaceId: string;
@@ -816,7 +816,7 @@ export interface CreateWorkspaceResult {
 // ============================================================
 //
 // Resolved view of `tenants.settings` (defaults already applied by the api),
-// backing the refund-policy + supplier-escalation (Google Sheets) pages.
+// backing the refund-policy + fulfillment-operator-escalation (Google Sheets) pages.
 
 export type RefundPolicyMode = "thresholds" | "always_ask" | "always_deny";
 
@@ -848,7 +848,7 @@ export interface DiscountPolicyView {
   readonly mode: DiscountPolicyMode;
 }
 
-export interface SupplierEscalationSheetView {
+export interface FulfillmentOperatorEscalationSheetView {
   readonly spreadsheetId: string;
   readonly range: string;
   readonly description: string | null;
@@ -882,7 +882,7 @@ export type CustomsDutiesPayerView = "customer" | "merchant" | "not_applicable";
  *
  * `deliveryTime` and `delayedAfterDays` are the two the agents act on: the
  * former is the window lateness is measured against, the latter the exact point
- * past which a shipment earns a supplier check.
+ * past which a shipment earns a fulfillment partner check.
  */
 export interface ShippingFactsView {
   readonly processingTime: string;
@@ -921,7 +921,7 @@ export interface TenantSettingsView {
   readonly notificationEmail: string | null;
   readonly refundPolicy: RefundPolicyView;
   readonly discountPolicy: DiscountPolicyView;
-  readonly supplierEscalationSheet: SupplierEscalationSheetView | null;
+  readonly fulfillmentOperatorEscalationSheet: FulfillmentOperatorEscalationSheetView | null;
   readonly legalAcceptance: LegalAcceptanceView | null;
   /**
    * Whether `order.cancel` returns the cancelled order's items to inventory.
@@ -947,7 +947,7 @@ export interface ScenarioActionView {
   readonly permission: ScenarioActionPermissionView;
 }
 
-export type SupplierModeView =
+export type FulfillmentOperatorModeView =
   | "escalate_and_wait"
   | "notify_and_proceed"
   | "none";
@@ -962,7 +962,7 @@ export interface ResolutionScenarioView {
   readonly enabled: boolean;
   /** Remedy tools the agent may use for this scenario + their permission. */
   readonly enabledActions: ReadonlyArray<ScenarioActionView>;
-  readonly supplierMode: SupplierModeView;
+  readonly fulfillmentOperatorMode: FulfillmentOperatorModeView;
   /** Free-text playbook guidance injected verbatim into the agent. */
   readonly notes: string | null;
 }
@@ -1019,7 +1019,7 @@ export interface ResolvedReferencesView {
  * `fulfillmentTrackingInfoUpdate` accepts ANY ONE of Shopify's three
  * fulfillment-order write scopes. We request only the two that can apply to
  * this app: `write_merchant_managed_fulfillment_orders` (the merchant created
- * the fulfillment) and `write_third_party_fulfillment_orders` (a supplier /
+ * the fulfillment) and `write_third_party_fulfillment_orders` (a fulfillment partner /
  * 3PL did). The third, `write_assigned_fulfillment_orders`, is for apps
  * registered as a Shopify fulfillment service — which this app is not — so
  * requesting it would widen the merchant's consent screen for nothing.

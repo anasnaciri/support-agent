@@ -29,10 +29,10 @@ const TICKETS: ReadonlyArray<readonly [string, string]> = [
   ["/settings/integrations", "/settings/integrations"],
   ["/settings/integrations/shopify", "/settings/integrations"],
   ["/settings/notifications", "/settings/notifications"],
-  // Supplier escalation lives under the Google Sheets connector now — no
+  // FulfillmentOperator escalation lives under the Google Sheets connector now — no
   // standalone nav entry — so its pages keep Integrations highlighted.
   ["/settings/integrations/google_sheets", "/settings/integrations"],
-  ["/settings/supplier-escalation", "/settings/integrations"],
+  ["/settings/fulfillment-operator-escalation", "/settings/integrations"],
   ["/settings/legal", "/settings/legal"],
   ["/settings/account", "/settings/account"],
 ];
@@ -49,7 +49,7 @@ describe("settings nav active matching", () => {
     }
   });
 
-  it("has no standalone supplier-escalation nav entry", () => {
+  it("has no standalone fulfillment-operator-escalation nav entry", () => {
     expect(
       ALL_ITEMS.find(
         (item) => item.href === "/settings/integrations/google_sheets",
@@ -57,14 +57,14 @@ describe("settings nav active matching", () => {
     ).toBeUndefined();
   });
 
-  it("keeps Integrations active on the Sheets / supplier pages", () => {
+  it("keeps Integrations active on the Sheets / fulfillment partner pages", () => {
     const integrations = ALL_ITEMS.find(
       (item) => item.href === "/settings/integrations",
     );
     expect(integrations?.match("/settings/integrations/google_sheets")).toBe(
       true,
     );
-    expect(integrations?.match("/settings/supplier-escalation")).toBe(true);
+    expect(integrations?.match("/settings/fulfillment-operator-escalation")).toBe(true);
   });
 
   it("returns null for a non-settings path", () => {

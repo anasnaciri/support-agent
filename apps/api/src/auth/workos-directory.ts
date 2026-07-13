@@ -104,7 +104,7 @@ export const makeStaticWorkosOrganizationDirectory = (
 
 // WRITE side of WorkOS: create an organization for a self-service signup, add
 // the founder to it, resolve the user's existing memberships (so onboarding is
-// idempotent — an invited user reuses their org), and send member/supplier
+// idempotent — an invited user reuses their org), and send member/fulfillment-operator
 // invitations. The Vite SPA (Option B) has no WORKOS_API_KEY, so these admin-SDK
 // operations — which the Next dashboard ran in a server action — must run in the
 // api. Raw fetch (no @workos-inc/node dep) keeps every call trivially testable

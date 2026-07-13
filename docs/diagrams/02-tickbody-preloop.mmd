@@ -5,7 +5,7 @@ flowchart TD
 
     KIND -->|"approval.approved"| AA1
     KIND -->|"approval.rejected"| AR["transition to human_takeover"]
-    KIND -->|"inbound / timer / supplier / resumed"| IDEN
+    KIND -->|"inbound / timer / fulfillment operator / resumed"| IDEN
 
     AA1{"status == resolved?"}
     AA1 -->|yes| AADUP["dup-skip, return Completed"]
@@ -24,8 +24,8 @@ flowchart TD
     G1 -->|yes| P1["PausedWaitingForApproval"]
     G1 -->|no| G2{"status == human_takeover?"}
     G2 -->|yes| P2["PausedForHumanTakeover"]
-    G2 -->|no| G3{"status == waiting_for_supplier (non-passthrough)?"}
-    G3 -->|yes| P3["PausedWaitingForSupplier"]
+    G2 -->|no| G3{"status == waiting_for_fulfillment_operator (non-passthrough)?"}
+    G3 -->|yes| P3["PausedWaitingForFulfillmentOperator"]
     G3 -->|no| RO{"resolved + inbound reply?"}
     RO -->|yes| ROPEN["reopen: resolved to in_progress"]
     RO -->|no| LOOP["AGENT LOOP (see diagram 03)"]

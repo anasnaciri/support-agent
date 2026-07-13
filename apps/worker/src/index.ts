@@ -33,9 +33,9 @@ import {
   registerTimerSweep,
 } from "./timer-sweep-schedule.js";
 import {
-  SUPPLIER_NOTIFY_QUEUE,
-  registerSupplierNotifySweep,
-} from "./supplier-notify-schedule.js";
+  FULFILLMENT_OPERATOR_NOTIFY_QUEUE,
+  registerFulfillmentOperatorNotifySweep,
+} from "./fulfillment-operator-notify-schedule.js";
 import {
   APPROVAL_MAINTENANCE_QUEUE,
   registerApprovalMaintenance,
@@ -213,16 +213,16 @@ const main = async (): Promise<void> => {
     `[worker] scheduled timer-sweep cron on queue=${TIMER_SWEEP_QUEUE}`,
   );
 
-  // Supplier notification sweep: the durable outbox relay for supplier
+  // FulfillmentOperator notification sweep: the durable outbox relay for fulfillmentOperator
   // escalation emails (notified_at ledger drives retry). The portal deep link
   // uses DASHBOARD_BASE_URL when set; otherwise the email omits the link.
-  await registerSupplierNotifySweep({
+  await registerFulfillmentOperatorNotifySweep({
     boss,
     runtimeLayer,
     portalBaseUrl: process.env["DASHBOARD_BASE_URL"] ?? null,
   });
   console.log(
-    `[worker] scheduled supplier-notify cron on queue=${SUPPLIER_NOTIFY_QUEUE}`,
+    `[worker] scheduled fulfillment-operator-notify cron on queue=${FULFILLMENT_OPERATOR_NOTIFY_QUEUE}`,
   );
 
   // Approvals maintenance: expires overdue pendings (escalating their

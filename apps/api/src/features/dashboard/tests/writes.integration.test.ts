@@ -4,10 +4,10 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   approvals,
   tickets,
-  ticketSupplierEscalations,
-  createSupplier,
+  ticketFulfillmentOperatorEscalations,
+  createFulfillmentOperator,
   makeDbClient,
-  suppliers,
+  fulfillmentOperators,
   tenants,
 } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../../../server.js";
@@ -147,7 +147,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       {
         ...mkTicket(ticketEscalate, tenantId, "human_takeover"),
         // A canonically-bound order: the handler tries to auto-fill the
-        // supplier's order projection from it. No Shopify creds exist in this
+        // fulfillmentOperator's order projection from it. No Shopify creds exist in this
         // test env, so the lookup fails and the projection must degrade to
         // nulls WITHOUT blocking the escalation.
         context: { identifiedOrderId: "gid://shopify/Order/424242" },
@@ -156,9 +156,9 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       mkTicket(ticketEscalateFailed, tenantId, "failed"),
       mkTicket(ticketEscalateOther, otherTenantId, "in_progress"),
     ]);
-    // The escalate tests' workspace has a supplier; the OTHER tenant has none
-    // (its escalate attempt must surface no_supplier).
-    await createSupplier(raw.db, tenantId, {
+    // The escalate tests' workspace has a fulfillment partner; the OTHER tenant has none
+    // (its escalate attempt must surface no_fulfillment_operator).
+    await createFulfillmentOperator(raw.db, tenantId, {
       name: "Warehouse",
       email: `wh-${tenantId.slice(0, 8)}@example.com`,
     });
@@ -180,11 +180,11 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     if (handle) await handle.close();
     for (const id of [tenantId, otherTenantId]) {
       await raw.db
-        .delete(ticketSupplierEscalations)
-        .where(sql`${ticketSupplierEscalations.tenantId} = ${id}`);
+        .delete(ticketFulfillmentOperatorEscalations)
+        .where(sql`${ticketFulfillmentOperatorEscalations.tenantId} = ${id}`);
       await raw.db
-        .delete(suppliers)
-        .where(sql`${suppliers.tenantId} = ${id}`);
+        .delete(fulfillmentOperators)
+        .where(sql`${fulfillmentOperators.tenantId} = ${id}`);
       await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${id}`);
       await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
@@ -536,25 +536,25 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(await ticketStatus(ticketHt)).toBe("resolved");
   });
 
-  it("escalate-supplier parks a taken-over ticket + writes the escalation row", async () => {
+  it("escalate-fulfillment-operator parks a taken-over ticket + writes the escalation row", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/tickets/${ticketEscalate}/escalate-supplier`, {
+    const res = await post(`/dashboard/tickets/${ticketEscalate}/escalate-fulfillment-operator`, {
       problem: "Order #1001 lost in transit — please reship",
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("escalated");
-    // Bridged human_takeover → in_progress → waiting_for_supplier (§10).
-    expect(await ticketStatus(ticketEscalate)).toBe("waiting_for_supplier");
+    // Bridged human_takeover → in_progress → waiting_for_fulfillment_operator (§10).
+    expect(await ticketStatus(ticketEscalate)).toBe("waiting_for_fulfillment_operator");
     const rows = await raw.db
       .select()
-      .from(ticketSupplierEscalations)
-      .where(eq(ticketSupplierEscalations.ticketId, ticketEscalate));
+      .from(ticketFulfillmentOperatorEscalations)
+      .where(eq(ticketFulfillmentOperatorEscalations.ticketId, ticketEscalate));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       status: "open",
       problem: "Order #1001 lost in transit — please reship",
     });
-    // The escalation row is the notify outbox — the supplier email cron picks
+    // The escalation row is the notify outbox — the fulfillment partner email cron picks
     // up `notified_at IS NULL` rows, same as an agent escalation.
     expect(rows[0]?.notifiedAt).toBeNull();
     // The bound order couldn't be fetched (no Shopify creds here), so the
@@ -563,9 +563,9 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(rows[0]?.trackingNumber).toBeNull();
   });
 
-  it("escalate-supplier is a no-op while an escalation is already open", async () => {
+  it("escalate-fulfillment-operator is a no-op while an escalation is already open", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/tickets/${ticketEscalate}/escalate-supplier`, {
+    const res = await post(`/dashboard/tickets/${ticketEscalate}/escalate-fulfillment-operator`, {
       problem: "duplicate",
     });
     expect(res.status).toBe(200);
@@ -574,33 +574,33 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     );
     const rows = await raw.db
       .select()
-      .from(ticketSupplierEscalations)
-      .where(eq(ticketSupplierEscalations.ticketId, ticketEscalate));
+      .from(ticketFulfillmentOperatorEscalations)
+      .where(eq(ticketFulfillmentOperatorEscalations.ticketId, ticketEscalate));
     expect(rows).toHaveLength(1);
   });
 
-  it("escalate-supplier keeps waiting_for_approval as the primary status", async () => {
+  it("escalate-fulfillment-operator keeps waiting_for_approval as the primary status", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/tickets/${ticketEscalateApproval}/escalate-supplier`,
+      `/dashboard/tickets/${ticketEscalateApproval}/escalate-fulfillment-operator`,
       { problem: "Confirm replacement stock for order #1002" },
     );
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("escalated");
     // Approval wins the single primary status under concurrent waits; the open
-    // escalation row carries the supplier wait on its own.
+    // escalation row carries the fulfillment partner wait on its own.
     expect(await ticketStatus(ticketEscalateApproval)).toBe("waiting_for_approval");
     const rows = await raw.db
       .select()
-      .from(ticketSupplierEscalations)
-      .where(eq(ticketSupplierEscalations.ticketId, ticketEscalateApproval));
+      .from(ticketFulfillmentOperatorEscalations)
+      .where(eq(ticketFulfillmentOperatorEscalations.ticketId, ticketEscalateApproval));
     expect(rows).toHaveLength(1);
   });
 
-  it("escalate-supplier refuses an illegal transition without writing", async () => {
+  it("escalate-fulfillment-operator refuses an illegal transition without writing", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/tickets/${ticketEscalateFailed}/escalate-supplier`,
+      `/dashboard/tickets/${ticketEscalateFailed}/escalate-fulfillment-operator`,
       { problem: "should not land" },
     );
     expect(res.status).toBe(409);
@@ -610,21 +610,21 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(await ticketStatus(ticketEscalateFailed)).toBe("failed");
     const rows = await raw.db
       .select()
-      .from(ticketSupplierEscalations)
-      .where(eq(ticketSupplierEscalations.ticketId, ticketEscalateFailed));
+      .from(ticketFulfillmentOperatorEscalations)
+      .where(eq(ticketFulfillmentOperatorEscalations.ticketId, ticketEscalateFailed));
     expect(rows).toHaveLength(0);
   });
 
-  it("escalate-supplier 400s on a missing problem statement", async () => {
+  it("escalate-fulfillment-operator 400s on a missing problem statement", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/tickets/${ticketEscalate}/escalate-supplier`,
+      `/dashboard/tickets/${ticketEscalate}/escalate-fulfillment-operator`,
       { problem: "   " },
     );
     expect(res.status).toBe(400);
   });
 
-  it("escalate-supplier reports no_supplier when the workspace has none", async () => {
+  it("escalate-fulfillment-operator reports no_fulfillment_operator when the workspace has none", async () => {
     if (!raw) return;
     const otherHeaders = dashboardAuthHeaders(
       otherOrgId,
@@ -632,19 +632,19 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       workosUser,
     );
     const res = await post(
-      `/dashboard/tickets/${ticketEscalateOther}/escalate-supplier`,
-      { problem: "no supplier configured here" },
+      `/dashboard/tickets/${ticketEscalateOther}/escalate-fulfillment-operator`,
+      { problem: "no fulfillment partner configured here" },
       otherHeaders,
     );
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { kind: string }).kind).toBe("no_supplier");
+    expect(((await res.json()) as { kind: string }).kind).toBe("no_fulfillment_operator");
     expect(await ticketStatus(ticketEscalateOther)).toBe("in_progress");
   });
 
-  it("escalate-supplier 404s for a ticket in another tenant (no mutation)", async () => {
+  it("escalate-fulfillment-operator 404s for a ticket in another tenant (no mutation)", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/tickets/${ticketEscalateOther}/escalate-supplier`,
+      `/dashboard/tickets/${ticketEscalateOther}/escalate-fulfillment-operator`,
       { problem: "cross-tenant" },
     );
     expect(res.status).toBe(404);

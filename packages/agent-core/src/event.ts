@@ -8,7 +8,7 @@ import type {
 } from "./ids.js";
 import type {
   InboundMessage,
-  SupplierUpdate,
+  FulfillmentOperatorUpdate,
   TicketInput,
   TrackingEvent,
 } from "./payloads.js";
@@ -46,9 +46,9 @@ export type DomainEvent =
       readonly reason?: string;
     }
   | {
-      readonly type: "supplier.updated";
+      readonly type: "fulfillment_operator.updated";
       readonly ticketId: TicketId;
-      readonly payload: SupplierUpdate;
+      readonly payload: FulfillmentOperatorUpdate;
     }
   | {
       readonly type: "tracking.changed";

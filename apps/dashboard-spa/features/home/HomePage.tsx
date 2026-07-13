@@ -33,21 +33,21 @@ export function HomePage() {
   const ctx = useWorkspaceCtx();
   const nav = useAppNavigate();
 
-  // When the ACTIVE workspace is a supplier one, the member has no merchant
+  // When the ACTIVE workspace is a fulfillment partner one, the member has no merchant
   // surface for it — send them to the portal instead of a "Today" page whose
   // data they can't read. Permissions follow the active workspace's kind, so a
   // dual-role user only lands here while a merchant workspace is active.
-  const activeIsSupplier =
-    session.permissions.has("supplier.tickets.view") &&
+  const activeIsFulfillmentOperator =
+    session.permissions.has("fulfillment_operator.tickets.view") &&
     !session.permissions.has("tickets.view");
   useEffect(() => {
-    if (activeIsSupplier) nav.replace("/supplier/tickets");
-  }, [activeIsSupplier, nav]);
+    if (activeIsFulfillmentOperator) nav.replace("/fulfillment-operator/tickets");
+  }, [activeIsFulfillmentOperator, nav]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: qk.today(ctx.workspaceId),
     queryFn: () => api.today(ctx),
-    enabled: !activeIsSupplier,
+    enabled: !activeIsFulfillmentOperator,
   });
 
   // Post-onboarding / workspace lifecycle toasts, read once from the URL.
@@ -81,7 +81,7 @@ export function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (activeIsSupplier) return null; // redirecting to the supplier portal
+  if (activeIsFulfillmentOperator) return null; // redirecting to the fulfillment partner portal
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
@@ -99,7 +99,7 @@ export function HomePage() {
   const inProgress =
     countOf("new") + countOf("in_progress") + countOf("triaging");
   const waitingCustomer = countOf("waiting_for_customer");
-  const waitingSupplier = countOf("waiting_for_supplier");
+  const waitingFulfillmentOperator = countOf("waiting_for_fulfillment_operator");
   const waitingApproval = countOf("waiting_for_approval");
   const resolvedTodayCount = data.resolvedTodayCount;
 
@@ -242,11 +242,11 @@ export function HomePage() {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile label="Waiting for customer" value={waitingCustomer} />
-        <StatTile label="Waiting for supplier" value={waitingSupplier} />
+        <StatTile label="Waiting for fulfillment partner" value={waitingFulfillmentOperator} />
         <StatTile
           label="In progress"
           value={inProgress}
-          hint="Tickets the agent is actively handling right now (new, triaging, in progress), not tickets parked waiting for approval, a customer, or a supplier to be resolved."
+          hint="Tickets the agent is actively handling right now (new, triaging, in progress), not tickets parked waiting for approval, a customer, or a fulfillment partner to be resolved."
         />
         <StatTile
           label="Resolved (all-time)"

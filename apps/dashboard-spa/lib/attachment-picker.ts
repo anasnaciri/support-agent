@@ -1,6 +1,6 @@
 // Pure logic for the composer's "attach a file already on this ticket" picker.
 // The ticket's attachment index (GET /dashboard/tickets/:id/attachments) holds
-// files a supplier sent, files the team uploaded on an earlier reply, and
+// files a fulfillment partner sent, files the team uploaded on an earlier reply, and
 // customer attachments — any of which the manager may want to forward. Kept out
 // of ChatComposer so the offer/capacity rules are unit-testable.
 
@@ -11,7 +11,7 @@ export const attachmentSourceLabel = (
   source: TicketAttachmentSummary["source"],
 ): string => {
   if (source === "inbound") return "From the customer";
-  if (source === "supplier") return "From the supplier";
+  if (source === "fulfillment_operator") return "From the fulfillment partner";
   return "Uploaded by your team";
 };
 

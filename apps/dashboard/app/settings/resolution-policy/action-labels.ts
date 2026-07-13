@@ -1,6 +1,6 @@
 // Plain-language labels for the resolution-policy editor — the merchant never
 // sees a tool id. The `tool` values map 1:1 to the runtime's remedy tools
-// (SCENARIO_REMEDY_TOOLS); supplier handling is the radio (supplierMode), not a
+// (SCENARIO_REMEDY_TOOLS); fulfillment partner handling is the radio (fulfillmentOperatorMode), not a
 // checklist action.
 
 export interface RemedyAction {
@@ -27,26 +27,26 @@ export const REMEDY_ACTIONS: ReadonlyArray<RemedyAction> = [
   },
 ];
 
-export interface SupplierModeOption {
+export interface FulfillmentOperatorModeOption {
   readonly value: "escalate_and_wait" | "notify_and_proceed" | "none";
   readonly label: string;
   readonly help: string;
 }
 
-export const SUPPLIER_MODE_OPTIONS: ReadonlyArray<SupplierModeOption> = [
+export const FULFILLMENT_OPERATOR_MODE_OPTIONS: ReadonlyArray<FulfillmentOperatorModeOption> = [
   {
     value: "escalate_and_wait",
-    label: "Escalate to my supplier and wait",
-    help: "Loop the supplier in and pause the ticket until they respond.",
+    label: "Escalate to my fulfillment partner and wait",
+    help: "Loop the fulfillment partner in and pause the ticket until they respond.",
   },
   {
     value: "notify_and_proceed",
-    label: "Notify my supplier and keep helping",
-    help: "Tell the supplier, but resolve for the customer now.",
+    label: "Notify my fulfillment partner and keep helping",
+    help: "Tell the fulfillment partner, but resolve for the customer now.",
   },
   {
     value: "none",
-    label: "Don't involve a supplier",
+    label: "Don't involve a fulfillment partner",
     help: "Handle it between the store and the customer.",
   },
 ];

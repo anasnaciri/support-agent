@@ -35,13 +35,13 @@ interface TodaySearchParams {
 export default async function TodayPage({ searchParams }: TodaySearchParams) {
   const sp = searchParams ? await searchParams : {};
   const ctx = await getDashboardContext();
-  // A supplier (constrained external role) has no merchant surface — send them
+  // A fulfillmentOperator (constrained external role) has no merchant surface — send them
   // to their portal instead of a "Today" page whose data they can't read.
   if (
-    ctx.permissions.has("supplier.tickets.view") &&
+    ctx.permissions.has("fulfillment_operator.tickets.view") &&
     !ctx.permissions.has("tickets.view")
   ) {
-    redirect("/supplier/tickets");
+    redirect("/fulfillment-operator/tickets");
   }
   const summary = await api.today(ctx);
 
@@ -79,7 +79,7 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
   const inProgress =
     countOf("new") + countOf("in_progress") + countOf("triaging");
   const waitingCustomer = countOf("waiting_for_customer");
-  const waitingSupplier = countOf("waiting_for_supplier");
+  const waitingFulfillmentOperator = countOf("waiting_for_fulfillment_operator");
   const waitingApproval = countOf("waiting_for_approval");
   const resolvedTodayCount = summary.resolvedTodayCount;
 
@@ -222,11 +222,11 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile label="Waiting for customer" value={waitingCustomer} />
-        <StatTile label="Waiting for supplier" value={waitingSupplier} />
+        <StatTile label="Waiting for fulfillment partner" value={waitingFulfillmentOperator} />
         <StatTile
           label="In progress"
           value={inProgress}
-          hint="Tickets the agent is actively handling right now (new, triaging, in progress) — not tickets parked waiting for approval, a customer, or a supplier to be resolved."
+          hint="Tickets the agent is actively handling right now (new, triaging, in progress) — not tickets parked waiting for approval, a customer, or a fulfillment partner to be resolved."
         />
         <StatTile
           label="Resolved (all-time)"

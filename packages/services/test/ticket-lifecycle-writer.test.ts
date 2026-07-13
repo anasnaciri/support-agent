@@ -45,7 +45,7 @@ const run = <A, E>(
 ) => Effect.runPromise(Effect.provide(eff, layer));
 
 describe("TicketLifecycleWriter", () => {
-  it("escalates a waiting supplier ticket to human takeover with risk flag and audit", async () => {
+  it("escalates a waiting fulfillmentOperator ticket to human takeover with risk flag and audit", async () => {
     const out = await run(
       Effect.gen(function* () {
         const tickets = yield* TicketRepository;
@@ -55,18 +55,18 @@ describe("TicketLifecycleWriter", () => {
           tenantId: TenantId("tenant-a"),
           channel: "email",
           currentAgentId: AgentId("missing-package-agent"),
-          status: "waiting_for_supplier",
-          context: { riskFlags: ["existing"], source: "supplier-tool" },
+          status: "waiting_for_fulfillment_operator",
+          context: { riskFlags: ["existing"], source: "fulfillment-operator-tool" },
         });
 
         const updated = yield* lifecycle.escalateToHuman({
           ticketId: created.id,
           tenantId: TenantId("tenant-a"),
-          actor: { type: "system", id: "supplier-notify" },
-          reason: "supplier_unreachable",
-          riskFlag: "supplier_unreachable",
-          onlyFromStatus: "waiting_for_supplier",
-          details: { escalationId: "e-cap", supplierEmail: "wh@x.com" },
+          actor: { type: "system", id: "fulfillment-operator-notify" },
+          reason: "fulfillment_operator_unreachable",
+          riskFlag: "fulfillment_operator_unreachable",
+          onlyFromStatus: "waiting_for_fulfillment_operator",
+          details: { escalationId: "e-cap", fulfillmentOperatorEmail: "wh@x.com" },
         });
 
         const fetched = yield* tickets.getById(created.id, TenantId("tenant-a"));
@@ -79,19 +79,19 @@ describe("TicketLifecycleWriter", () => {
 
     expect(out.updated.status).toBe("human_takeover");
     expect(out.fetched.status).toBe("human_takeover");
-    expect(out.fetched.context["source"]).toBe("supplier-tool");
+    expect(out.fetched.context["source"]).toBe("fulfillment-operator-tool");
     expect(out.fetched.context["riskFlags"]).toEqual([
       "existing",
-      "supplier_unreachable",
+      "fulfillment_operator_unreachable",
     ]);
     expect(out.entries).toHaveLength(1);
     expect(out.entries[0]).toMatchObject({
-      actor: { type: "system", id: "supplier-notify" },
+      actor: { type: "system", id: "fulfillment-operator-notify" },
       action: "ticket.escalated_to_human",
       details: {
-        reason: "supplier_unreachable",
+        reason: "fulfillment_operator_unreachable",
         escalationId: "e-cap",
-        supplierEmail: "wh@x.com",
+        fulfillmentOperatorEmail: "wh@x.com",
       },
     });
   });
@@ -113,10 +113,10 @@ describe("TicketLifecycleWriter", () => {
         const updated = yield* lifecycle.escalateToHuman({
           ticketId: created.id,
           tenantId: TenantId("tenant-a"),
-          actor: { type: "system", id: "supplier-notify" },
-          reason: "supplier_unreachable",
-          riskFlag: "supplier_unreachable",
-          onlyFromStatus: "waiting_for_supplier",
+          actor: { type: "system", id: "fulfillment-operator-notify" },
+          reason: "fulfillment_operator_unreachable",
+          riskFlag: "fulfillment_operator_unreachable",
+          onlyFromStatus: "waiting_for_fulfillment_operator",
           details: { escalationId: "e-cap" },
         });
 
@@ -310,7 +310,7 @@ describe("TicketLifecycleWriter", () => {
     });
   });
 
-  it("parks tickets for customer and supplier waits with domain audit rows", async () => {
+  it("parks tickets for customer and fulfillmentOperator waits with domain audit rows", async () => {
     const out = await run(
       Effect.gen(function* () {
         const tickets = yield* TicketRepository;
@@ -322,7 +322,7 @@ describe("TicketLifecycleWriter", () => {
           currentAgentId: AgentId("order-status-agent"),
           status: "in_progress",
         });
-        const supplierTicket = yield* tickets.create({
+        const fulfillmentOperatorTicket = yield* tickets.create({
           tenantId: TenantId("tenant-a"),
           channel: "email",
           currentAgentId: AgentId("missing-package-agent"),
@@ -336,21 +336,21 @@ describe("TicketLifecycleWriter", () => {
           tool: "conversation.ask_customer",
           callId: "call-customer",
         });
-        const supplier = yield* lifecycle.parkWaitingForSupplier({
-          ticketId: supplierTicket.id,
+        const fulfillmentOperator = yield* lifecycle.parkWaitingForFulfillmentOperator({
+          ticketId: fulfillmentOperatorTicket.id,
           tenantId: TenantId("tenant-a"),
           agentId: AgentId("missing-package-agent"),
-          tool: "supplier.escalate",
-          callId: "call-supplier",
+          tool: "fulfillment_operator.escalate",
+          callId: "call-fulfillmentOperator",
         });
 
         return {
           customer,
-          supplier,
+          fulfillmentOperator,
           customerEntries: yield* audit.forTicket(customerTicket.id, {
             tenantId: TenantId("tenant-a"),
           }),
-          supplierEntries: yield* audit.forTicket(supplierTicket.id, {
+          fulfillmentOperatorEntries: yield* audit.forTicket(fulfillmentOperatorTicket.id, {
             tenantId: TenantId("tenant-a"),
           }),
         };
@@ -358,20 +358,20 @@ describe("TicketLifecycleWriter", () => {
     );
 
     expect(out.customer.status).toBe("waiting_for_customer");
-    expect(out.supplier.status).toBe("waiting_for_supplier");
+    expect(out.fulfillmentOperator.status).toBe("waiting_for_fulfillment_operator");
     expect(out.customerEntries[0]).toMatchObject({
       actor: { type: "agent", id: "order-status-agent" },
       action: "ticket.waiting_for_customer",
       details: { tool: "conversation.ask_customer", callId: "call-customer" },
     });
-    expect(out.supplierEntries[0]).toMatchObject({
+    expect(out.fulfillmentOperatorEntries[0]).toMatchObject({
       actor: { type: "agent", id: "missing-package-agent" },
-      action: "ticket.waiting_for_supplier",
-      details: { tool: "supplier.escalate", callId: "call-supplier" },
+      action: "ticket.waiting_for_fulfillment_operator",
+      details: { tool: "fulfillment_operator.escalate", callId: "call-fulfillmentOperator" },
     });
   });
 
-  it("manually parks a live ticket for a supplier with a user-actor audit row", async () => {
+  it("manually parks a live ticket for a fulfillmentOperator with a user-actor audit row", async () => {
     const out = await run(
       Effect.gen(function* () {
         const tickets = yield* TicketRepository;
@@ -384,11 +384,11 @@ describe("TicketLifecycleWriter", () => {
           status: "in_progress",
         });
 
-        const outcome = yield* lifecycle.parkWaitingForSupplierManually({
+        const outcome = yield* lifecycle.parkWaitingForFulfillmentOperatorManually({
           ticketId: created.id,
           tenantId: TenantId("tenant-a"),
           actor: { type: "user", id: "manager-1" },
-          reason: "escalated to supplier from dashboard",
+          reason: "escalated to fulfillment partner from dashboard",
           escalationId: "esc-1",
         });
 
@@ -404,17 +404,17 @@ describe("TicketLifecycleWriter", () => {
 
     expect(out.outcome).toEqual({
       kind: "parked",
-      toStatus: "waiting_for_supplier",
+      toStatus: "waiting_for_fulfillment_operator",
     });
-    expect(out.fetched.status).toBe("waiting_for_supplier");
+    expect(out.fetched.status).toBe("waiting_for_fulfillment_operator");
     expect(out.entries[0]).toMatchObject({
       actor: { type: "user", id: "manager-1" },
-      action: "ticket.waiting_for_supplier",
+      action: "ticket.waiting_for_fulfillment_operator",
       details: { escalationId: "esc-1" },
     });
   });
 
-  it("manual supplier park bridges from human takeover (never a direct jump)", async () => {
+  it("manual fulfillmentOperator park bridges from human takeover (never a direct jump)", async () => {
     const out = await run(
       Effect.gen(function* () {
         const tickets = yield* TicketRepository;
@@ -426,11 +426,11 @@ describe("TicketLifecycleWriter", () => {
           status: "human_takeover",
         });
 
-        const outcome = yield* lifecycle.parkWaitingForSupplierManually({
+        const outcome = yield* lifecycle.parkWaitingForFulfillmentOperatorManually({
           ticketId: created.id,
           tenantId: TenantId("tenant-a"),
           actor: { type: "user", id: "manager-1" },
-          reason: "escalated to supplier from dashboard",
+          reason: "escalated to fulfillment partner from dashboard",
           escalationId: "esc-2",
         });
 
@@ -443,12 +443,12 @@ describe("TicketLifecycleWriter", () => {
 
     expect(out.outcome).toEqual({
       kind: "parked",
-      toStatus: "waiting_for_supplier",
+      toStatus: "waiting_for_fulfillment_operator",
     });
-    expect(out.fetched.status).toBe("waiting_for_supplier");
+    expect(out.fetched.status).toBe("waiting_for_fulfillment_operator");
   });
 
-  it("manual supplier park keeps waiting_for_approval as the primary wait", async () => {
+  it("manual fulfillmentOperator park keeps waiting_for_approval as the primary wait", async () => {
     const out = await run(
       Effect.gen(function* () {
         const tickets = yield* TicketRepository;
@@ -461,11 +461,11 @@ describe("TicketLifecycleWriter", () => {
           status: "waiting_for_approval",
         });
 
-        const outcome = yield* lifecycle.parkWaitingForSupplierManually({
+        const outcome = yield* lifecycle.parkWaitingForFulfillmentOperatorManually({
           ticketId: created.id,
           tenantId: TenantId("tenant-a"),
           actor: { type: "user", id: "manager-1" },
-          reason: "escalated to supplier from dashboard",
+          reason: "escalated to fulfillment partner from dashboard",
           escalationId: "esc-3",
         });
 
@@ -480,7 +480,7 @@ describe("TicketLifecycleWriter", () => {
     );
 
     // Approval wins the single primary status under concurrent waits; the open
-    // escalation row carries the supplier wait on its own. Audit still records
+    // escalation row carries the fulfillmentOperator wait on its own. Audit still records
     // the escalation.
     expect(out.outcome).toEqual({
       kind: "parked",
@@ -488,12 +488,12 @@ describe("TicketLifecycleWriter", () => {
     });
     expect(out.fetched.status).toBe("waiting_for_approval");
     expect(out.entries[0]).toMatchObject({
-      action: "ticket.waiting_for_supplier",
+      action: "ticket.waiting_for_fulfillment_operator",
       details: { escalationId: "esc-3" },
     });
   });
 
-  it("manual supplier park refuses an illegal transition without writing", async () => {
+  it("manual fulfillmentOperator park refuses an illegal transition without writing", async () => {
     const out = await run(
       Effect.gen(function* () {
         const tickets = yield* TicketRepository;
@@ -506,11 +506,11 @@ describe("TicketLifecycleWriter", () => {
           status: "failed",
         });
 
-        const outcome = yield* lifecycle.parkWaitingForSupplierManually({
+        const outcome = yield* lifecycle.parkWaitingForFulfillmentOperatorManually({
           ticketId: created.id,
           tenantId: TenantId("tenant-a"),
           actor: { type: "user", id: "manager-1" },
-          reason: "escalated to supplier from dashboard",
+          reason: "escalated to fulfillment partner from dashboard",
           escalationId: "esc-4",
         });
 

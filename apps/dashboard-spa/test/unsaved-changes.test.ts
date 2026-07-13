@@ -60,7 +60,7 @@ describe("resolutionPolicySnapshot", () => {
     [fieldName("delivery_issue", "__label"), "Delivery problem"],
     [fieldName("delivery_issue", "__recognition"), "lost / stuck"],
     [fieldName("delivery_issue", "enabled"), "on"],
-    [fieldName("delivery_issue", "supplierMode"), "none"],
+    [fieldName("delivery_issue", "fulfillmentOperatorMode"), "none"],
     [fieldName("delivery_issue", "notes"), "check tracking first"],
   ];
 

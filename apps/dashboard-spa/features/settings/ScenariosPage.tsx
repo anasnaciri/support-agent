@@ -38,7 +38,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   PERMISSION_OPTIONS,
   REMEDY_ACTIONS,
-  SUPPLIER_MODE_OPTIONS,
+  FULFILLMENT_OPERATOR_MODE_OPTIONS,
   deniedActionsFor,
 } from "@/lib/resolution-action-labels";
 import {
@@ -846,7 +846,7 @@ interface CustomCard {
  * they apply are immutable, forced server-side) and carry those values as
  * hidden inputs. Custom cards make the name + recognition editable and add a
  * remove button. The editable fields — which remedy actions the agent may take
- * and whether each needs approval, supplier handling, the Active toggle, and
+ * and whether each needs approval, fulfillment partner handling, the Active toggle, and
  * free-text notes — are identical for both.
  */
 export function ScenarioCard({
@@ -865,7 +865,7 @@ export function ScenarioCard({
   const byTool = new Map(
     (scenario?.enabledActions ?? []).map((a) => [a.tool, a.permission]),
   );
-  const defaultSupplierMode = scenario?.supplierMode ?? "none";
+  const defaultFulfillmentOperatorMode = scenario?.fulfillmentOperatorMode ?? "none";
 
   // The form is uncontrolled (it submits via FormData), but the playbook warning
   // has to react to these two the moment they change: a note that names an action
@@ -873,8 +873,8 @@ export function ScenarioCard({
   const [enabledTools, setEnabledTools] = useState<ReadonlySet<string>>(
     () => new Set(byTool.keys()),
   );
-  const [supplierMode, setSupplierMode] = useState(defaultSupplierMode);
-  const deniedActions = deniedActionsFor(enabledTools, supplierMode);
+  const [fulfillmentOperatorMode, setFulfillmentOperatorMode] = useState(defaultFulfillmentOperatorMode);
+  const deniedActions = deniedActionsFor(enabledTools, fulfillmentOperatorMode);
 
   const toggleTool = (tool: string, on: boolean) =>
     setEnabledTools((prev) => {
@@ -1022,19 +1022,19 @@ export function ScenarioCard({
 
         <Separator />
 
-        {/* Supplier handling. */}
+        {/* Fulfillment partner handling. */}
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium">
-            When a supplier is involved
+            When a fulfillment partner is involved
           </legend>
-          {SUPPLIER_MODE_OPTIONS.map((o) => (
+          {FULFILLMENT_OPERATOR_MODE_OPTIONS.map((o) => (
             <label key={o.value} className="flex items-start gap-2">
               <input
                 type="radio"
-                name={fieldName(formKey, "supplierMode")}
+                name={fieldName(formKey, "fulfillmentOperatorMode")}
                 value={o.value}
-                checked={supplierMode === o.value}
-                onChange={() => setSupplierMode(o.value)}
+                checked={fulfillmentOperatorMode === o.value}
+                onChange={() => setFulfillmentOperatorMode(o.value)}
                 className="mt-0.5 size-4 border-input accent-primary"
               />
               <span className="text-sm">
@@ -1069,7 +1069,7 @@ export function ScenarioCard({
 
 /**
  * The scenario editor. Built-in cards are fixed; merchants can add their own
- * scenarios (name + when-it-applies + the same action/supplier/notes controls)
+ * scenarios (name + when-it-applies + the same action/fulfillment-operator/notes controls)
  * and remove the custom ones. A hidden manifest lists every card's form key so
  * the submit handler can reconstruct the list (built-ins, existing customs, and
  * freshly-added `__new_*` cards alike) from the submitted FormData.

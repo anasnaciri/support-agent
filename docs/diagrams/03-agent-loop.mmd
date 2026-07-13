@@ -13,7 +13,7 @@ flowchart TD
     FMR --> FMC
 
     D -->|handoff| HO["swap agent (allowlist), continue"]
-    D -->|"wait_for_customer / escalate_supplier"| HN["human_takeover ('not wired')"]:::warn
+    D -->|"wait_for_customer / escalate_fulfillment_operator"| HN["human_takeover ('not wired')"]:::warn
     D -->|tool_call| TC["push assistant msg; handoff pseudo-tool?; tryGet; decode schema"]
 
     TC --> C2{"C2 marker dedup (sideEffect != none)"}
@@ -24,7 +24,7 @@ flowchart TD
     PERM -->|ask| ASK["create approval + park + audit in 1 tx; email/push best-effort; PausedWaitingForApproval"]
     PERM -->|allow| EXE["EXECUTE outside tx (Effect.timeout if declared); audit + C2 marker in 1 tx"]
     EXE -->|ask_customer| WC["waiting_for_customer"]
-    EXE -->|"supplier.escalate escalated"| WS["waiting_for_supplier"]
+    EXE -->|"fulfillment_operator.escalate escalated"| WS["waiting_for_fulfillment_operator"]
     EXE -->|"reply SEND failure"| RPARK["parkForReplyDeliveryFailure, human_takeover (NEVER resolves)"]
     EXE -->|else| PUSH["push tool result, loop"]
 
@@ -34,7 +34,7 @@ flowchart TD
     E2["E2: NO check that a reply was actually sent, ticket can resolve in silence"]:::hi
     E4["E4: hung provider pins tick + advisory lock"]:::med
     E7["E7: unclassified deterministic 400 burns 5 retries"]:::med
-    E13["E13: this decision dead-ends, but the supplier.escalate TOOL works"]:::lo
+    E13["E13: this decision dead-ends, but the fulfillment_operator.escalate TOOL works"]:::lo
     C2 -.-> E1
     FMR -.-> E2
     LLM -.-> E4

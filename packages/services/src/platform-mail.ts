@@ -79,17 +79,17 @@ export interface SendMerchantNotificationInput {
   readonly ticketId?: string;
 }
 
-export interface SendSupplierEscalationInput {
+export interface SendFulfillmentOperatorEscalationInput {
   readonly tenantId: TenantId;
   /** The escalation id — for a stable Resend idempotency key. */
   readonly escalationId: string;
   /**
-   * The supplier's email — passed directly (not resolved from the tenant's
+   * The fulfillmentOperator's email — passed directly (not resolved from the tenant's
    * notificationEmail like the approval/connector mail), because the recipient
-   * is the external supplier, not the merchant operator.
+   * is the external fulfillmentOperator, not the merchant operator.
    */
-  readonly supplierEmail: string;
-  /** Deep link to the supplier's ticket in the portal, or null if unconfigured. */
+  readonly fulfillmentOperatorEmail: string;
+  /** Deep link to the fulfillmentOperator's ticket in the portal, or null if unconfigured. */
   readonly portalUrl: string | null;
   /** The agent's PII-free problem statement (never carries customer data). */
   readonly problem: string;
@@ -115,13 +115,13 @@ export class PlatformMailService extends Context.Tag("PlatformMailService")<
       input: SendConnectorAlertInput,
     ) => Effect.Effect<void, PlatformMailError>;
     /**
-     * Notify a supplier that a ticket was escalated to them, with a link to the
-     * supplier portal. The durable outbox sweep (worker) calls this; the
+     * Notify a fulfillmentOperator that a ticket was escalated to them, with a link to the
+     * fulfillmentOperator portal. The durable outbox sweep (worker) calls this; the
      * escalation row's notified_at ledger drives retry, so a transient failure
      * here just means the next sweep pass re-sends.
      */
-    readonly sendSupplierEscalation: (
-      input: SendSupplierEscalationInput,
+    readonly sendFulfillmentOperatorEscalation: (
+      input: SendFulfillmentOperatorEscalationInput,
     ) => Effect.Effect<void, PlatformMailError>;
     /**
      * Email channel of a merchant heads-up (the `merchant.notify` tool +
@@ -152,8 +152,8 @@ export type PlatformMailTestRecord =
       readonly input: SendConnectorAlertInput;
     }
   | {
-      readonly kind: "supplier-escalation";
-      readonly input: SendSupplierEscalationInput;
+      readonly kind: "fulfillment-operator-escalation";
+      readonly input: SendFulfillmentOperatorEscalationInput;
     }
   | {
       readonly kind: "merchant-notification";
@@ -241,7 +241,7 @@ export const makePlatformMailServiceTest = (
             return Effect.succeed(undefined);
           },
         ),
-      sendSupplierEscalation: (input) =>
+      sendFulfillmentOperatorEscalation: (input) =>
         Effect.suspend(
           (): Effect.Effect<void, PlatformMailError> => {
             if (fixtures.unconfiguredFor?.has(input.tenantId)) {
@@ -257,7 +257,7 @@ export const makePlatformMailServiceTest = (
                 }),
               );
             }
-            sent.push({ kind: "supplier-escalation", input });
+            sent.push({ kind: "fulfillment-operator-escalation", input });
             return Effect.succeed(undefined);
           },
         ),

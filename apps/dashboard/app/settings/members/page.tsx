@@ -344,14 +344,14 @@ export default async function MembersPage({ searchParams }: PageProps) {
                         </div>
                       </fieldset>
                     ))}
-                    {!role.isOwner ? (
-                      <Button type="submit" variant="outline" size="sm">
-                        Save permissions
-                      </Button>
-                    ) : (
+                    {role.isOwner ? (
                       <p className="text-xs text-muted-foreground">
                         The Owner role always has every permission.
                       </p>
+                    ) : (
+                      <Button type="submit" variant="outline" size="sm">
+                        Save permissions
+                      </Button>
                     )}
                   </form>
                 </div>

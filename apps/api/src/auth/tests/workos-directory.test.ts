@@ -142,7 +142,7 @@ describe("makeStaticWorkosOrganizationDirectory (test/inject)", () => {
 // The org-admin directory WRITES to WorkOS (unlike the read-only user/org
 // directories): create an org for a self-service signup, add the founder,
 // resolve their existing memberships (idempotent onboarding), and send member/
-// supplier invitations server-side so the Vite SPA — which has no WORKOS_API_KEY
+// fulfillmentOperator invitations server-side so the Vite SPA — which has no WORKOS_API_KEY
 // — no longer mints invitation ids in the browser. Same soft-fail contract:
 // a create/invite that fails returns null (membership → false, list → []) so the
 // caller decides (503 / retry / degrade) rather than the layer throwing.

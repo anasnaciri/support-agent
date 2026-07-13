@@ -98,7 +98,14 @@ export const renameRoleAction = async (formData: FormData): Promise<void> => {
   const ctx = await requirePermission("members.manage");
   const roleId = str(formData, "roleId");
   const name = str(formData, "name");
-  if (roleId && name) await api.renameRole(ctx, roleId, name);
+  if (roleId && name) {
+    const { status, body } = await api.renameRole(ctx, roleId, name);
+    if (status !== 200) {
+      const reason =
+        (body as { error?: string } | null)?.error ?? "rename_failed";
+      back(`error=${encodeURIComponent(reason)}`);
+    }
+  }
   revalidatePath(PATH);
   back(`ok=role_renamed&role=${encodeURIComponent(roleId)}`);
 };
@@ -128,7 +135,18 @@ export const saveRolePermissionsAction = async (
     .getAll("permissionIds")
     .filter((v): v is string => typeof v === "string")
     .filter(isRbacPermissionId);
-  if (roleId) await api.setRolePermissions(ctx, roleId, permissionIds);
+  if (roleId) {
+    const { status, body } = await api.setRolePermissions(
+      ctx,
+      roleId,
+      permissionIds,
+    );
+    if (status !== 200) {
+      const reason =
+        (body as { error?: string } | null)?.error ?? "permissions_failed";
+      back(`error=${encodeURIComponent(reason)}`);
+    }
+  }
   revalidatePath(PATH);
   back(`ok=permissions_saved&role=${encodeURIComponent(roleId)}`);
 };

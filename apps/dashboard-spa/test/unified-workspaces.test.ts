@@ -14,22 +14,22 @@ const ws = (id: string, name: string): WorkspaceSummary => ({
 
 describe("mergeWorkspaces", () => {
   const merchant = [ws("m1", "My Store"), ws("m2", "Second Store")];
-  const supplier = [ws("s1", "Vendor A"), ws("s2", "Vendor B")];
+  const fulfillmentOperator = [ws("s1", "Vendor A"), ws("s2", "Vendor B")];
 
-  it("tags merchant + supplier entries and lists merchant first", () => {
-    const merged = mergeWorkspaces(merchant, supplier, true);
+  it("tags merchant + fulfillment partner entries and lists merchant first", () => {
+    const merged = mergeWorkspaces(merchant, fulfillmentOperator, true);
     expect(merged.map((w) => [w.id, w.kind])).toEqual([
       ["m1", "merchant"],
       ["m2", "merchant"],
-      ["s1", "supplier"],
-      ["s2", "supplier"],
+      ["s1", "fulfillment_operator"],
+      ["s2", "fulfillment_operator"],
     ]);
   });
 
-  it("drops the merchant portion for a pure supplier (includeMerchant=false)", () => {
-    const merged = mergeWorkspaces(merchant, supplier, false);
+  it("drops the merchant portion for a pure fulfillment partner (includeMerchant=false)", () => {
+    const merged = mergeWorkspaces(merchant, fulfillmentOperator, false);
     expect(merged.map((w) => w.id)).toEqual(["s1", "s2"]);
-    expect(merged.every((w) => w.kind === "supplier")).toBe(true);
+    expect(merged.every((w) => w.kind === "fulfillment_operator")).toBe(true);
   });
 
   it("dedupes a workspace present in both lists — merchant wins", () => {
@@ -39,7 +39,7 @@ describe("mergeWorkspaces", () => {
   });
 
   it("routes each kind to its own surface home", () => {
-    expect(surfaceHomeForKind("supplier")).toBe("/supplier/tickets");
+    expect(surfaceHomeForKind("fulfillment_operator")).toBe("/fulfillment-operator/tickets");
     expect(surfaceHomeForKind("merchant")).toBe("/");
   });
 });

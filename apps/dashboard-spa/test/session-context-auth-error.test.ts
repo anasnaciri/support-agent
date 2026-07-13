@@ -83,29 +83,29 @@ describe("workspaceBootstrapRedirectTarget", () => {
 });
 
 describe("pickActiveWorkspaceForPath", () => {
-  it("selects the supplier workspace when a supplier portal deep link has no stored workspace", () => {
+  it("selects the fulfillment partner workspace when a fulfillment partner portal deep link has no stored workspace", () => {
     const active = pickActiveWorkspaceForPath(
-      [workspace("merchant-1", "merchant"), workspace("supplier-1", "supplier")],
+      [workspace("merchant-1", "merchant"), workspace("fulfillment-operator-1", "fulfillment_operator")],
       undefined,
-      "/supplier/tickets",
+      "/fulfillment-operator/tickets",
     );
 
-    expect(active?.id).toBe("supplier-1");
+    expect(active?.id).toBe("fulfillment-operator-1");
   });
 
-  it("overrides a stored merchant workspace on supplier portal routes", () => {
+  it("overrides a stored merchant workspace on fulfillment partner portal routes", () => {
     const active = pickActiveWorkspaceForPath(
-      [workspace("merchant-1", "merchant"), workspace("supplier-1", "supplier")],
+      [workspace("merchant-1", "merchant"), workspace("fulfillment-operator-1", "fulfillment_operator")],
       "merchant-1",
-      "/supplier/tickets",
+      "/fulfillment-operator/tickets",
     );
 
-    expect(active?.id).toBe("supplier-1");
+    expect(active?.id).toBe("fulfillment-operator-1");
   });
 
   it("keeps the normal default selection on merchant routes", () => {
     const active = pickActiveWorkspaceForPath(
-      [workspace("merchant-1", "merchant"), workspace("supplier-1", "supplier")],
+      [workspace("merchant-1", "merchant"), workspace("fulfillment-operator-1", "fulfillment_operator")],
       undefined,
       "/",
     );
@@ -113,11 +113,11 @@ describe("pickActiveWorkspaceForPath", () => {
     expect(active?.id).toBe("merchant-1");
   });
 
-  it("falls back to the normal active workspace when a supplier route has no supplier workspace", () => {
+  it("falls back to the normal active workspace when a fulfillment partner route has no fulfillment partner workspace", () => {
     const active = pickActiveWorkspaceForPath(
       [workspace("merchant-1", "merchant")],
       undefined,
-      "/supplier/tickets",
+      "/fulfillment-operator/tickets",
     );
 
     expect(active?.id).toBe("merchant-1");

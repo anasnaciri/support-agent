@@ -75,7 +75,7 @@ export class OrderUpdateFailed extends Data.TaggedError("OrderUpdateFailed")<{
 
 /**
  * Shopify refused to update a fulfillment's tracking info (currently: the
- * supplier portal's tracking-number edit via `fulfillmentTrackingInfoUpdate`).
+ * fulfillment partner portal's tracking-number edit via `fulfillmentTrackingInfoUpdate`).
  * Common causes (from `userErrors[].message`): the fulfillment no longer
  * exists, or the app lacks Shopify fulfillment-order write scopes / the
  * installing user lacks `fulfill_and_ship_orders`. NOTE the payload's

@@ -14,7 +14,7 @@ const TICKET_STATUS_LABELS: Readonly<Record<string, string>> = {
   triaging: "Reviewing",
   in_progress: "In progress",
   waiting_for_customer: "Waiting on customer",
-  waiting_for_supplier: "Waiting on supplier",
+  waiting_for_fulfillment_operator: "Waiting on fulfillment partner",
   waiting_for_approval: "Needs approval",
   approved_action_running: "Finishing approved action",
   resolved: "Resolved",
@@ -64,8 +64,8 @@ const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = {
   "conversation.ask_customer": "Ask the customer a question",
   "refund.create": "Issue a refund",
   "order.cancel": "Cancel the order",
-  "supplier.add_sheet_row": "Escalate to supplier",
-  "supplier.escalate": "Escalate to supplier",
+  "fulfillment_operator.add_sheet_row": "Escalate to fulfillment partner",
+  "fulfillment_operator.escalate": "Escalate to fulfillment partner",
   "merchant.notify": "Send you a heads-up",
 };
 

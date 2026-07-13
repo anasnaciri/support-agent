@@ -63,7 +63,7 @@ flowchart LR
         RD["reply-delivery-retry<br/>re-send failed replies · auto-resolve"]
         TS["timer-sweep"]
         REN["gmail / graph / imap renewals"]
-        SN["supplier-notify outbox"]
+        SN["fulfillment-operator-notify outbox"]
         RET["retention-sweep"]
         LC["llm-credits"]
     end
@@ -84,7 +84,7 @@ flowchart TD
 
     KIND -->|approval.approved| AA["approval-resume"]
     KIND -->|approval.rejected| AR["→ human_takeover"]
-    KIND -->|"inbound / timer / supplier / resumed"| ID
+    KIND -->|"inbound / timer / fulfillment operator / resumed"| ID
 
     subgraph resume["approval.approved resume"]
         AA --> AA1{"status == resolved?"}
@@ -109,8 +109,8 @@ flowchart TD
     G1 -->|yes| P1["PausedWaitingForApproval"]
     G1 -->|no| G2{"status ==<br/>human_takeover?"}
     G2 -->|yes| P2["PausedForHumanTakeover"]
-    G2 -->|no| G3{"status ==<br/>waiting_for_supplier<br/>(non-passthrough)?"}
-    G3 -->|yes| P3["PausedWaitingForSupplier"]
+    G2 -->|no| G3{"status ==<br/>waiting_for_fulfillment_operator<br/>(non-passthrough)?"}
+    G3 -->|yes| P3["PausedWaitingForFulfillmentOperator"]
     G3 -->|no| RO{"resolved + inbound reply?"}
     RO -->|yes| ROPEN["reopen: resolved → in_progress"]
     RO -->|no| LOOP["AGENT LOOP →"]
@@ -140,8 +140,8 @@ flowchart TD
     FMR -. "E2: NO check that a reply was actually sent →<br/>ticket can resolve in silence" .-> FMR
 
     D -->|handoff| HO["swap agent (allowlist) · continue"]
-    D -->|"wait_for_customer / escalate_supplier"| HN["→ human_takeover ('not wired')"]:::warn
-    HN -. "E13: decision dead-ends, but supplier.escalate TOOL works" .-> HN
+    D -->|"wait_for_customer / escalate_fulfillment_operator"| HN["→ human_takeover ('not wired')"]:::warn
+    HN -. "E13: decision dead-ends, but fulfillment_operator.escalate TOOL works" .-> HN
     D -->|tool_call| TC
 
     subgraph tool["tool_call path"]
@@ -153,7 +153,7 @@ flowchart TD
         PERM -->|ask| ASK["create approval + park + audit (1 tx)<br/>+ email / push (best-effort) → PausedWaitingForApproval"]
         PERM -->|allow| EXE["EXECUTE outside tx (Effect.timeout if declared)<br/>→ audit + C2 marker (1 tx)"]
         EXE -->|ask_customer| WC["→ waiting_for_customer"]
-        EXE -->|"supplier.escalate {escalated}"| WS["→ waiting_for_supplier"]
+        EXE -->|"fulfillment_operator.escalate {escalated}"| WS["→ waiting_for_fulfillment_operator"]
         EXE -->|"reply SEND failure"| RPARK["parkForReplyDeliveryFailure → human_takeover<br/>(NEVER resolves)"]
         EXE -->|else| PUSH["push tool result · loop"]
     end
@@ -175,7 +175,7 @@ stateDiagram-v2
     new --> in_progress: agent loop
     in_progress --> waiting_for_approval: tool perm = ask
     in_progress --> waiting_for_customer: conversation.ask_customer
-    in_progress --> waiting_for_supplier: supplier.escalate {escalated}
+    in_progress --> waiting_for_fulfillment_operator: fulfillment_operator.escalate {escalated}
     in_progress --> resolved: final_message
     in_progress --> human_takeover: escalate (creds / max_turns / not-wired / reply-send fail)
 
@@ -184,8 +184,8 @@ stateDiagram-v2
     waiting_for_approval --> waiting_for_approval: stray event HELD
 
     waiting_for_customer --> in_progress: customer.replied
-    waiting_for_supplier --> in_progress: supplier.updated
-    waiting_for_supplier --> waiting_for_supplier: stray event HELD
+    waiting_for_fulfillment_operator --> in_progress: fulfillment_operator.updated
+    waiting_for_fulfillment_operator --> waiting_for_fulfillment_operator: stray event HELD
 
     human_takeover --> in_progress: dashboard "hand back" / reply delivered on retry
     human_takeover --> human_takeover: stray event HELD
@@ -221,7 +221,7 @@ Severity: 🔴 high · 🟠 medium · 🟡 lower.
 | **E10** | 🟡 | Reply-delivery cron marks a row **`sent` on "skip"** though nothing was sent (draft silently dropped, data reads "sent"); its auto-resolve runs **without the per-ticket advisory lock**. | ✅ |
 | **E11** | 🟡 | `ToolExecutionStore` / `ProcessedMessageStore` are optional — if a deploy forgets to wire them, **all dedup silently degrades** (same failure class as the connector-cron prod outage). No boot-time assertion. | ✅ |
 | **E12** | 🟡 | Dead-letter consumer looks up `message.received` tickets with `provider=undefined` (tickBody uses the parsed provider). If `findByThreadId` filters on provider, a dead-lettered inbound may not find its ticket → dangles un-parked. | 🔎 |
-| **E13** | 🟡 | The `escalate_supplier` / `wait_for_customer` *decision types* still dead-end to human ("not wired"), but supplier escalation is wired via the `supplier.escalate` *tool* — a model emitting the decision gets parked instead. | ✅ |
+| **E13** | 🟡 | The `escalate_fulfillment_operator` / `wait_for_customer` *decision types* still dead-end to human ("not wired"), but fulfillment operator escalation is wired via the `fulfillment_operator.escalate` *tool* — a model emitting the decision gets parked instead. | ✅ |
 
 ### Where to start
 **E1**, **E2**, **E3** have real customer/security impact and small, testable fixes:

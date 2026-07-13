@@ -10,7 +10,7 @@ import {
 import { ShopifyServiceTest } from "@support-agent/services";
 import {
   resolveCanonicalOrder,
-  supplierOrderProjection,
+  fulfillmentOperatorOrderProjection,
 } from "../escalation-projection.js";
 
 const buildFulfillment = (
@@ -55,9 +55,9 @@ const buildOrder = (over: Partial<ShopifyOrder> = {}): ShopifyOrder => ({
   ...over,
 });
 
-describe("supplierOrderProjection", () => {
+describe("fulfillmentOperatorOrderProjection", () => {
   it("is all-null without an order", () => {
-    expect(supplierOrderProjection(null)).toEqual({
+    expect(fulfillmentOperatorOrderProjection(null)).toEqual({
       orderRef: null,
       shipCity: null,
       shipCountry: null,
@@ -73,7 +73,7 @@ describe("supplierOrderProjection", () => {
         buildFulfillment(["NEW-1", "NEW-2"], "2026-05-16T00:00:00.000Z"),
       ],
     });
-    expect(supplierOrderProjection(order)).toEqual({
+    expect(fulfillmentOperatorOrderProjection(order)).toEqual({
       orderRef: "#1001",
       shipCity: "Lisbon",
       shipCountry: "Portugal",
@@ -84,7 +84,7 @@ describe("supplierOrderProjection", () => {
 
   it("nulls the address/tracking slots it can't fill", () => {
     const order = buildOrder({ shippingAddress: null, fulfillments: [] });
-    expect(supplierOrderProjection(order)).toEqual({
+    expect(fulfillmentOperatorOrderProjection(order)).toEqual({
       orderRef: "#1001",
       shipCity: null,
       shipCountry: null,
@@ -109,9 +109,9 @@ describe("resolveCanonicalOrder", () => {
     expect(result?.id).toBe(gid);
   });
 
-  it("never falls back to the customer's quoted ref (supplier-facing data)", async () => {
+  it("never falls back to the customer's quoted ref (fulfillment-partner-facing data)", async () => {
     // A quoted ref is an UNTRUSTED customer hint — resolving it fuzzily could
-    // point the supplier at someone else's order. Canonical GID or nothing.
+    // point the fulfillment partner at someone else's order. Canonical GID or nothing.
     const env = ShopifyServiceTest({
       ordersByName: new Map([["#1001", buildOrder()]]),
     });

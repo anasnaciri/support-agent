@@ -145,7 +145,7 @@ export const defaultDiscountPolicy: DiscountPolicy = {
 // request, ...). For each, the merchant declares — as DATA, not code — which
 // remedy tools the scenario-resolution agent may use and whether each is
 // automatic or needs human approval (`enabledActions`, the HARD gate), how to
-// handle the supplier (`supplierMode`), and free-text guidance (`notes`, the
+// handle the fulfillment operator (`fulfillmentOperatorMode`), and free-text guidance (`notes`, the
 // only soft, LLM-interpreted field). `recognition` is fed to triage so it can
 // match an inbound message to the scenario.
 //
@@ -162,7 +162,7 @@ export interface ScenarioAction {
   readonly permission: ScenarioActionPermission;
 }
 
-export type SupplierMode = "escalate_and_wait" | "notify_and_proceed" | "none";
+export type FulfillmentOperatorMode = "escalate_and_wait" | "notify_and_proceed" | "none";
 
 export interface ScenarioPolicy {
   /** Stable id. Built-ins are fixed; custom scenarios are merchant-defined. */
@@ -182,7 +182,7 @@ export interface ScenarioPolicy {
   readonly enabled?: boolean;
   /** Remedy tools this scenario may use + auto/ask each. Absent ⇒ denied. */
   readonly enabledActions: ReadonlyArray<ScenarioAction>;
-  readonly supplierMode: SupplierMode;
+  readonly fulfillmentOperatorMode: FulfillmentOperatorMode;
   /**
    * Free-text playbook (the soft layer). Stored with `@` Fact/doc refs and `/`
    * action refs; `resolveFactReferences` renders both into the prompt, and the
@@ -199,7 +199,7 @@ export interface ResolutionPolicy {
 /**
  * Seeded built-in scenarios, pre-filled to match today's specialist behavior.
  * Used as the defaults-on-read fallback when a tenant has never configured a
- * resolution policy. Money tools default to `ask` (gated); supplier handling
+ * resolution policy. Money tools default to `ask` (gated); fulfillment operator handling
  * mirrors today (delivery/damage escalate + wait). Baseline tools are omitted
  * on purpose (always-on).
  */
@@ -216,8 +216,8 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       // A status question that turns out to be a shipping problem is handled
       // by the GENERAL re-classification rule (the agent re-stamps
       // scenarioKey to delivery_issue and follows that playbook), so this
-      // scenario stays supplier-free for the plain answer-the-status case.
-      supplierMode: "none",
+      // scenario stays fulfillment operator-free for the plain answer-the-status case.
+      fulfillmentOperatorMode: "none",
       notes:
         "Look up the order, check tracking if available, and tell the customer the status. " +
         "Give them a real expectation rather than 'soon': this store ships orders in " +
@@ -236,7 +236,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       builtin: true,
       enabled: true,
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
-      supplierMode: "escalate_and_wait",
+      fulfillmentOperatorMode: "escalate_and_wait",
       notes:
         "Verify the carrier status first with /tracking.lookup. There is no fixed number of days " +
         "that counts as too long. This store treats a shipment as delayed once it has been in " +
@@ -249,13 +249,13 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "threshold, call /knowledge.search for the shipping policy's delivery window, and if that " +
         "documents none either, or either carrier number is null, you cannot confirm lateness, " +
         "so say so rather than asserting the order is on schedule. On a real delivery problem, " +
-        "escalate to the supplier to reship AND always send the customer a short reassuring reply " +
+        "escalate to the fulfillment operator to reship AND always send the customer a short reassuring reply " +
         'in the same run: "We are looking into it and will follow up," without promising a ' +
         "specific outcome yet. " +
         "Once the carrier's transitDays reaches @shipping.lost_after with the parcel still " +
         "undelivered, treat it as genuinely lost: stop waiting and make the customer whole with a " +
-        "reshipment via the supplier, or a refund if no replacement is possible. If there is no " +
-        "supplier, offer a refund, and tell the customer it takes @returns.refund_processing_time " +
+        "reshipment via the fulfillment operator, or a refund if no replacement is possible. If there is no " +
+        "fulfillment operator, offer a refund, and tell the customer it takes @returns.refund_processing_time " +
         "to appear.",
     },
     {
@@ -265,7 +265,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       builtin: true,
       enabled: true,
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
-      supplierMode: "escalate_and_wait",
+      fulfillmentOperatorMode: "escalate_and_wait",
       notes:
         "Damage claims need evidence. If the customer's message has NO photos of the damage, " +
         "use /conversation.ask_customer ONCE to ask for clear photos from a couple of angles plus " +
@@ -277,7 +277,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "(uncertain), do NOT accuse or deny the customer. Flag it for the store owner with " +
         "/merchant.notify and draft a softer reply that asks them to confirm the order and which item " +
         "is damaged, without committing to a refund amount yet. " +
-        "When the damage is verified (productMatch = match), prefer a replacement via the supplier; " +
+        "When the damage is verified (productMatch = match), prefer a replacement via the fulfillment operator; " +
         "refund only if no replacement is possible. On a multi-item order, refund only the damaged " +
         "line item: use that lineItems entry's unitPrice amount (times the affected quantity when " +
         "more than one unit is clearly damaged) as the partial refund amount for /refund.create; " +
@@ -298,7 +298,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       builtin: true,
       enabled: true,
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
-      supplierMode: "escalate_and_wait",
+      fulfillmentOperatorMode: "escalate_and_wait",
       notes:
         "Like a damage claim, the fix depends on seeing what arrived. If the message has NO photo of " +
         "the item received, use /conversation.ask_customer ONCE for a clear photo of what they got " +
@@ -309,7 +309,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "product). If you genuinely can't tell (uncertain), do NOT accuse or deny. Flag it for the " +
         "store owner with /merchant.notify and draft a softer reply asking them to confirm the order and " +
         "what they received. When it is clearly the wrong item this is OUR error: we cover return " +
-        "shipping, and the fix is to send the correct product. Escalate to the supplier to ship the " +
+        "shipping, and the fix is to send the correct product. Escalate to the fulfillment operator to ship the " +
         "right item and reassure the customer we are correcting it. Refund only if the correct item " +
         "can't be sent. On a multi-item order, refund only the wrong line item: use that lineItems " +
         "entry's unitPrice amount (times the affected quantity when more than one unit is clearly " +
@@ -329,7 +329,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         { tool: "refund.create", permission: "ask" },
         { tool: "discount.create", permission: "ask" },
       ],
-      supplierMode: "none",
+      fulfillmentOperatorMode: "none",
       notes:
         "Check the order and confirm the request against the store's return policy: returns are " +
         "accepted within @returns.return_window of delivery, so if it is past that window explain " +
@@ -354,7 +354,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       builtin: true,
       enabled: true,
       enabledActions: [{ tool: "order.cancel", permission: "ask" }],
-      supplierMode: "none",
+      fulfillmentOperatorMode: "none",
       notes:
         "Look up the order and check the store's cancellation policy with /knowledge.search. " +
         "An order is only cancellable while it is still in the warehouse, which is roughly " +
@@ -377,7 +377,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       enabledActions: [
         { tool: "order.update_shipping_address", permission: "ask" },
       ],
-      supplierMode: "escalate_and_wait",
+      fulfillmentOperatorMode: "escalate_and_wait",
       notes:
         "Look up the order first. The address is only editable until the order leaves the " +
         "warehouse, which is about @shipping.processing_time from when it was placed, so treat " +
@@ -387,7 +387,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "full new address (street, city, state/province, postal code, country) with " +
         "/conversation.ask_customer and update it once they reply. Never guess or fill in missing " +
         "parts yourself. If the order HAS already shipped, the address on the order can no longer " +
-        "redirect the parcel. Do not edit it; escalate to the supplier with the customer's new " +
+        "redirect the parcel. Do not edit it; escalate to the fulfillment operator with the customer's new " +
         "address and wait for their answer before promising the customer anything.",
     },
     {
@@ -397,7 +397,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       builtin: true,
       enabled: true,
       enabledActions: [],
-      supplierMode: "none",
+      fulfillmentOperatorMode: "none",
       notes:
         "Answer from the knowledge base and product catalog. The questions customers ask most " +
         "already have stated answers, so quote them instead of searching: orders ship in " +
@@ -409,7 +409,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
   ],
 };
 
-const isSupplierMode = (v: unknown): v is SupplierMode =>
+const isFulfillmentOperatorMode = (v: unknown): v is FulfillmentOperatorMode =>
   v === "escalate_and_wait" || v === "notify_and_proceed" || v === "none";
 
 /** Keep only well-formed `{ tool, permission }` actions; drop the rest. */
@@ -432,21 +432,21 @@ const decodeScenarioActions = (raw: unknown): ScenarioAction[] => {
   return enabledActions;
 };
 
-/** Decode one scenario; returns null when key/label/supplierMode are invalid. */
+/** Decode one scenario; returns null when key/label/fulfillment-operatorMode are invalid. */
 const decodeScenario = (raw: unknown): ScenarioPolicy | null => {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const key = r["key"];
   const label = r["label"];
   const builtin = r["builtin"];
-  const supplierMode = r["supplierMode"];
+  const fulfillmentOperatorMode = r["fulfillmentOperatorMode"];
   if (
     typeof key !== "string" ||
     key.length === 0 ||
     typeof label !== "string" ||
     label.length === 0 ||
     typeof builtin !== "boolean" ||
-    !isSupplierMode(supplierMode)
+    !isFulfillmentOperatorMode(fulfillmentOperatorMode)
   ) {
     return null;
   }
@@ -468,7 +468,7 @@ const decodeScenario = (raw: unknown): ScenarioPolicy | null => {
     builtin,
     enabled,
     enabledActions,
-    supplierMode,
+    fulfillmentOperatorMode,
     ...(typeof recognition === "string" && recognition.length > 0
       ? { recognition }
       : {}),
@@ -530,12 +530,12 @@ interface EditableScenarioFields {
   readonly recognition?: string;
   readonly enabled: boolean;
   readonly enabledActions: ReadonlyArray<ScenarioAction>;
-  readonly supplierMode: SupplierMode;
+  readonly fulfillmentOperatorMode: FulfillmentOperatorMode;
   readonly notes?: string;
 }
 
 /** Lenient row parse for the write path: tolerates an empty key (new custom)
- *  and an invalid supplierMode (defaults to none); never trusts `builtin`. */
+ *  and an invalid fulfillmentOperatorMode (defaults to none); never trusts `builtin`. */
 const extractScenarioRow = (raw: unknown): EditableScenarioFields | null => {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
@@ -554,7 +554,7 @@ const extractScenarioRow = (raw: unknown): EditableScenarioFields | null => {
     label,
     enabled: r["enabled"] !== false,
     enabledActions: decodeScenarioActions(r["enabledActions"]),
-    supplierMode: isSupplierMode(r["supplierMode"]) ? r["supplierMode"] : "none",
+    fulfillmentOperatorMode: isFulfillmentOperatorMode(r["fulfillmentOperatorMode"]) ? r["fulfillmentOperatorMode"] : "none",
     ...(recognition ? { recognition } : {}),
     ...(notes ? { notes } : {}),
   };
@@ -567,7 +567,7 @@ const extractScenarioRow = (raw: unknown): EditableScenarioFields | null => {
  *   - Built-ins are ALWAYS present (a merchant can't delete one) and their
  *     immutable fields (key/label/recognition/builtin) are forced from the
  *     seeded defaults; only the editable fields (enabled / enabledActions /
- *     supplierMode / notes) are taken from the body.
+ *     fulfillmentOperatorMode / notes) are taken from the body.
  *   - Custom scenarios are accepted with `builtin` forced to false, a label
  *     (required — blank ones are dropped), and a stable, unique, namespaced
  *     key: an already-assigned `custom_*` key is kept as-is (so renaming the
@@ -609,7 +609,7 @@ export const decodeResolutionPolicyUpdate = (raw: unknown): ResolutionPolicy => 
       builtin: true,
       enabled: sent ? sent.enabled : def.enabled !== false,
       enabledActions: sent ? sent.enabledActions : def.enabledActions,
-      supplierMode: sent ? sent.supplierMode : def.supplierMode,
+      fulfillmentOperatorMode: sent ? sent.fulfillmentOperatorMode : def.fulfillmentOperatorMode,
       ...(def.recognition ? { recognition: def.recognition } : {}),
       ...(notes ? { notes } : {}),
     });
@@ -626,7 +626,7 @@ export const decodeResolutionPolicyUpdate = (raw: unknown): ResolutionPolicy => 
       builtin: false,
       enabled: row.enabled,
       enabledActions: row.enabledActions,
-      supplierMode: row.supplierMode,
+      fulfillmentOperatorMode: row.fulfillmentOperatorMode,
       ...(row.recognition ? { recognition: row.recognition } : {}),
       ...(row.notes ? { notes: row.notes } : {}),
     });
@@ -643,8 +643,8 @@ export const decodeResolutionPolicyUpdate = (raw: unknown): ResolutionPolicy => 
 export const DEFAULT_RETENTION_DAYS = 365;
 
 /**
- * Per-tenant target for warehouse / supplier escalation rows written
- * by the `supplier.add_sheet_row` tool. When unset (`null`), agents
+ * Per-tenant target for warehouse / fulfillment operator escalation rows written
+ * by the `fulfillment_operator.add_sheet_row` tool. When unset (`null`), agents
  * that would otherwise escalate skip the sheet write and go straight
  * to their customer reply — the prompt is written to be robust to
  * missing config.
@@ -656,13 +656,13 @@ export const DEFAULT_RETENTION_DAYS = 365;
  * `description` is operator-visible context surfaced on the dashboard
  * settings page; it never reaches the agent prompt or the sheet itself.
  */
-export interface SupplierEscalationSheet {
+export interface FulfillmentOperatorEscalationSheet {
   readonly spreadsheetId: string;
   readonly range: string;
   readonly description: string | null;
 }
 
-export const defaultSupplierEscalationSheet: SupplierEscalationSheet | null =
+export const defaultFulfillmentOperatorEscalationSheet: FulfillmentOperatorEscalationSheet | null =
   null;
 
 /**
@@ -712,12 +712,12 @@ export class TenantSettings extends Data.Class<{
    */
   readonly retentionDays: number;
   /**
-   * Optional Google Sheet target for `supplier.add_sheet_row`. When
-   * null the agent runtime omits the supplier-escalation header from
+   * Optional Google Sheet target for `fulfillment_operator.add_sheet_row`. When
+   * null the agent runtime omits the fulfillment operator-escalation header from
    * the system prompt and the missing-package-agent's BRANCH A skips
    * its sheet-write step entirely.
    */
-  readonly supplierEscalationSheet: SupplierEscalationSheet | null;
+  readonly fulfillmentOperatorEscalationSheet: FulfillmentOperatorEscalationSheet | null;
   /**
    * Merchant acceptance of the current data processing notice + DPA.
    * Null means connector credential writes must be blocked.
@@ -821,14 +821,14 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
       policy: DiscountPolicy,
     ) => Effect.Effect<void, TenantRepositoryError>;
     /**
-     * Set (or clear) the tenant's supplier-escalation sheet target.
+     * Set (or clear) the tenant's fulfillment operator-escalation sheet target.
      * Passing `null` clears the field so the agent's BRANCH A skips
      * its sheet-write step. Same deep-merge semantics as
      * `setRefundPolicy` — unrelated settings columns are preserved.
      */
-    readonly setSupplierEscalationSheet: (
+    readonly setFulfillmentOperatorEscalationSheet: (
       tenantId: TenantId,
-      sheet: SupplierEscalationSheet | null,
+      sheet: FulfillmentOperatorEscalationSheet | null,
     ) => Effect.Effect<void, TenantRepositoryError>;
     /**
      * Record that the tenant accepted the current data processing notice and
@@ -943,14 +943,14 @@ export const TenantRepositoryTest = (
         );
         return Effect.void;
       },
-      setSupplierEscalationSheet: (tenantId, sheet) => {
+      setFulfillmentOperatorEscalationSheet: (tenantId, sheet) => {
         const prev = store.get(tenantId);
         if (!prev) {
           return Effect.fail(new TenantNotFound({ tenantId }));
         }
         store.set(
           tenantId,
-          new TenantSettings({ ...prev, supplierEscalationSheet: sheet }),
+          new TenantSettings({ ...prev, fulfillmentOperatorEscalationSheet: sheet }),
         );
         return Effect.void;
       },

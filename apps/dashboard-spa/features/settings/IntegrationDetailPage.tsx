@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { AlertTriangle, ClipboardList, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
-import type { SupplierEscalationSheetView } from "@support-agent/dashboard-contracts";
+import type { FulfillmentOperatorEscalationSheetView } from "@support-agent/dashboard-contracts";
 
 import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
@@ -157,7 +157,7 @@ function DisconnectButton({
     provider === "shopify"
       ? "The agent loses order, customer, and refund access for this store until you reconnect."
       : provider === "google_sheets"
-        ? "Sheets-backed workflows (like supplier escalation) stop working until you reconnect."
+        ? "Sheets-backed workflows (like fulfillment partner escalation) stop working until you reconnect."
         : "The agent stops reading and replying to this mailbox immediately. Open tickets can't send replies until you reconnect.";
   return (
     <ConfirmButton
@@ -182,7 +182,7 @@ function SheetTargetForm({
   sheet,
 }: {
   readonly tone: string;
-  readonly sheet: SupplierEscalationSheetView | null;
+  readonly sheet: FulfillmentOperatorEscalationSheetView | null;
 }) {
   const ctx = useWorkspaceCtx();
   const qc = useQueryClient();
@@ -197,7 +197,7 @@ function SheetTargetForm({
       readonly spreadsheetId: string;
       readonly range: string;
       readonly description: string | null;
-    }) => api.setSupplierSheet(ctx, input),
+    }) => api.setFulfillmentOperatorSheet(ctx, input),
     onSuccess: () => {
       toast.success("Sheet target saved.");
       void qc.invalidateQueries({ queryKey: qk.settings(ctx.workspaceId) });
@@ -206,7 +206,7 @@ function SheetTargetForm({
   });
 
   const clearM = useMutation({
-    mutationFn: () => api.clearSupplierSheet(ctx),
+    mutationFn: () => api.clearFulfillmentOperatorSheet(ctx),
     onSuccess: () => {
       toast(
         "Sheet target cleared. The agent will skip the sheet write on future missing-package tickets.",
@@ -264,7 +264,7 @@ function SheetTargetForm({
         <p className="text-sm text-muted-foreground">
           The Google Sheet the missing-package agent writes to via{" "}
           <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-            supplier.add_sheet_row
+            fulfillment_operator.add_sheet_row
           </code>{" "}
           when a customer reports a package marked delivered that didn&apos;t
           arrive (BRANCH A). The platform writes rows using this connection.
@@ -948,7 +948,7 @@ export function IntegrationDetailPage() {
   // re-submitting the same address updates its password and server settings).
   const showImapForm = provider === "imap" && (tone !== "active" || needsAttention);
 
-  const sheet = settings.supplierEscalationSheet ?? null;
+  const sheet = settings.fulfillmentOperatorEscalationSheet ?? null;
 
   return (
     <div className="space-y-6">

@@ -1,7 +1,7 @@
 import type {
   ResolutionScenarioView,
   ScenarioActionPermissionView,
-  SupplierModeView,
+  FulfillmentOperatorModeView,
 } from "@support-agent/dashboard-contracts";
 
 import { REMEDY_ACTIONS } from "./action-labels";
@@ -23,7 +23,7 @@ export const NEW_SCENARIO_PREFIX = "__new_";
 /** Persisted custom scenarios are namespaced with this prefix server-side. */
 const CUSTOM_PREFIX = "custom_";
 
-const SUPPLIER_MODES: ReadonlySet<string> = new Set([
+const FULFILLMENT_OPERATOR_MODES: ReadonlySet<string> = new Set([
   "escalate_and_wait",
   "notify_and_proceed",
   "none",
@@ -70,9 +70,9 @@ export const parseResolutionForm = (
       return [{ tool: action.tool, permission }];
     });
 
-    const smRaw = get(fieldName(formKey, "supplierMode"));
-    const supplierMode: SupplierModeView =
-      smRaw && SUPPLIER_MODES.has(smRaw) ? (smRaw as SupplierModeView) : "none";
+    const smRaw = get(fieldName(formKey, "fulfillmentOperatorMode"));
+    const fulfillmentOperatorMode: FulfillmentOperatorModeView =
+      smRaw && FULFILLMENT_OPERATOR_MODES.has(smRaw) ? (smRaw as FulfillmentOperatorModeView) : "none";
 
     const notesRaw = get(fieldName(formKey, "notes"));
     const notes = typeof notesRaw === "string" ? notesRaw.trim() : "";
@@ -103,7 +103,7 @@ export const parseResolutionForm = (
       builtin: !custom,
       enabled,
       enabledActions,
-      supplierMode,
+      fulfillmentOperatorMode,
       notes: notes.length > 0 ? notes : null,
     };
   });

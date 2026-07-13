@@ -4,19 +4,19 @@
 //
 // Uploads index themselves on the ticket the moment the bytes land — before
 // anyone decides to send them. So a merchant who stages a chip and removes it,
-// or a supplier who uploads a file and abandons the update form, leaves a blob
+// or a fulfillment partner who uploads a file and abandons the update form, leaves a blob
 // and an index row that nothing will ever reference again.
 //
 // A row is "used" once it becomes part of something durable: attached to an
 // outgoing customer reply (`resolveDraftAttachmentIds` / the manual reply
-// handler) or bound into a supplier's posted update (`recordSupplierUpdate`).
+// handler) or bound into a fulfillment partner's posted update (`recordFulfillmentOperatorUpdate`).
 // `used_at` records that. The orphans are what stays NULL.
 //
 // Two guards keep the sweep off files that are merely WAITING to be used:
 //   - a pending approval on the ticket may hold `attachmentIds` in its
 //     proposedInput; the tool body only runs (and only marks them) on approve,
 //     and approval links live for 30 days.
-//   - an OPEN supplier escalation may still receive the update that binds its
+//   - an OPEN fulfillment partner escalation may still receive the update that binds its
 //     uploads.
 // Both are cheap NOT EXISTS predicates and both fail SAFE (retain, don't
 // delete). Inbound (customer) attachments are never swept: the message they
@@ -32,7 +32,7 @@ import { and, eq, inArray, isNull, lt, ne, notExists, sql } from "drizzle-orm";
 import {
   approvals,
   ticketAttachments,
-  ticketSupplierEscalations,
+  ticketFulfillmentOperatorEscalations,
   tenants,
   DbClient,
 } from "@support-agent/db";
@@ -111,14 +111,14 @@ export const findOrphanAttachments = (
               notExists(
                 db
                   .select({ one: sql`1` })
-                  .from(ticketSupplierEscalations)
+                  .from(ticketFulfillmentOperatorEscalations)
                   .where(
                     and(
                       eq(
-                        ticketSupplierEscalations.id,
+                        ticketFulfillmentOperatorEscalations.id,
                         ticketAttachments.escalationId,
                       ),
-                      eq(ticketSupplierEscalations.status, "open"),
+                      eq(ticketFulfillmentOperatorEscalations.status, "open"),
                     ),
                   ),
               ),

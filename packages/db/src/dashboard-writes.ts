@@ -21,10 +21,10 @@ import {
 } from "@support-agent/services";
 import { ensureOwnerRole } from "./member-rbac-store.js";
 import {
-  getDefaultSupplier,
+  getDefaultFulfillmentOperator,
   hasOpenEscalationForTicket,
   insertEscalation,
-} from "./supplier-store.js";
+} from "./fulfillment-operator-store.js";
 import { ApprovalServiceLive } from "./approval-service-live.js";
 import { AuditLogServiceLive } from "./audit-log-live.js";
 import { TicketRepositoryLive } from "./ticket-repository-live.js";
@@ -238,25 +238,25 @@ export const resolveTicketManually = async (
   );
 };
 
-export type EscalateTicketToSupplierOutcome =
+export type EscalateTicketToFulfillmentOperatorOutcome =
   | { readonly kind: "escalated"; readonly escalationId: string }
   | { readonly kind: "already_escalated" }
-  | { readonly kind: "no_supplier" }
+  | { readonly kind: "no_fulfillment_operator" }
   | { readonly kind: "transition_not_allowed"; readonly fromStatus: string }
   | { readonly kind: "ticket_not_found" };
 
-export interface EscalateTicketToSupplierInput {
+export interface EscalateTicketToFulfillmentOperatorInput {
   readonly ticketId: string;
   readonly tenantId: string;
   readonly managerId: string;
-  /** What the supplier should do — merchant-typed; shown in the supplier portal + email. */
+  /** What the fulfillmentOperator should do — merchant-typed; shown in the fulfillmentOperator portal + email. */
   readonly problem: string;
   /** Free-text reason saved into the transition + audit details. */
   readonly reason?: string | undefined;
   /**
-   * The customer-PII-free order projection the supplier sees, derived by the
+   * The customer-PII-free order projection the fulfillmentOperator sees, derived by the
    * caller (the api handler) from the ticket's canonically-bound order — same
-   * slice the agent's supplier.escalate tool supplies. All best-effort nulls
+   * slice the agent's fulfillment_operator.escalate tool supplies. All best-effort nulls
    * when the ticket has no resolved order or Shopify is unreachable.
    */
   readonly orderRef?: string | null | undefined;
@@ -266,21 +266,21 @@ export interface EscalateTicketToSupplierInput {
 }
 
 /**
- * Escalate a ticket to the workspace's supplier BY HAND ("Escalate to supplier"
- * in the ticket-page ⋮ menu). Mirrors the agent's `supplier.escalate` tool path:
- * write the `ticket_supplier_escalations` row first (the row IS the notify
- * outbox — the worker cron emails the supplier off `notified_at IS NULL`),
- * then park the ticket through `parkWaitingForSupplierManually` (transition +
+ * Escalate a ticket to the workspace's fulfillment partner BY HAND from the
+ * ticket-page ⋮ menu. Mirrors the agent's `fulfillment_operator.escalate` tool path:
+ * write the `ticket_fulfillment_operator_escalations` row first (the row IS the notify
+ * outbox — the worker cron emails the fulfillmentOperator off `notified_at IS NULL`),
+ * then park the ticket through `parkWaitingForFulfillmentOperatorManually` (transition +
  * audit in one tx; bridges from `human_takeover`; a `waiting_for_approval`
  * ticket keeps approval as its primary status while the open row carries the
- * supplier wait). Parkability is pre-checked so an illegal move (e.g. from a
+ * fulfillmentOperator wait). Parkability is pre-checked so an illegal move (e.g. from a
  * `failed` ticket) refuses BEFORE the escalation row lands; an already-open
  * escalation is a no-op. Cross-tenant ids surface as `ticket_not_found`.
  */
-export const escalateTicketToSupplier = async (
+export const escalateTicketToFulfillmentOperator = async (
   db: DrizzleDb,
-  input: EscalateTicketToSupplierInput,
-): Promise<EscalateTicketToSupplierOutcome> => {
+  input: EscalateTicketToFulfillmentOperatorInput,
+): Promise<EscalateTicketToFulfillmentOperatorOutcome> => {
   const row = (
     await db
       .select({ status: tickets.status })
@@ -295,18 +295,18 @@ export const escalateTicketToSupplier = async (
   const parkable =
     from === "human_takeover" ||
     from === "waiting_for_approval" ||
-    isStatusTransitionAllowed(from, "waiting_for_supplier");
+    isStatusTransitionAllowed(from, "waiting_for_fulfillment_operator");
   if (!parkable) return { kind: "transition_not_allowed", fromStatus: from };
   if (await hasOpenEscalationForTicket(db, input.tenantId, input.ticketId)) {
     return { kind: "already_escalated" };
   }
-  const supplier = await getDefaultSupplier(db, input.tenantId);
-  if (!supplier) return { kind: "no_supplier" };
+  const fulfillmentOperator = await getDefaultFulfillmentOperator(db, input.tenantId);
+  if (!fulfillmentOperator) return { kind: "no_fulfillment_operator" };
 
   const { id: escalationId } = await insertEscalation(db, {
     tenantId: input.tenantId,
     ticketId: input.ticketId,
-    supplierId: supplier.id,
+    fulfillmentOperatorId: fulfillmentOperator.id,
     problem: input.problem,
     orderRef: input.orderRef ?? null,
     shipCity: input.shipCity ?? null,
@@ -314,12 +314,13 @@ export const escalateTicketToSupplier = async (
     trackingNumber: input.trackingNumber ?? null,
   });
 
-  const reason = input.reason ?? "ticket escalated to supplier from dashboard";
+  const reason =
+    input.reason ?? "ticket escalated to fulfillment partner from dashboard";
   const outcome = await runTicketLifecycle(
     db,
     Effect.gen(function* () {
       const lifecycle = yield* TicketLifecycleWriter;
-      return yield* lifecycle.parkWaitingForSupplierManually({
+      return yield* lifecycle.parkWaitingForFulfillmentOperatorManually({
         ticketId: TicketId(input.ticketId),
         tenantId: TenantId(input.tenantId),
         actor: { type: "user", id: input.managerId },
@@ -330,7 +331,7 @@ export const escalateTicketToSupplier = async (
   );
   if (outcome.kind === "transition_not_allowed") {
     // Raced past the pre-check (the ticket moved meanwhile). The open escalation
-    // row stays valid — the supplier wait is row-derived.
+    // row stays valid — the fulfillmentOperator wait is row-derived.
     return { kind: "transition_not_allowed", fromStatus: outcome.fromStatus };
   }
   return { kind: "escalated", escalationId };

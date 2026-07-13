@@ -67,7 +67,7 @@ const defaultTenantSettings = new TenantSettings({
   refundPolicy: defaultRefundPolicy,
   discountPolicy: defaultDiscountPolicy,
   retentionDays: DEFAULT_RETENTION_DAYS,
-  supplierEscalationSheet: null,
+  fulfillmentOperatorEscalationSheet: null,
   legalAcceptance: null,
 });
 

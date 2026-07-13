@@ -41,7 +41,7 @@ describe("composerKey", () => {
 
   it("changes the key when the same approval is redrafted with a new body", () => {
     expect(composerKey("t1", approval("a1", "old draft"))).not.toBe(
-      composerKey("t1", approval("a1", "new draft after supplier update")),
+      composerKey("t1", approval("a1", "new draft after fulfillment partner update")),
     );
   });
 

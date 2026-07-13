@@ -41,10 +41,10 @@ import {
   disconnectGoogleSheetsAction,
 } from "../actions";
 import {
-  saveSupplierEscalationAction,
-  clearSupplierEscalationAction,
-} from "@/app/settings/supplier-escalation/actions";
-import { googleSheetsUrlForSpreadsheetId } from "@/app/settings/supplier-escalation/sheet-url";
+  saveFulfillmentOperatorEscalationAction,
+  clearFulfillmentOperatorEscalationAction,
+} from "@/app/settings/fulfillment-operator-escalation/actions";
+import { googleSheetsUrlForSpreadsheetId } from "@/app/settings/fulfillment-operator-escalation/sheet-url";
 
 interface Props {
   readonly params: Promise<{ readonly provider: string }>;
@@ -158,10 +158,10 @@ export default async function ConnectorManagePage({
     capabilities.some((c) => !isCapabilityGranted(provider, c, row.scopes));
 
   // The Google Sheets connector owns the sheet target the agent writes to
-  // (the missing-package supplier-escalation row). It lives here — on the
+  // (the missing-package fulfillment-operator-escalation row). It lives here — on the
   // connection itself — rather than on a separate settings page, because
   // it's a property of this connection.
-  const sheet = settings?.supplierEscalationSheet ?? null;
+  const sheet = settings?.fulfillmentOperatorEscalationSheet ?? null;
   const sheetUrl = sheet
     ? googleSheetsUrlForSpreadsheetId(sheet.spreadsheetId)
     : "";
@@ -327,7 +327,7 @@ export default async function ConnectorManagePage({
                     provider === "shopify"
                       ? "The agent loses order, customer, and refund access for this store until you reconnect."
                       : provider === "google_sheets"
-                        ? "Sheets-backed workflows (like supplier escalation) stop working until you reconnect."
+                        ? "Sheets-backed workflows (like fulfillment partner escalation) stop working until you reconnect."
                         : "The agent stops reading and replying to this mailbox immediately. Open tickets can't send replies until you reconnect."
                   }
                   confirmLabel="Disconnect"
@@ -403,7 +403,7 @@ export default async function ConnectorManagePage({
               <p className="text-sm text-muted-foreground">
                 The Google Sheet the missing-package agent writes to via{" "}
                 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                  supplier.add_sheet_row
+                  fulfillment_operator.add_sheet_row
                 </code>{" "}
                 when a customer reports a package marked delivered that
                 didn&apos;t arrive (BRANCH A). The platform writes rows using
@@ -421,7 +421,7 @@ export default async function ConnectorManagePage({
                 </Alert>
               ) : null}
 
-              <form action={saveSupplierEscalationAction} className="space-y-4">
+              <form action={saveFulfillmentOperatorEscalationAction} className="space-y-4">
                 <div className="grid gap-2 sm:max-w-2xl">
                   <Label htmlFor="sheetUrl">Google Sheets URL</Label>
                   <Input
@@ -479,7 +479,7 @@ export default async function ConnectorManagePage({
                   <Button type="submit">Save</Button>
                   {sheet ? (
                     <Button
-                      formAction={clearSupplierEscalationAction}
+                      formAction={clearFulfillmentOperatorEscalationAction}
                       type="submit"
                       variant="outline"
                     >

@@ -27,7 +27,7 @@ describe("status badge variants", () => {
 
     it("keeps waiting states quiet", () => {
       expect(ticketStatusVariant("waiting_for_customer")).toBe("muted");
-      expect(ticketStatusVariant("waiting_for_supplier")).toBe("muted");
+      expect(ticketStatusVariant("waiting_for_fulfillment_operator")).toBe("muted");
     });
 
     it("approval status maps to bright variants, except pending's amber", () => {

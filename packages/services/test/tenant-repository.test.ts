@@ -40,7 +40,7 @@ const settings = (
     refundPolicy: defaultRefundPolicy,
     discountPolicy: defaultDiscountPolicy,
     retentionDays: 365,
-    supplierEscalationSheet: null,
+    fulfillmentOperatorEscalationSheet: null,
     legalAcceptance: null,
     ...overrides,
   });
@@ -147,7 +147,7 @@ describe("TenantRepositoryTest", () => {
     }
   });
 
-  it("setSupplierEscalationSheet stores the sheet target (preserves siblings)", async () => {
+  it("setFulfillmentOperatorEscalationSheet stores the sheet target (preserves siblings)", async () => {
     const initial = settings({ legalAcceptance: currentLegalAcceptance });
     const layer = TenantRepositoryTest({
       settingsByTenant: new Map([[tenantId, initial]]),
@@ -156,7 +156,7 @@ describe("TenantRepositoryTest", () => {
       Effect.provide(
         Effect.gen(function* () {
           const repo = yield* TenantRepository;
-          yield* repo.setSupplierEscalationSheet(tenantId, {
+          yield* repo.setFulfillmentOperatorEscalationSheet(tenantId, {
             spreadsheetId: "abc123",
             range: "Escalations!A:F",
             description: "warehouse ops",
@@ -169,16 +169,16 @@ describe("TenantRepositoryTest", () => {
     expect(got.notificationEmail).toBe("ops@example.com");
     expect(got.refundPolicy).toEqual(defaultRefundPolicy);
     expect(got.legalAcceptance).toEqual(currentLegalAcceptance);
-    expect(got.supplierEscalationSheet).toEqual({
+    expect(got.fulfillmentOperatorEscalationSheet).toEqual({
       spreadsheetId: "abc123",
       range: "Escalations!A:F",
       description: "warehouse ops",
     });
   });
 
-  it("setSupplierEscalationSheet clears the sheet when passed null", async () => {
+  it("setFulfillmentOperatorEscalationSheet clears the sheet when passed null", async () => {
     const initial = settings({
-      supplierEscalationSheet: {
+      fulfillmentOperatorEscalationSheet: {
         spreadsheetId: "abc123",
         range: "Escalations!A:F",
         description: null,
@@ -191,22 +191,22 @@ describe("TenantRepositoryTest", () => {
       Effect.provide(
         Effect.gen(function* () {
           const repo = yield* TenantRepository;
-          yield* repo.setSupplierEscalationSheet(tenantId, null);
+          yield* repo.setFulfillmentOperatorEscalationSheet(tenantId, null);
           return yield* repo.getSettings(tenantId);
         }),
         layer,
       ),
     );
-    expect(got.supplierEscalationSheet).toBeNull();
+    expect(got.fulfillmentOperatorEscalationSheet).toBeNull();
   });
 
-  it("setSupplierEscalationSheet fails when the tenant is absent (TenantNotFound)", async () => {
+  it("setFulfillmentOperatorEscalationSheet fails when the tenant is absent (TenantNotFound)", async () => {
     const layer = TenantRepositoryTest({});
     const exit = await Effect.runPromiseExit(
       Effect.provide(
         Effect.gen(function* () {
           const repo = yield* TenantRepository;
-          yield* repo.setSupplierEscalationSheet(tenantId, null);
+          yield* repo.setFulfillmentOperatorEscalationSheet(tenantId, null);
         }),
         layer,
       ),
@@ -325,7 +325,7 @@ describe("TenantRepositoryTest", () => {
           label: "VIP complaint",
           builtin: false,
           enabledActions: [{ tool: "refund.create", permission: "ask" }],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
       ],
     };
@@ -415,7 +415,7 @@ describe("playbook action references", () => {
           key: "refund_request",
           label: "Refund request",
           builtin: true,
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
           enabledActions: [],
           notes: "When a refund is due, queue refund.create.",
         },
@@ -432,14 +432,14 @@ describe("playbook action references", () => {
         {
           key: "",
           label: "VIP complaint",
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
           enabledActions: [],
-          notes: "Escalate with supplier.escalate first.",
+          notes: "Escalate with fulfillment_operator.escalate first.",
         },
       ],
     });
     const custom = p.scenarios.find((s) => !s.builtin);
-    expect(custom!.notes).toBe("Escalate with /supplier.escalate first.");
+    expect(custom!.notes).toBe("Escalate with /fulfillment_operator.escalate first.");
   });
 });
 
@@ -467,7 +467,7 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
           recognition: "An angry high-value customer",
           builtin: false,
           enabledActions: [{ tool: "refund.create", permission: "ask" }],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
           notes: "Be extra gracious.",
         },
       ],
@@ -479,7 +479,7 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
       tool: "refund.create",
       permission: "ask",
     });
-    expect(p.scenarios[0]!.supplierMode).toBe("none");
+    expect(p.scenarios[0]!.fulfillmentOperatorMode).toBe("none");
     expect(p.scenarios[0]!.notes).toBe("Be extra gracious.");
     // No `enabled` in the raw → defaults to enabled (back-compat).
     expect(p.scenarios[0]!.enabled).toBe(true);
@@ -494,14 +494,14 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
           builtin: false,
           enabled: false,
           enabledActions: [],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
         {
           key: "on_one",
           label: "On",
           builtin: false,
           enabledActions: [],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
       ],
     };
@@ -510,7 +510,7 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
     expect(p.scenarios.find((s) => s.key === "on_one")!.enabled).toBe(true);
   });
 
-  it("falls back to defaults when no scenario is valid (bad supplierMode / empty key)", () => {
+  it("falls back to defaults when no scenario is valid (bad fulfillmentOperatorMode / empty key)", () => {
     const raw = {
       scenarios: [
         {
@@ -518,14 +518,14 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
           label: "Bad",
           builtin: false,
           enabledActions: [],
-          supplierMode: "whenever", // invalid supplierMode → scenario dropped
+          fulfillmentOperatorMode: "whenever", // invalid fulfillmentOperatorMode → scenario dropped
         },
         {
           key: "", // empty key → scenario dropped
           label: "Empty key",
           builtin: false,
           enabledActions: [],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
       ],
     };
@@ -543,7 +543,7 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
             { tool: "refund.create", permission: "ask" },
             { tool: 5, permission: "allow" },
           ],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
       ],
     };
@@ -560,11 +560,11 @@ describe("delivery_issue built-in scenario", () => {
     (s) => s.key === "delivery_issue",
   );
 
-  it("escalates to the supplier and reassures the customer in the same run", () => {
+  it("escalates to the fulfillment operator and reassures the customer in the same run", () => {
     expect(di).toBeDefined();
-    expect(di!.supplierMode).toBe("escalate_and_wait");
+    expect(di!.fulfillmentOperatorMode).toBe("escalate_and_wait");
     const notes = (di!.notes ?? "").toLowerCase();
-    expect(notes).toContain("supplier");
+    expect(notes).toContain("fulfillment operator");
     expect(notes).toContain("reassur");
   });
 });
@@ -576,7 +576,7 @@ describe("damaged_product built-in scenario", () => {
 
   it("asks for photos, verifies them against the product, and flags a mismatch to the merchant", () => {
     expect(dp).toBeDefined();
-    expect(dp!.supplierMode).toBe("escalate_and_wait");
+    expect(dp!.fulfillmentOperatorMode).toBe("escalate_and_wait");
     const notes = (dp!.notes ?? "").toLowerCase();
     // Ask for evidence when none was attached.
     expect(notes).toContain("photo");
@@ -596,11 +596,11 @@ describe("wrong_item built-in scenario", () => {
     (s) => s.key === "wrong_item",
   );
 
-  it("ships as a supplier-escalating built-in with a gated refund", () => {
+  it("ships as a fulfillment-operator built-in with a gated refund", () => {
     expect(wi).toBeDefined();
     expect(wi!.builtin).toBe(true);
     expect(wi!.enabled).toBe(true);
-    expect(wi!.supplierMode).toBe("escalate_and_wait");
+    expect(wi!.fulfillmentOperatorMode).toBe("escalate_and_wait");
     expect(wi!.enabledActions).toEqual([
       { tool: "refund.create", permission: "ask" },
     ]);
@@ -610,7 +610,7 @@ describe("wrong_item built-in scenario", () => {
     const notes = (wi!.notes ?? "").toLowerCase();
     expect(notes).toContain("photo");
     expect(notes).toContain("product");
-    expect(notes).toContain("supplier");
+    expect(notes).toContain("fulfillment operator");
     expect(notes).toContain("merchant");
     expect(notes).toContain("reassur");
     // Refund is the fallback, not the first move.
@@ -736,7 +736,7 @@ describe("built-in scenario notes reference store facts", () => {
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 365,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
       shippingFacts: {
         processingTime: "1–2 business days",
@@ -788,7 +788,7 @@ describe("order_cancellation built-in scenario", () => {
     expect(cancel).toBeDefined();
     expect(cancel!.builtin).toBe(true);
     expect(cancel!.enabled).toBe(true);
-    expect(cancel!.supplierMode).toBe("none");
+    expect(cancel!.fulfillmentOperatorMode).toBe("none");
     expect(cancel!.enabledActions).toEqual([
       { tool: "order.cancel", permission: "ask" },
     ]);
@@ -818,13 +818,13 @@ describe("shipping_address_update built-in scenario", () => {
     ]);
   });
 
-  it("escalates to the supplier and waits when the order already shipped", () => {
+  it("escalates to the fulfillment operator and waits after shipment", () => {
     // The unfulfilled branch edits the order; the fulfilled branch can't —
-    // the parcel is moving — so the playbook hands it to the supplier.
-    expect(ship!.supplierMode).toBe("escalate_and_wait");
+    // the parcel is moving — so the playbook hands it to the fulfillment operator.
+    expect(ship!.fulfillmentOperatorMode).toBe("escalate_and_wait");
     const notes = (ship!.notes ?? "").toLowerCase();
     expect(notes).toContain("ask");
-    expect(notes).toContain("supplier");
+    expect(notes).toContain("fulfillment operator");
   });
 
   it("survives the write-path normalizer as a forced built-in", () => {
@@ -856,7 +856,7 @@ describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
           builtin: false,
           enabled: false,
           enabledActions: [{ tool: "refund.create", permission: "allow" }],
-          supplierMode: "notify_and_proceed",
+          fulfillmentOperatorMode: "notify_and_proceed",
           notes: "merchant note",
         },
       ],
@@ -871,7 +871,7 @@ describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
     expect(out.enabledActions).toEqual([
       { tool: "refund.create", permission: "allow" },
     ]);
-    expect(out.supplierMode).toBe("notify_and_proceed");
+    expect(out.fulfillmentOperatorMode).toBe("notify_and_proceed");
     expect(out.notes).toBe("merchant note");
   });
 
@@ -885,7 +885,7 @@ describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
           builtin: true, // lie — must be coerced to false
           enabled: true,
           enabledActions: [{ tool: "discount.create", permission: "ask" }],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
           notes: "Be gracious.",
         },
       ],
@@ -913,7 +913,7 @@ describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
           recognition: "B2B / bulk buyer asking about an order",
           builtin: false,
           enabledActions: [],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
       ],
     });
@@ -930,14 +930,14 @@ describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
           label: "Returns",
           builtin: false,
           enabledActions: [],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
         {
           key: "",
           label: "Returns",
           builtin: false,
           enabledActions: [],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
         {
           // Tries to masquerade as a built-in via a custom_ key.
@@ -945,7 +945,7 @@ describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
           label: "Sneaky",
           builtin: false,
           enabledActions: [],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
       ],
     });
@@ -970,7 +970,7 @@ describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
           recognition: "angry whale",
           builtin: false,
           enabledActions: [],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
       ],
     });
@@ -985,14 +985,14 @@ describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
           label: "   ",
           builtin: false,
           enabledActions: [],
-          supplierMode: "none",
+          fulfillmentOperatorMode: "none",
         },
       ],
     });
     expect(p.scenarios.every((s) => s.builtin)).toBe(true);
   });
 
-  it("defaults a custom's invalid supplierMode to none and drops invalid actions", () => {
+  it("defaults a custom's invalid fulfillmentOperatorMode to none and drops invalid actions", () => {
     const p = decodeResolutionPolicyUpdate({
       scenarios: [
         {
@@ -1003,12 +1003,12 @@ describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
             { tool: "refund.create", permission: "ask" },
             { tool: 7, permission: "allow" },
           ],
-          supplierMode: "whenever",
+          fulfillmentOperatorMode: "whenever",
         },
       ],
     });
     const custom = p.scenarios.find((s) => !s.builtin)!;
-    expect(custom.supplierMode).toBe("none");
+    expect(custom.fulfillmentOperatorMode).toBe("none");
     expect(custom.enabledActions).toEqual([
       { tool: "refund.create", permission: "ask" },
     ]);

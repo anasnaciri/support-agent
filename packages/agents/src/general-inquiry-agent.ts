@@ -99,7 +99,7 @@ export const generalInquiryAgent: AgentConfig = {
     "- Never call `shopify.search_products` more than once per ticket.",
     "- Never call `shopify.get_store_info` more than once per ticket.",
     "- Never call `shopify.list_pickup_locations` more than once per ticket.",
-    "- Never state where orders ship FROM, or name any warehouse, supplier, or fulfillment location. `shipsToCountries` is destinations only, and pickup locations are pickup points only — never present them as where orders ship from. If a customer asks where their order ships from, answer ONLY if the knowledge base explicitly states it; otherwise treat it as not answerable from your tools (path B).",
+    "- Never state where orders ship FROM, or name any warehouse, supplier, fulfillment operator, or fulfillment location. `shipsToCountries` is destinations only, and pickup locations are pickup points only — never present them as where orders ship from. If a customer asks where their order ships from, answer ONLY if the knowledge base explicitly states it; otherwise treat it as not answerable from your tools (path B).",
     "- Never call `conversation.reply` more than once per ticket.",
     "- Never offer, approve, or negotiate a discount, coupon, refund, or price — you have no authority and no tool for it.",
     "- Never reply to a scam, phishing, or abusive message — record it via `ticket.update_context` and finish.",

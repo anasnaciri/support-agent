@@ -18,16 +18,15 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 ## Current Focus
 
 - [x] **Generalized the planned logistics-escalation model beyond one default
-      supplier** (2026-07-13). The canonical target is now the fulfillment- or
+      fulfillment operator** (2026-07-13). The canonical target is now the fulfillment- or
       shipment-scoped `Resolution Owner`, resolved through a `Fulfillment Route`
-      and a capability-bearing `Logistics Connection`; supplier, 3PL, Amazon
-      MCF/FBA, carrier, merchant warehouse, POD, local delivery, and reverse
-      logistics are distinct roles/routes. A scenario controls whether outside
-      logistics help is allowed and whether to wait, but must not choose the
-      target. Added glossary terms, ADR 0001, and the connector/routing design to
-      `master-plan.md`. This was a documentation/domain pass only; the current
-      `supplier.escalate`, default-supplier lookup, supplier tables, and
-      `waiting_for_supplier` runtime remain unchanged until TDD migrations.
+      and a capability-bearing `Logistics Connection`; product supplier, 3PL,
+      Amazon MCF/FBA, carrier, merchant warehouse, POD, local delivery, and
+      reverse logistics are distinct roles/routes. A scenario controls whether
+      outside logistics help is allowed and whether to wait, but must not choose
+      the target. Added glossary terms, ADR 0001, and the connector/routing
+      design to `master-plan.md`. The current runtime still resolves one default
+      fulfillment operator until the routing work below ships.
       Naming decision (2026-07-13): use **Fulfillment Operator** in the domain,
       code, and agent instructions; use **Fulfillment partner** as the friendlier
       merchant-facing label. Do not use "shipping provider" (ambiguous with the
@@ -40,15 +39,15 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         order from the first fulfillment.
       - [ ] **Introduce provider-neutral logistics storage/services.** Model
         operators, routes, connections, advertised capabilities, and external
-        resolution requests. Expand/contract migrate existing supplier bindings
+        resolution requests. Build on the migrated fulfillment operator bindings
         and escalation rows; keep portal authorization binding-based.
       - [ ] **Replace target-specific escalation with action-specific logistics
         tools.** Start with investigation and reship requests, route at execution
         time from fresh fulfillment evidence, consult `PermissionService`, and
         fall back to the merchant when the route is missing, ambiguous, or lacks
-        the capability. Keep supplier-mode enforcement as a compatibility wall
-        until scenario policy is generalized.
-      - [ ] **Add connection variants.** Reuse the constrained supplier portal
+        the capability. Keep fulfillment-operator-mode enforcement as a
+        specialized safety wall until scenario policy is generalized.
+      - [ ] **Add connection variants.** Reuse the constrained fulfillment operator portal
         as the first partner-portal connector; add merchant-owned operational
         mailbox send/reply correlation for email-only operators; then ship one
         API-backed 3PL connector as the plugin proof.
@@ -58,9 +57,41 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         to the seller's actual operator even when Customer Service by Amazon is
         enabled. Never treat all three as one `fba` boolean.
       - [ ] **Generalize wait/audit/dashboard language through a tested
-        expand/contract migration.** External requests may wait on a supplier,
-        3PL, marketplace, carrier, or merchant ops. Do not flag-day rename
-        `waiting_for_supplier` or regress concurrent approval + external waits.
+        migration.** External requests may wait on a fulfillment operator, 3PL,
+        marketplace, carrier, or merchant ops. Generalize the operator-specific
+        wait without regressing concurrent approval + external waits.
+
+- [x] **Shipped the Fulfillment Operator terminology migration** (2026-07-13).
+      Agent prompts, tool descriptions, trusted scenario guidance, default
+      playbook notes, merchant/dashboard copy, partner-portal copy, platform
+      mail, legal copy, and domain docs now call the shipping-responsible party
+      **Fulfillment Operator** (agent/domain) or **Fulfillment partner**
+      (merchant-facing). `0048_fulfillment_operator_domain` updates
+      persisted built-in playbooks only when their note hash matches an
+      unmodified version previously shipped in this repo; merchant-authored or
+      edited notes are deliberately preserved because "supplier" may correctly
+      mean product source. This is a one-way migration with no compatibility
+      alias: it renames the live `suppliers` and
+      `ticket_supplier_escalations` tables, the `supplier_id` column, related
+      constraints/indexes, role name and permission ids, ticket wait status,
+      workflow event/tool names, attachment source, scenario/settings keys,
+      audit/tool execution records and idempotency keys, custom-agent tool
+      configuration and exact tool tokens in instructions, plus pg-boss queue,
+      schedule, and structured event payload identities. The constrained role
+      is stored directly as `Fulfillment partner`, so frontends render the DB
+      value with no role-name translation. Historical migrations retain their
+      original names only as the immutable history needed to build old schema
+      versions. Per the user's explicit instruction, this terminology/data
+      migration did not follow red-green TDD; existing assertions were updated
+      after the change.
+      Verified with 2,699 non-socket tests (469 integration / smoke tests
+      skipped by environment), `git diff --check`, targeted `rg` audits,
+      `pnpm build`, a fresh PostgreSQL migration chain from 0000 through 0048,
+      a seeded legacy-data migration check covering custom prompts,
+      idempotency keys, context keys, and real pg-boss v12 queue/job/schedule
+      rows, plus a live-catalog assertion that no fulfillment-domain relation,
+      constraint, or column retains `supplier`. The seeded check also confirms
+      customer/merchant text such as `supplier.com` remains unchanged.
 
 - [x] **Google Sheets, Outlook, and IMAP / SMTP integrations are marked Beta**
       (2026-07-13). Their cards on the Integrations overview and headings on
@@ -88,7 +119,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       Coverage proves scenario A -> scenario B changes for ask -> allow,
       allow -> ask, allow -> disabled,
       schema replacement, execution denial, and approval resume. Keep the
-      supplier-mode execution backstop as a specialized second wall. This task
+      fulfillment-operator-mode execution backstop as a specialized second wall. This task
       uses only the permission semantics already stored in `enabledActions`;
       the generic precedence model remains separate below. The old
       steering-only helper/tests and contradictory comments were removed.
@@ -145,10 +176,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       returned structured `status: "exception"` with a delivery-exception scan
       and it correctly changed `context.scenarioKey` to `delivery_issue`.
       Despite that scenario's explicit note ("On an exception, escalate to the
-      supplier to reship") and `supplierMode: escalate_and_wait`, it skipped
-      `supplier.escalate` and queued only a customer reply telling the customer
+      fulfillment operator to reship") and `fulfillmentOperatorMode: escalate_and_wait`, it skipped
+      `fulfillment_operator.escalate` and queued only a customer reply telling the customer
       to contact the post office. Production audit confirms there was no
-      escalation attempt, denial, tool error, or escalation row. The supplier
+      escalation attempt, denial, tool error, or escalation row. The fulfillment operator
       tool was available (`ask` by default), the selected scenario permits it,
       and the 20-turn loop stopped voluntarily at turn 5, ruling out policy and
       turn-budget causes. Root design gap: `withScenario(...)` is applied only
@@ -164,30 +195,30 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       patch into the in-memory ticket, so the next turn replaces the old
       dedicated playbook with the new one without stacking headers or losing
       any customer message / assistant tool-call / tool-result history.
-      Supplier escalation remains judgment-based; no mandatory-action guard
+      Fulfillment Operator escalation remains judgment-based; no mandatory-action guard
       was added. Regression coverage captures all three prompts across initial
       selection and reroute, asserts old-playbook removal, and verifies the
       message history continues growing. Verified with focused red -> green,
       89 worker runtime/scenario tests, and `pnpm build`.
 
-- [x] **`supplierMode: none` now overrides contradictory scenario notes**
+- [x] **`fulfillmentOperatorMode: none` now overrides contradictory scenario notes**
       (2026-07-13). The trusted playbook header explicitly states that the
       structured setting wins over free-text notes. More importantly, the
-      runtime denies `supplier.escalate` at execution time by resolving the
+      runtime denies `fulfillment_operator.escalate` at execution time by resolving the
       ticket's selected `scenarioKey` against the current tenant policy. The
       guard refreshes ticket context and settings at the call boundary, so an
-      agent cannot select a supplier-disabled scenario and escalate later in
+      agent cannot select a fulfillment-operator-disabled scenario and escalate later in
       the same tool loop. Approval resume re-checks the same constraint, so an
       older queued escalation cannot execute after the scenario disables
-      suppliers. Covered in `scenario-resolution-loop.test.ts` (same-run and
+      fulfillment operators. Covered in `scenario-resolution-loop.test.ts` (same-run and
       approval-resume regressions) and `agent-runtime.test.ts` (prompt
       precedence). Same-run scenario resteering now replaces the full Scenario
       Action Policy (playbook, tool list, and permissions). The dedicated
-      supplier denial remains a separate execution-time second wall resolved
+      fulfillment operator denial remains a separate execution-time second wall resolved
       from the ticket's current `scenarioKey`.
 
 - [x] **PROD BUG (FIXED 2026-07-12): tracking-destination gate false-positives
-      on ISO code vs country name and suppressed a supplier escalation** (found
+      on ISO code vs country name and suppressed a fulfillment operator escalation** (found
       2026-07-12, prod ticket `03649e6f-640d-44dc-b805-e770da635069`, tenant
       `4f685543`). Both fixes landed TDD (red → green), verified with
       `npx vitest run packages apps/worker apps/api` (2065 passed) +
@@ -213,7 +244,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         tracking number after `order.update_tracking`** (observed on the same
         prod ticket, 2026-07-12 21:53). The card followed
         `context.liveTrackingStatus` — the snapshot of the agent's LAST
-        `tracking.lookup` — so a supplier reship synced onto the Shopify
+        `tracking.lookup` — so a fulfillment operator reship synced onto the Shopify
         fulfillment never reached it. Fixed in three layers, TDD, full suite
         green (`npx vitest run packages apps/worker apps/api
         apps/dashboard-spa`, 2675 passed) + SPA `tsc --noEmit`:
@@ -233,8 +264,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           stored number differs from the snapshot's clears
           `liveTrackingStatus` (facts header stops describing the superseded
           shipment); a same-number re-store keeps it. Tests in
-          `tracking-lookup-runtime.test.ts`. (The supplier-portal pencil edit
-          already cleared it inside `recordSupplierTrackingUpdate` — verified,
+          `tracking-lookup-runtime.test.ts`. (The fulfillment-operator portal pencil edit
+          already cleared it inside `recordFulfillmentOperatorTrackingUpdate` — verified,
           untouched.)
         - **SPA fallback cross-check** — `dropSupersededStamp`
           (`lib/tracking-panel-data.ts`, unit-tested) suppresses the on-ticket
@@ -266,7 +297,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           Shopify-admin edits: the next time anyone opens the ticket, the DB
           stamp is healed. Nothing is surfaced to the merchant (deliberate).
         - [x] **Review follow-up (FIXED 2026-07-13): multi-fulfillment tracking source can heal to
-          the wrong shipment.** `order.update_tracking` and the supplier portal
+          the wrong shipment.** `order.update_tracking` and the fulfillment operator portal
           correctly pick the fulfillment carrying the old tracking number, but
           the dashboard tracking endpoint later follows the FIRST fulfillment
           carrying any tracking number. On an order with multiple fulfillments,
@@ -282,7 +313,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           card and can then persist the wrong shipment into the ticket stamp.
           Fixed TDD by persisting the exact Shopify fulfillment id as
           `context.trackingFulfillmentId` after both `order.update_tracking`
-          and supplier-portal edits. The dashboard source picker now prefers
+          and fulfillment-operator portal edits. The dashboard source picker now prefers
           that bound fulfillment; legacy tickets first associate by the
           stamped number, then fall back to the first tracked fulfillment. A
           missing bound fulfillment returns no tracking instead of guessing
@@ -290,7 +321,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           schemaless and the legacy association path remains supported.
         - [ ] **Review follow-up: app-owned tracking writes clear the DB stamp
           but do not recreate it.** `order.update_tracking` drops
-          `liveTrackingStatus`; the supplier portal pencil does the same. The
+          `liveTrackingStatus`; the fulfillment operator portal pencil does the same. The
           endpoint restamp intentionally refuses to invent a stamp when one is
           absent, so after these successful writes the DB stamp stays absent
           unless a later agent run calls `tracking.lookup`. Decide whether the
@@ -329,10 +360,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         `tracking_destination_unavailable`; these are distinct cases and do not
         inject the mismatch directive. Every lookup replaces only the previous
         tracking-outcome flag and preserves unrelated flags. This lets a
-        supplier-corrected tracking number remove the injected warning without
+        fulfillment-operator-corrected tracking number remove the injected warning without
         mislabeling an unavailable lookup as a mismatch. The directive was also
         shortened without dropping its reason, different-order warning,
-        `merchant.notify`, or verification-only `supplier.escalate` guidance.
+        `merchant.notify`, or verification-only `fulfillment_operator.escalate` guidance.
 
       Original diagnosis:
       17track returned `destinationCountry: "US"` (ISO 3166 alpha-2) while the
@@ -340,11 +371,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       name). `trackingDestinationMismatchFlag` compares normalized *strings*
       ("us" ≠ "united states") → false `tracking_destination_mismatch`. The
       injected directive ("do NOT … escalate off it") then stopped the
-      scenario agent from calling `supplier.escalate` on a shipment with a
+      scenario agent from calling `fulfillment_operator.escalate` on a shipment with a
       genuine carrier delivery exception (transitDays 27 vs the store's
       20-day delayed threshold) — the exact playbook case the merchant
-      configured (`supplierMode: escalate_and_wait`, "On an exception,
-      escalate to the supplier"). The 2026-07-10 entry below predicted the
+      configured (`fulfillmentOperatorMode: escalate_and_wait`, "On an exception,
+      escalate to the fulfillment operator"). The 2026-07-10 entry below predicted the
       representation-mismatch risk but judged the failure mode as "parks a
       healthy ticket for a human"; in reality the flag also *suppresses
       legitimate escalation*, and the forced-approval backstop only reviews
@@ -368,17 +399,17 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         that actually engaged. Prompt-vs-runtime gap to keep in mind when
         fixing.
       - [x] **Tracking-destination directive now permits verification-only
-        supplier escalation** (2026-07-13). The trusted runtime prompt still
+        fulfillment operator escalation** (2026-07-13). The trusted runtime prompt still
         explains the destination-country mismatch and that the tracking may
-        belong to a different order, but no longer suppresses every supplier
+        belong to a different order, but no longer suppresses every fulfillment operator
         contact. It forbids claims or escalation based on the suspect delivery
-        state, requires `merchant.notify`, and—when supplier escalation is
-        enabled—directs `supplier.escalate` to ask the supplier to verify the
+        state, requires `merchant.notify`, and—when fulfillment operator escalation is
+        enabled—directs `fulfillment_operator.escalate` to ask the fulfillment operator to verify the
         order's tracking number without repeating claims from scans/status.
 
-- [x] **Supplier-reported tracking numbers sync onto the order** (2026-07-12).
+- [x] **Fulfillment Operator-reported tracking numbers sync onto the order** (2026-07-12).
       Verified with `npx vitest run packages apps/worker apps/api
-      apps/dashboard-spa` (all green) and `pnpm build`. A supplier typing
+      apps/dashboard-spa` (all green) and `pnpm build`. A fulfillment operator typing
       "reshipped #TRACK123" as a portal MESSAGE previously only re-engaged the
       agent to draft a reply — the number could never reach the order because
       no agent tool wrote tracking (only the portal card pencil's HTTP handler
@@ -388,18 +419,18 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       with the portal's fulfillment-picking rule (the fulfillment carrying
       `currentTrackingNumber` wins; no match → only a single-fulfillment order
       is safe, `AmbiguousFulfillment` otherwise; carrier carried over when the
-      supplier named none; `notifyCustomer: false` always). The
-      `supplier.updated` branch of `buildInitialMessages` now steers the agent:
-      sync a supplier-reported new/corrected tracking number with the tool
+      fulfillment operator named none; `notifyCustomer: false` always). The
+      `fulfillment_operator.updated` branch of `buildInitialMessages` now steers the agent:
+      sync a fulfillment-operator-reported new/corrected tracking number with the tool
       BEFORE drafting the reply, passing the order's old number as
-      `currentTrackingNumber`, and only ever a number the supplier explicitly
+      `currentTrackingNumber`, and only ever a number the fulfillment operator explicitly
       stated. Registered in `ALL_TOOLS`, `TOOL_DISPLAY_NAMES` ("Update the
       tracking number"), the scenario agent's tool list, the `/` action
       catalog (`ACTIONABLE_TOOLS`), and `summarizeApprovalAction` (shows the
       number).
       - **`defaultPermission: "allow"`** — user decision (2026-07-12), unlike
-        every other order write: the number's authority is the supplier's own
-        statement, and the supplier already holds an UNGATED manual edit of the
+        every other order write: the number's authority is the fulfillment operator's own
+        statement, and the fulfillment operator already holds an UNGATED manual edit of the
         same field in their portal. Tenants can flip it to Ask per-agent.
       - **Deliberately NO `requiredConnectorScopes`:** the mutation accepts ANY
         ONE of the two `SHOPIFY_FULFILLMENT_TRACKING_SCOPES`, and the precheck
@@ -454,7 +485,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       centre fade + scale both ways, and below `sm` the dialog rises 1.5rem from
       the bottom on entry and drops back down on exit.
 
-- [x] **Outbound merchant/supplier copy avoids LLM em dashes** (2026-07-11).
+- [x] **Outbound merchant/fulfillment-operator copy avoids LLM em dashes** (2026-07-11).
       Verified with
       `npx vitest run packages/providers/test/platform-mail-live.test.ts packages/providers/test/telegram-notification-live.test.ts packages/services/test/merchant-notification.test.ts`
       and `pnpm build`. Two layers: seeded scenario notes and authored
@@ -482,7 +513,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
          included). It forbids em dashes outright, which is the only protection
          customer replies get: nothing rewrites them on the way out.
       3. **UI prose**: all ~110 em-dash strings across the dashboard SPA and the
-         supplier portal pages, plus the Shopify post-connect page title and the
+         fulfillment operator portal pages, plus the Shopify post-connect page title and the
          Shopify refund note.
       Bare `"—"` used as an empty-value placeholder (`{value ?? "—"}`) is a
       legitimate typographic dash and was deliberately left in six spots.
@@ -594,7 +625,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
            permission. "Address change on unshipped: agent directly / through
            you" = `shipping_address_update` → `order.update_shipping_address`
            permission `allow` vs `ask`. "Address change once shipped: check
-           carrier/supplier first" = that scenario's `supplierMode:
+           carrier/fulfillment-operator first" = that scenario's `fulfillmentOperatorMode:
            escalate_and_wait` + notes. These are walls; a contradicting sentence
            can only make the model promise something the wall blocks. The Facts
            forms DEEP-LINK to these pages, they do not copy the value.
@@ -619,7 +650,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           shipping header).
         - `shippingFacts` gains `lostPackageInvestigationDays` next to
           `delayedAfterDays`. Two DIFFERENT numbers on one timeline:
-          `delayedAfterDays` = when `delivery_issue` opens a supplier check;
+          `delayedAfterDays` = when `delivery_issue` opens a fulfillment operator check;
           `lostPackageInvestigationDays` = when we stop waiting and make the
           customer whole (refund/reship). This is the direct answer to "how long
           do you investigate a lost package… they should both be in sync": one
@@ -880,7 +911,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         `productMatch` (match/mismatch/uncertain) via `ticket.update_context`;
         on mismatch/uncertain, `merchant.notify` to flag it (never accuse/deny)
         and draft a softened confirm-the-item reply; on `match`, prefer a
-        supplier replacement, refund only if no replacement. The scenario agent
+        fulfillment operator replacement, refund only if no replacement. The scenario agent
         already carries all those tools — this was steering, not wiring.
         - Merchant-editable built-in: tenants with a persisted resolutionPolicy
           that customized these notes keep theirs (read path + write normalizer
@@ -1070,7 +1101,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       - New `shippingFacts` block on `tenants.settings` (JSONB), edited on the
         Knowledge base settings page: order processing time, delivery time,
         shipping cost + free-shipping threshold, customs/duties payer, and
-        `delayedAfterDays` — the day count past which the agent opens a supplier
+        `delayedAfterDays` — the day count past which the agent opens a fulfillment operator
         check. Three fields are required; cost and customs are optional.
       - **All-or-nothing decode.** `decodeShippingFacts` returns `null` unless
         all three required fields are valid. A half-written block must never hand
@@ -1223,7 +1254,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       paths, each verified red first).
 - [x] Empty LLM completions are retryable, not decisions (2026-07-09):
       production ticket `4746d9d6-9931-4645-944a-f1036949d78c` took a
-      `supplier.updated` tick, ran three good turns
+      `fulfillment_operator.updated` tick, ran three good turns
       (`ticket.update_context`, `find_customer_order`, `get_customer`), then
       OpenRouter/`google/gemini-3.5-flash` returned a response with no tool
       calls, blank text, and a ZEROED usage block — `inputTokens: 0` on a prompt
@@ -1242,56 +1273,56 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       - The `autonomous_no_action` guard was NOT at fault and must not be
         loosened: it is the thing that stopped a live customer ticket from being
         closed with nothing sent.
-- [x] `supplier.updated` ticks re-engage the agent with the thread transcript
+- [x] `fulfillment_operator.updated` ticks re-engage the agent with the thread transcript
       (2026-07-09): the prefetch at the top of the tick was gated on
-      `event.type === "ticket.resumed"` alone, so a supplier responding put the
-      agent back in the loop blind — the payload is the SUPPLIER's note, not the
+      `event.type === "ticket.resumed"` alone, so a fulfillment operator responding put the
+      agent back in the loop blind — the payload is the FULFILLMENT OPERATOR's note, not the
       customer conversation. On ticket `4746d9d6` the agent burned turns 1-2
       re-hunting the order (`find_customer_order` → `get_customer`) before it
       could act; the retry tick, which DID get the transcript, went straight to
       `get_order` and had a draft queued by turn 2 (turn-0 prompt 6,615 vs 7,208
       tokens — the gap is the missing transcript). Extracted the gate into the
       pure, unit-tested `shouldPrefetchThread(eventType)` and widened it to
-      `supplier.updated`; `buildInitialMessages` now inlines the transcript
-      (untrusted-fenced, oldest-first, before the supplier note). Confirmed
+      `fulfillment_operator.updated`; `buildInitialMessages` now inlines the transcript
+      (untrusted-fenced, oldest-first, before the fulfillment operator note). Confirmed
       `manual.takeover` needs no transcript — it parks the ticket in
       `human_takeover`, where the runtime holds every event before the loop.
-- [x] `supplier.updated` prompt injects the bound-order directive + ticket-facts
+- [x] `fulfillment_operator.updated` prompt injects the bound-order directive + ticket-facts
       header (2026-07-09): it was the only agent-facing branch of
       `buildInitialMessages` that injected neither, while `ticket.created`,
       `customer.replied`, `message.received` and `ticket.resumed` all do. This
       was the *other* half of why ticket `4746d9d6` re-hunted the order on the
-      supplier tick — without the directive the agent never saw the canonical
+      fulfillment operator tick — without the directive the agent never saw the canonical
       bound order GID, so it re-searched by customer (`find_customer_order` →
       `get_customer`) instead of loading by id. The transcript masked that
       symptom; the directive fixes the cause. Precedence mirrors every sibling
       branch: `orderIdentityDirective || boundOrderDirective`, so an unverified
-      order/customer mismatch still challenges before it discloses (a supplier
+      order/customer mismatch still challenges before it discloses (a fulfillment operator
       tick ends in a customer-facing reply, so the identity gate applies there
       too). Both stay OUTSIDE the untrusted fence, pinned by tests.
-- [x] Diagnose Elva Labs supplier redirect for `anasncri@gmail.com`
+- [x] Diagnose Elva Labs fulfillment operator redirect for `anasncri@gmail.com`
       (2026-07-09): production data showed the user is correctly bound as a
-      supplier to both `477168f6-a0cc-4f52-b1a9-70d28ac4c42f` (Elva Labs) and
-      `4f685543-53d4-4a8b-a73c-71eb6155d1b4`, but Elva's persisted Supplier
-      role still grants legacy `supplier.cases.view/respond` permissions from
+      fulfillment operator to both `477168f6-a0cc-4f52-b1a9-70d28ac4c42f` (Elva Labs) and
+      `4f685543-53d4-4a8b-a73c-71eb6155d1b4`, but Elva's persisted historical Supplier
+      role still granted legacy `supplier.cases.view/respond` permissions from
       before the case→ticket rename. Current API/SPA gates require
-      `supplier.tickets.view/respond`, so the supplier client gate redirects to
+      `fulfillment_operator.tickets.view/respond`, so the fulfillment operator client gate redirects to
       `/`. Added migration `0044_supplier_ticket_permissions` to map old ids to
-      current ids, and made `ensureSupplierRole` remove stale supplier-case
-      permissions before ensuring the current supplier-ticket permissions.
-      Verified with a red/green supplier-store integration regression, local
+      the then-current ticket ids; migration 0048 later moved those ticket ids
+      to the Fulfillment Operator namespace.
+      Verified with a red/green fulfillment-operator-store integration regression, local
       migration, and `pnpm build`. Production repair was not applied in-session:
       the approval reviewer rejected the live RBAC write because the user had
       asked for diagnosis rather than explicitly approving a production data
       mutation; deploy/run the migration or explicitly approve the narrow repair
       to restore Elva immediately.
-- [x] Supplier portal deep links select a supplier workspace (2026-07-09):
-      suppliers with both a merchant/default workspace and a supplier binding
+- [x] Fulfillment Operator portal deep links select a fulfillment operator workspace (2026-07-09):
+      fulfillment operators with both a merchant/default workspace and a fulfillment operator binding
       could land on `/`, fire the merchant Today summary, see "Couldn’t load
-      your summary", and never reach `/supplier/tickets`. Fixed the SPA session
-      bootstrap to prefer a supplier workspace on `/supplier/*` routes, even
+      your summary", and never reach `/fulfillment-operator/tickets`. Fixed the SPA session
+      bootstrap to prefer a fulfillment operator workspace on `/fulfillment-operator/*` routes, even
       when the stored workspace is merchant, while preserving normal merchant
-      defaults elsewhere; if no supplier workspace exists, the supplier route
+      defaults elsewhere; if no fulfillment operator workspace exists, the fulfillment operator route
       falls back to the normal active workspace so RBAC handles accidental visits
       cleanly. Verified with the focused session-context regression, dashboard
       SPA build, and `pnpm build`.
@@ -1436,8 +1467,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       and Telegram (merchant notifications), renamed "Cloudflare R2" to
       Cloudflare (object storage + web hosting), noted merchant-connected
       IMAP/SMTP mailboxes flow through the merchant's own provider, and
-      added a "Sharing on merchant instructions" section for supplier-portal
-      / supplier-sheet disclosure. `DATA_PROCESSING_NOTICE_VERSION` bumped
+      added a "Sharing on merchant instructions" section for fulfillment-operator portal
+      / fulfillment-operator sheet disclosure. `DATA_PROCESSING_NOTICE_VERSION` bumped
       2026-07-04 → 2026-07-07, so existing tenants must re-accept before new
       connector writes (`legalAcceptanceIsCurrent`). DPA version unchanged.
       Verified with `pnpm build` and the legal + tenant-repository tests.
@@ -1487,9 +1518,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `support-agent-dashboard-v2` unaffected, still 200). The Next source
       tree itself still exists (and still builds via `tsc -b`); deleting it
       is a separate decision.
-- [x] Concurrent wait states: a ticket can wait on approval AND a supplier at
+- [x] Concurrent wait states: a ticket can wait on approval AND a fulfillment operator at
       once. Status stays the single `primaryWaitStatus` pointer (approval wins);
-      both waits are row-derived and shown as chips; a supplier update on a
+      both waits are row-derived and shown as chips; a fulfillment operator update on a
       waiting-for-approval ticket redrafts (supersedes pending approvals + resumes).
 - [x] SPA settings OVERVIEW fixed (2026-07-05): the `/settings/$` splat
       Placeholder route was SHADOWING the exact `/settings` route, so the
@@ -1534,7 +1565,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       Test: test/legacy-settings-redirects.test.ts (source pins + splat
       matching pins). Verified with the SPA suite (483 tests), `pnpm build`,
       and the SPA Vite build.
-- [ ] Remove `waiting_for_approval` / `waiting_for_supplier` from the
+- [ ] Remove `waiting_for_approval` / `waiting_for_fulfillment_operator` from the
       agent-settable `ticket.update_status` enum (`packages/tools/src/ticket/update-status.ts`)
       — those are runtime-owned parks, not agent-settable; agent-visible schema
       change, own slice.
@@ -1572,7 +1603,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       counts DISTINCT tickets now, so the chip is correct even before the
       backend redeploys and runs 0038.
 - [ ] Finish ticket-recovery hardening follow-ups: non-Gmail send dedup where
-      feasible, and epoch handling for timer/supplier events.
+      feasible, and epoch handling for timer/fulfillment-operator events.
 - [ ] Add deterministic automated-mail guards before triage and before sending
       customer replies. (The manual blocked-senders list landed 2026-07-05;
       this item is the automatic complement: Auto-Submitted / Precedence:bulk /
@@ -1609,13 +1640,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       runtime, dashboard, worker recovery, and manual ticket actions.
 - [x] Dashboard manual status changes, take-over, resume, retry last step, and
       restart-from-triage.
-- [x] Manual escalate-to-supplier from the ticket page (⋮ menu → dialog):
-      `POST /dashboard/tickets/:id/escalate-supplier` writes the escalation row
-      (the notify outbox) and parks via `parkWaitingForSupplierManually` —
+- [x] Manual escalate-to-fulfillment-operator from the ticket page (⋮ menu → dialog):
+      `POST /dashboard/tickets/:id/escalate-fulfillment-operator` writes the escalation row
+      (the notify outbox) and parks via `parkWaitingForFulfillmentOperatorManually` —
       bridges from `human_takeover`, keeps `waiting_for_approval` primary.
 - [x] Ticket-header actions rework: Refund is a text button, Resolve carries its
       label, retries live in a dedicated ↺ dropdown ("Retry last step" /
-      "Retry ticket"), ⋮ menu holds status changes + supplier escalation.
+      "Retry ticket"), ⋮ menu holds status changes + fulfillment operator escalation.
 - [x] Restart-from-triage rebinds to triage, clears stale classification, and
       cancels pending approvals from the abandoned route.
 - [x] Resumed tickets can replay the full conversation thread so triage and
@@ -1689,12 +1720,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       Merchant: composer Attach button → raw-bytes upload endpoint
       (image/png,jpeg,gif,webp + pdf, magic-byte sniff, 10 MiB cap, per-route
       11 MiB bodyLimit) → ids on manual reply + merged into Edit-and-Approve
-      overrides. Supplier: portal update form uploads scoped to the OPEN
-      escalation; `recordSupplierUpdate` validates ids (source='supplier', own
-      ticket), stamps `context.supplierUpdate.attachments`, event payload
+      overrides. Fulfillment Operator: portal update form uploads scoped to the OPEN
+      escalation; `recordFulfillmentOperatorUpdate` validates ids (source='fulfillment_operator', own
+      ticket), stamps `context.fulfillmentOperatorUpdate.attachments`, event payload
       carries `{id, filename}`; runtime prompt lists trusted ids + fenced
       untrusted filenames so the agent forwards files via
-      `conversation.reply` `attachmentIds`. Context card shows "Supplier
+      `conversation.reply` `attachmentIds`. Context card shows "Fulfillment Operator
       files"; GET `/dashboard/tickets/:id/attachments` lists a ticket's index.
 
 ### Shopify, Orders, Refunds, Discounts, And Tracking
@@ -1729,7 +1760,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `permission-toggle`, `write_orders` (already requested — no re-OAuth).
       Scenario `shipping_address_update`: customer gave the address → propose
       the update; didn't → `ask_customer` first; already shipped →
-      `supplierMode: escalate_and_wait`. Bundle-ping summarizer shows the
+      `fulfillmentOperatorMode: escalate_and_wait`. Bundle-ping summarizer shows the
       destination (street + city), never the GID.
 - [x] Discount/coupon tool issues bounded, single-use, customer-locked goodwill
       coupons through tenant discount policy.
@@ -1740,50 +1771,50 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Shopify integration capability grid distinguishes scopeless tools from
       real missing scopes and shows platform capabilities.
 
-### Suppliers
+### Fulfillment Operators
 
-- [x] Supplier portal closes the escalation loop: agent escalates, ticket waits,
-      supplier posts an update, and the agent drafts the customer reply.
-- [x] Supplier notification uses a durable outbox ledger rather than
+- [x] Fulfillment Operator portal closes the escalation loop: agent escalates, ticket waits,
+      fulfillment operator posts an update, and the agent drafts the customer reply.
+- [x] Fulfillment Operator notification uses a durable outbox ledger rather than
       best-effort send.
-- [x] Supplier updates re-engage the agent from all allowed resting states a
+- [x] Fulfillment Operator updates re-engage the agent from all allowed resting states a
       person can leave the ticket in.
-- [x] Supplier update payloads carry escalation ids so repeat escalations do not
+- [x] Fulfillment Operator update payloads carry escalation ids so repeat escalations do not
       cross-dedup.
-- [x] Suppliers can be bound to many merchant workspaces through an
+- [x] Fulfillment Operators can be bound to many merchant workspaces through an
       org-independent binding model.
-- [x] Merchant and supplier workspaces merge into one switcher, with permissions
+- [x] Merchant and fulfillment operator workspaces merge into one switcher, with permissions
       resolved per active workspace kind.
-- [x] Supplier portal pages use a constrained projection and do not expose full
+- [x] Fulfillment Operator portal pages use a constrained projection and do not expose full
       customer thread data.
-- [x] Suppliers can fix the order's tracking number from the escalation page
+- [x] Fulfillment Operators can fix the order's tracking number from the escalation page
       (a reship went out under a new number): `POST
-      /dashboard/supplier/tickets/:id/tracking` → unit-tested
-      `updateSupplierTracking` core → `ShopifyService.updateFulfillmentTracking`
+      /dashboard/fulfillment-operator/tickets/:id/tracking` → unit-tested
+      `updateFulfillmentOperatorTracking` core → `ShopifyService.updateFulfillmentTracking`
       (Shopify `fulfillmentTrackingInfoUpdate`, `notifyCustomer: false` — the
       customer hears it from the agent, never a store email). Open escalations
       only (404 walls, 409 once resolved). Fulfillment picked by matching the
       escalation's tracking projection, else the order's single fulfillment;
       several-without-match is refused (`ambiguous_fulfillment`), not guessed.
       Bookkeeping tx: escalation tracking re-stamped + stale
-      `context.liveTrackingStatus` cache dropped + `supplier.tracking_updated`
-      audit row. Does NOT resolve the escalation — the supplier's posted
+      `context.liveTrackingStatus` cache dropped + `fulfillment_operator.tracking_updated`
+      audit row. Does NOT resolve the escalation — the fulfillment operator's posted
       update stays the thing that re-engages the agent.
 - [x] Concurrent wait states: a ticket can hold a pending approval AND an open
-      supplier escalation at once. `tickets.status` stays the single
+      fulfillment operator escalation at once. `tickets.status` stays the single
       `primaryWaitStatus` pointer (approval wins); both waits are row-derived
       (pending approvals / open escalations) and surfaced as `waitingOn` chips.
       The tick that queues an ask-gated reply then escalates parks the bundle
-      (`waiting_for_approval`), the supplier notify outbox keys on the open
-      escalation row (not status), an approval resume parks on the supplier
-      while an escalation is open, and a supplier update on a
+      (`waiting_for_approval`), the fulfillment operator notify outbox keys on the open
+      escalation row (not status), an approval resume parks on the fulfillment operator
+      while an escalation is open, and a fulfillment operator update on a
       waiting-for-approval ticket redrafts (supersedes pending approvals + resumes
       so the agent drafts fresh).
 
 ### Dashboard And SPA
 
 - [x] Merchant dashboard includes Today, ticket list, ticket detail, approvals,
-      audit, settings, members, integrations, policies, knowledge, and supplier
+      audit, settings, members, integrations, policies, knowledge, and fulfillment operator
       surfaces.
 - [x] SPA is mobile friendly (2026-07-08). Below `md` (768px, pinned by
       `lib/use-media-query.ts` + test) the shell branches in JS via
@@ -1835,7 +1866,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] SPA port uses Vite, TanStack Router, TanStack Query, cookie BFF auth,
       workspace context, and route-level read/write pages.
 - [x] SPA ticket page supports mutations, approval decisions, refund modal,
-      supplier update form, live refetch boundary, and settings forms.
+      fulfillment operator update form, live refetch boundary, and settings forms.
 - [x] Approval UI hides the unused approval `reasoning` field and raw proposed
       input JSON; approval cards/pages show the ticket context note instead.
 - [x] SPA onboarding self-heals org-less sessions and avoids redirect loops
@@ -1905,7 +1936,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       disabled for an action the agent may not take at all.
 - [x] The playbook warns, live, when its prose contradicts those switches: a note
       that `/`-references an action the scenario denies (a remedy that isn't
-      ticked, or `supplier.escalate` with supplier handling set to none) shows an
+      ticked, or `fulfillment_operator.escalate` with fulfillment operator handling set to none) shows an
       amber line naming it the merchant's way. Purely client-side —
       `deniedActionsFor` mirrors the runtime envelope, and both halves are on the
       one screen. Baseline actions never warn.
@@ -2088,8 +2119,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       removed from the real tools; SPA `toolActionLabel` reads the same map; the
       Telegram bundle summarizer uses it as the line base. Renames:
       conversation.reply → "Reply to the customer", order.cancel → "Cancel and
-      refund the order", supplier.escalate → "Ask the supplier for help",
-      supplier.add_sheet_row → "Log the issue with the supplier"; every internal
+      refund the order", fulfillment_operator.escalate → "Ask the fulfillment operator for help",
+      fulfillment_operator.add_sheet_row → "Log the issue with the fulfillment operator"; every internal
       tool got a friendly name too (audit rows read as words). Visibility on the
       agent page remains governed solely by `tenantControl` — a name no longer
       implies tenant-facing. Drift guard: packages/tools/test/display-names.test.ts
@@ -2101,26 +2132,26 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Runtime And Reliability
 
-- [x] Add replay/resume behavior for held `supplier.updated` events after
-      approval decisions. (Redraft: a supplier update on a
+- [x] Add replay/resume behavior for held `fulfillment_operator.updated` events after
+      approval decisions. (Redraft: a fulfillment operator update on a
       waiting-for-approval ticket supersedes the pending approvals and resumes;
       the event is no longer held.)
-- [ ] Add merchant-facing recovery when supplier notification attempts exhaust
-      and the ticket is still waiting for supplier.
-- [ ] `escalateSupplierNotifyFailure` keeps `onlyFromStatus:
-      "waiting_for_supplier"`, so a waiting-for-approval ticket with an open
-      escalation that exhausts supplier-notify attempts no-ops instead of
+- [ ] Add merchant-facing recovery when fulfillment operator notification attempts exhaust
+      and the ticket is still waiting for fulfillment_operator.
+- [ ] `escalateFulfillmentOperatorNotifyFailure` keeps `onlyFromStatus:
+      "waiting_for_fulfillment_operator"`, so a waiting-for-approval ticket with an open
+      escalation that exhausts fulfillment-operator-notify attempts no-ops instead of
       escalating to a human. Acceptable for now (the merchant is already engaged
-      via the approval), but revisit if suppliers go unreachable under
+      via the approval), but revisit if fulfillment operators go unreachable under
       concurrent waits.
-- [ ] `supplier_unreachable` risk flag is not stamped on waiting-for-approval
+- [ ] `fulfillment_operator_unreachable` risk flag is not stamped on waiting-for-approval
       tickets (same `onlyFromStatus` gate as above).
-- [ ] Multi-escalation supplier note history is audit-trail only:
-      `context.supplierUpdate` is last-write-wins, so a second escalation's note
+- [ ] Multi-escalation fulfillment operator note history is audit-trail only:
+      `context.fulfillmentOperatorUpdate` is last-write-wins, so a second escalation's note
       overwrites the first in context (the audit log preserves both).
-- [ ] Allow a supplier correction or second update to the same escalation, or
+- [ ] Allow a fulfillment operator correction or second update to the same escalation, or
       make the required new escalation flow explicit in the UI.
-- [ ] Add epoch handling to timer and supplier events, building on
+- [ ] Add epoch handling to timer and fulfillment operator events, building on
       `tickets.epoch`.
 - [ ] Evaluate IMAP/SMTP pre-send dedup scan; Graph cannot rely on custom
       Message-ID.
@@ -2206,23 +2237,23 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [ ] Add Aftership/EasyPost carrier integrations with per-tenant credentials
       and proactive `tracking.changed` webhook ingestion.
 
-### Suppliers
+### Fulfillment Operators
 
-- [x] Manual escalate-to-supplier auto-fills the order projection (`orderRef`,
+- [x] Manual escalate-to-fulfillment-operator auto-fills the order projection (`orderRef`,
       ship city/country, newest tracking number) server-side from the ticket's
       canonically-bound order (`identifiedOrderId` GID only — never the
-      customer's quoted ref; wrong-order data must not reach a supplier).
+      customer's quoted ref; wrong-order data must not reach a fulfillment operator).
       Best-effort: an unreachable Shopify degrades to nulls, never blocks the
       escalation. `escalation-projection.ts` + handler wiring in apps/api.
-- [ ] Add merchant-facing supplier list and pending invitation management if the
+- [ ] Add merchant-facing fulfillment operator list and pending invitation management if the
       invite-only settings surface is insufficient.
-- [ ] Replace one-default-supplier routing with the fulfillment-scoped logistics
+- [ ] Replace one-default-fulfillment-operator routing with the fulfillment-scoped logistics
       routing plan in Current Focus / ADR 0001 (includes per-vendor mappings).
-- [ ] Revisit `supplierMode` semantics in autonomous loop so wait vs
-      notify-and-proceed is enforced after gated supplier actions.
-- [ ] Keep supplier access binding-based; never fall back to org membership for
-      supplier portal authorization.
-- [x] Supplier tracking edit Shopify access fixed in code (2026-07-09): the
+- [ ] Revisit `fulfillmentOperatorMode` semantics in autonomous loop so wait vs
+      notify-and-proceed is enforced after gated fulfillment operator actions.
+- [ ] Keep fulfillment operator access binding-based; never fall back to org membership for
+      fulfillment operator portal authorization.
+- [x] Fulfillment Operator tracking edit Shopify access fixed in code (2026-07-09): the
       old follow-up named obsolete `write_fulfillments`, which was never in ANY
       scope list — so the portal's tracking edit could never have been
       authorized on any install. Current Shopify `fulfillmentTrackingInfoUpdate`
@@ -2233,8 +2264,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `write_assigned_fulfillment_orders` is for apps registered as a Shopify
       fulfillment service, which this app is not. Added them to
       `DEFAULT_SHOPIFY_SCOPES` + `shopify.app.toml`, added a Shopify capability
-      grid row ("Update shipment tracking from supplier portal"), and classify
-      that denial as `shopify_permission_required` so the supplier sees a
+      grid row ("Update shipment tracking from fulfillment operator portal"), and classify
+      that denial as `shopify_permission_required` so the fulfillment operator sees a
       stable "store connection doesn't allow tracking changes yet" message
       instead of a generic retry. Verified with focused API/SPA regressions,
       dashboard-contracts build, SPA build, and `pnpm build`.
@@ -2262,11 +2293,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       transition, `components/ui/animate-height.tsx`), and the aside stays
       mounted so an emptying card slides out via the existing translate
       transition instead of unmounting with a pop.
-- [x] Context card shows the supplier's answer: `context.supplierUpdate`
-      (stamped by `recordSupplierUpdate`) renders as bespoke "Supplier note" /
-      "Supplier suggests" multiline rows in `lib/ticket-context.ts` instead of
+- [x] Context card shows the fulfillment operator's answer: `context.fulfillmentOperatorUpdate`
+      (stamped by `recordFulfillmentOperatorUpdate`) renders as bespoke "Fulfillment Operator note" /
+      "Fulfillment Operator suggests" multiline rows in `lib/ticket-context.ts` instead of
       being invisible (it was filtered out of `CARD_KEYS` and would have
-      JSON-dumped via the fallback). Internal `supplierId` deliberately hidden.
+      JSON-dumped via the fallback). Internal `fulfillmentOperatorId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
 - [x] Attachment previews in the ticket thread (2026-07-09, `f662d2b` +
       `c61e2ea`). Three legs, as designed:
@@ -2353,7 +2384,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Orphaned upload GC (2026-07-09, `20c31d3`). `ticket_attachments.used_at`
       (migration 0041) is stamped when a file becomes part of something durable:
       an outgoing reply (`resolveDraftAttachmentIds`, manual reply handler) or a
-      supplier's posted update (`recordSupplierUpdate`, IN its tx — used iff the
+      fulfillment operator's posted update (`recordFulfillmentOperatorUpdate`, IN its tx — used iff the
       update committed). `apps/worker/src/attachment-gc.ts` reclaims rows that
       stay NULL past 30 days, on the existing daily retention cron.
       - Two retain-guards, both fail-safe: a PENDING approval on the ticket may
@@ -2375,18 +2406,18 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       - 0041 backfills `used_at = created_at` on existing rows: we can't tell
         after the fact which were sent, and over-retaining beats deleting a blob
         a live reply references.
-- [x] Supplier portal shows the files the supplier sent (2026-07-09, `0f1069b`).
+- [x] Fulfillment Operator portal shows the files the fulfillment operator sent (2026-07-09, `0f1069b`).
       `ticket_attachments.escalation_id` (migration 0040, nullable — merchant
-      and inbound rows carry none) is stamped at supplier-upload time;
-      `getEscalationForSupplier` projects that escalation's own files and the
-      supplier's chat bubble renders them (metadata only, storage keys stay
-      server-side). `supplierChatMessages` only attaches them to the RESOLVED
+      and inbound rows carry none) is stamped at fulfillment-operator upload time;
+      `getEscalationForFulfillmentOperator` projects that escalation's own files and the
+      fulfillment operator's chat bubble renders them (metadata only, storage keys stay
+      server-side). `fulfillmentOperatorChatMessages` only attaches them to the RESOLVED
       outbound bubble, so an upload staged against an abandoned draft never
       reads as an answer.
-      - SECURITY tightening in the same slice: `recordSupplierUpdate` used to
-        accept any `source='supplier'` id on the ticket, so a SECOND escalation
+      - SECURITY tightening in the same slice: `recordFulfillmentOperatorUpdate` used to
+        accept any `source='fulfillment_operator'` id on the ticket, so a SECOND escalation
         could re-send the first one's files. Validation is now escalation-scoped.
-      - Pre-existing supplier rows keep a null `escalation_id` (they predate the
+      - Pre-existing fulfillment operator rows keep a null `escalation_id` (they predate the
         binding) and stay reachable via the ticket-context stamp their update
         wrote; they will not appear in the portal's per-escalation view.
 - [x] `ApprovalSignalsStrip` / `ApprovalCard` now merge risk flags via
@@ -2397,7 +2428,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       edit landed SPA-only (the api endpoint is shared, so porting is just the
       popover + action).
 - [ ] `apps/dashboard` (Next) still has the old ticket-header layout (icon-only
-      refund, retries in the ⋮ menu, no manual supplier escalation) — port the
+      refund, retries in the ⋮ menu, no manual fulfillment operator escalation) — port the
       SPA's rework only if that app stays user-facing.
 - [ ] Fix legacy relay tickets where corrected `customerEmail` updates display but
       connector replies still target original thread recipients.
@@ -2451,11 +2482,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       2026-07-08 `delivery_issue` reassure-reply note (`39ab74e`) needs a
       policy re-save (or the merge-on-read above) to reach existing tenants —
       for live tenants, edit /settings/resolution-policy directly. (The
-      `where_is_order` supplierMode flip from `39ab74e` was superseded by the
+      `where_is_order` fulfillmentOperatorMode flip from `39ab74e` was superseded by the
       general re-classification rule `d8b1ddc` and reverted.) The 2026-07-11
       partial-refund note updates for `refund_request`, `damaged_product`, and
       `wrong_item` have the same stored-policy caveat.
-- [ ] If `supplier.escalate` is ever set to `auto`, the tool description
+- [ ] If `fulfillment_operator.escalate` is ever set to `auto`, the tool description
       ("must NOT send a customer reply" after escalated:true) suppresses the
       reassuring holding reply — reword the description before flipping any
       tenant to auto-escalation.
@@ -2503,8 +2534,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       source.
 - [x] 17track v1 is platform-managed and lookup-only. Proactive tracking belongs
       to later Aftership/EasyPost style integrations.
-- [x] Supplier identity is binding-anchored and can span many merchant
-      workspaces, superseding the old one-supplier-one-workspace decision.
+- [x] Fulfillment Operator identity is binding-anchored and can span many merchant
+      workspaces, superseding the old one-fulfillment-operator-one-workspace decision.
 - [x] Approval rows do not expire by age; email approval links remain bounded,
       and stale drafts are warned rather than blocked.
 - [x] Ticket retention archives resolved tickets after 30 days and deletes archived
@@ -2518,7 +2549,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       because agents do not consult human RBAC.
 - [x] Scenario-resolution agent was added beside legacy specialists behind a
       flag instead of replacing specialist prompts in one step.
-- [x] `supplier.notify` was not built; `supplier.escalate` is the supplier
+- [x] `fulfillment_operator.notify` was not built; `fulfillment_operator.escalate` is the fulfillment operator
       contact primitive.
 - [x] SPA keeps the existing flat dashboard package layout instead of moving
       code under `src/`.
@@ -2526,13 +2557,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       single "who acts next" pointer; both wait facts are derived from rows
       (pending approvals / open escalations). Precedence is encoded once in
       `primaryWaitStatus` (agent-core) — approval wins, because the merchant is
-      the next unblocker and the supplier wait is passive (carried by the open
+      the next unblocker and the fulfillment operator wait is passive (carried by the open
       escalation row + notify outbox). This preserves the CHECK constraint, the
       `(tenant,status)` index, `groupBy` rollups, list filters, and the cron
       mutex-guards.
-- [x] A supplier update on a ticket parked `waiting_for_approval` REDRAFTS: it
+- [x] A fulfillment operator update on a ticket parked `waiting_for_approval` REDRAFTS: it
       supersedes every pending approval (they may be stale in light of the
-      supplier's note) and resumes the ticket so the agent drafts fresh, rather
+      fulfillment operator's note) and resumes the ticket so the agent drafts fresh, rather
       than holding the event. No epoch bump — stale approve links are inert
       (`already_decided` → 409), and the bundle filter/reminder sweep read
       pending only.
@@ -2552,10 +2583,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - A ticket in `human_takeover` never runs the agent until an explicit resume.
 - Failed customer-reply delivery must never resolve the ticket.
 - Delivery-scoped side-effect markers must not dedup distinct inbound messages.
-- Supplier portal access is by supplier binding, never by WorkOS org membership.
+- Fulfillment Operator portal access is by fulfillment operator binding, never by WorkOS org membership.
 - Concurrent wait states: `tickets.status` is the single `primaryWaitStatus`
   pointer (approval wins); both wait facts are row-derived (pending approvals /
-  open escalations), never a status set. The supplier notify outbox keys on the
+  open escalations), never a status set. The fulfillment operator notify outbox keys on the
   open escalation row, not on `tickets.status`.
 - Path-B dashboard data arrives over JSON; Date-typed API fields must be coerced
   before calling Date methods.

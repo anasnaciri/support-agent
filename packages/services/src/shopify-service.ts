@@ -405,11 +405,11 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
 
     /**
      * Replace a fulfillment's tracking info via Shopify's
-     * `fulfillmentTrackingInfoUpdate` mutation — the supplier portal's
+     * `fulfillmentTrackingInfoUpdate` mutation — the fulfillmentOperator portal's
      * "fix the tracking number" edit (a reship went out under a new
-     * number). A store write under an authenticated supplier's authority,
+     * number). A store write under an authenticated fulfillmentOperator's authority,
      * not an agent tool, so no `PermissionService` consultation — the
-     * supplier-portal permission gate covers it. Returns the fulfillment
+     * fulfillment-operator-portal permission gate covers it. Returns the fulfillment
      * as Shopify stored it. Maps `userErrors` → `FulfillmentUpdateFailed`;
      * structural failures reuse the existing `ShopifyError` tags. Needs one
      * of Shopify's fulfillment-order write scopes; the app requests all three

@@ -50,7 +50,7 @@ import {
   PlatformMailServiceTest,
   SheetsServiceTest,
   ShopifyServiceTest,
-  SupplierEscalationServiceTest,
+  FulfillmentOperatorEscalationServiceTest,
   TenantAgentOverridesServiceTest,
   TrackingServiceTest,
   TenantRepository,
@@ -79,8 +79,8 @@ const approvalLinkLayer = Layer.succeed(ApprovalLinkConfig, {
 const platformMailNoop = PlatformMailServiceTest({});
 const tenantOverridesEmpty = TenantAgentOverridesServiceTest();
 // Default tenant settings used by every e2e flow that doesn't care
-// about the values. `supplierEscalationSheet: null` keeps the runtime's
-// `buildSystemPrompt` from injecting the supplier header into agents
+// about the values. `fulfillmentOperatorEscalationSheet: null` keeps the runtime's
+// `buildSystemPrompt` from injecting the fulfillmentOperator header into agents
 // that don't exercise it. Tests that need a non-null sheet override
 // this layer locally.
 const defaultTenantSettings = new TenantSettings({
@@ -88,7 +88,7 @@ const defaultTenantSettings = new TenantSettings({
   refundPolicy: defaultRefundPolicy,
   discountPolicy: defaultDiscountPolicy,
   retentionDays: 730,
-  supplierEscalationSheet: null,
+  fulfillmentOperatorEscalationSheet: null,
   legalAcceptance: null,
 });
 const tenantRepoDefault = TenantRepositoryTest({
@@ -655,25 +655,25 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // ----------------------------------------------------------------
-  // supplier.escalate producer: an agent with the tool set to `allow`
-  // hands a stuck order to the supplier; the runtime records the
-  // escalation (via SupplierEscalationService), parks the ticket in
-  // waiting_for_supplier, and ends the tick (no customer reply).
+  // fulfillment_operator.escalate producer: an agent with the tool set to `allow`
+  // hands a stuck order to the fulfillmentOperator; the runtime records the
+  // escalation (via FulfillmentOperatorEscalationService), parks the ticket in
+  // waiting_for_fulfillment_operator, and ends the tick (no customer reply).
   // ----------------------------------------------------------------
-  it("runs supplier.escalate and parks the ticket in waiting_for_supplier", async () => {
+  it("runs fulfillment_operator.escalate and parks the ticket in waiting_for_fulfillment_operator", async () => {
     const escalatingAgent: AgentConfig = {
       id: AgentId("escalating-agent"),
       name: "Escalating",
-      description: "Escalates a stuck order to the supplier.",
+      description: "Escalates a stuck order to the fulfillmentOperator.",
       mode: "primary",
       provider: "openrouter",
       model: "google/gemini-3.5-flash",
-      promptTemplate: "Escalate the stuck order to the supplier.",
-      tools: ["supplier.escalate"],
-      // `allow` → the runtime parks in waiting_for_supplier rather than
+      promptTemplate: "Escalate the stuck order to the fulfillmentOperator.",
+      tools: ["fulfillment_operator.escalate"],
+      // `allow` → the runtime parks in waiting_for_fulfillment_operator rather than
       // creating an approval (the default `ask` would park in
       // waiting_for_approval instead).
-      permissionOverrides: { "supplier.escalate": "allow" },
+      permissionOverrides: { "fulfillment_operator.escalate": "allow" },
       handoffs: [],
       maxTurnsPerTick: 2,
       temperature: 0,
@@ -682,7 +682,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "esc-0",
-        tool: "supplier.escalate",
+        tool: "fulfillment_operator.escalate",
         input: {
           problem: "Order stuck in transit 12 days past the delivery window",
           orderRef: "#7001",
@@ -693,14 +693,14 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       },
     ];
     let captured: Record<string, unknown> | undefined;
-    const supplierLayer = SupplierEscalationServiceTest({
+    const fulfillmentOperatorLayer = FulfillmentOperatorEscalationServiceTest({
       escalate: (input) => {
         captured = input as unknown as Record<string, unknown>;
         return Effect.succeed({
           kind: "escalated" as const,
           escalationId: "esc-1",
-          supplierId: "sup-1",
-          supplierEmail: "wh@x.com",
+          fulfillmentOperatorId: "sup-1",
+          fulfillmentOperatorEmail: "wh@x.com",
         });
       },
     });
@@ -715,7 +715,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       TransactionRunnerPassthrough,
       ShopifyServiceTest({}),
       ConversationServiceTest({}),
-      supplierLayer,
+      fulfillmentOperatorLayer,
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
@@ -764,8 +764,8 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ),
     );
 
-    expect(out.result.type).toBe("PausedWaitingForSupplier");
-    expect(out.fetched.status).toBe("waiting_for_supplier");
+    expect(out.result.type).toBe("PausedWaitingForFulfillmentOperator");
+    expect(out.fetched.status).toBe("waiting_for_fulfillment_operator");
     // The tool forwarded the agent's privacy projection to the service.
     expect(captured).toMatchObject({
       problem: "Order stuck in transit 12 days past the delivery window",
@@ -778,27 +778,27 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "event.received",
       "llm.decision",
       "tool.invoked",
-      "ticket.waiting_for_supplier",
+      "ticket.waiting_for_fulfillment_operator",
     ]);
   });
 
   // ----------------------------------------------------------------
-  // No supplier configured: supplier.escalate returns { escalated: false }
+  // No fulfillmentOperator configured: fulfillment_operator.escalate returns { escalated: false }
   // (a normal result, not an error) → the runtime does NOT park the ticket;
   // the agent reads the result and falls back (here, resolves). Proves the
-  // agent never assumes a supplier exists.
+  // agent never assumes a fulfillmentOperator exists.
   // ----------------------------------------------------------------
-  it("does NOT park when no supplier is configured (escalated:false)", async () => {
+  it("does NOT park when no fulfillmentOperator is configured (escalated:false)", async () => {
     const escalatingAgent: AgentConfig = {
       id: AgentId("escalating-agent"),
       name: "Escalating",
-      description: "Escalates a stuck order to the supplier.",
+      description: "Escalates a stuck order to the fulfillmentOperator.",
       mode: "primary",
       provider: "openrouter",
       model: "google/gemini-3.5-flash",
-      promptTemplate: "Escalate the stuck order; reply if there's no supplier.",
-      tools: ["supplier.escalate"],
-      permissionOverrides: { "supplier.escalate": "allow" },
+      promptTemplate: "Escalate the stuck order; reply if there's no fulfillmentOperator.",
+      tools: ["fulfillment_operator.escalate"],
+      permissionOverrides: { "fulfillment_operator.escalate": "allow" },
       handoffs: [],
       maxTurnsPerTick: 3,
       temperature: 0,
@@ -807,10 +807,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "esc-0",
-        tool: "supplier.escalate",
+        tool: "fulfillment_operator.escalate",
         input: { problem: "Order #7001 stuck in transit", orderRef: "#7001" },
       },
-      { type: "final_message", text: "No supplier — acknowledged the delay." },
+      { type: "final_message", text: "No fulfillmentOperator — acknowledged the delay." },
     ];
     const env = Layer.mergeAll(
       TicketRepositoryTest,
@@ -823,7 +823,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       TransactionRunnerPassthrough,
       ShopifyServiceTest({}),
       ConversationServiceTest({}),
-      SupplierEscalationServiceTest({ noSupplier: true }),
+      FulfillmentOperatorEscalationServiceTest({ noFulfillmentOperator: true }),
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
@@ -872,25 +872,25 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ),
     );
 
-    // The ticket is NOT parked on the supplier — the agent kept control.
+    // The ticket is NOT parked on the fulfillmentOperator — the agent kept control.
     expect(out.result.type).toBe("Completed");
     expect(out.fetched.status).toBe("resolved");
     const actions = out.entries.map((e) => e.action);
-    expect(actions).not.toContain("ticket.waiting_for_supplier");
+    expect(actions).not.toContain("ticket.waiting_for_fulfillment_operator");
     expect(actions).toContain("tool.invoked"); // the escalate attempt happened
   });
 
   // ----------------------------------------------------------------
-  // supplier park guard: a ticket in waiting_for_supplier holds stray
+  // fulfillmentOperator park guard: a ticket in waiting_for_fulfillment_operator holds stray
   // events (a customer reply, a timer) so the agent never answers the
   // customer while the warehouse still owns the ticket. Only
-  // supplier.updated / manual.takeover / ticket.resumed pass through.
+  // fulfillment_operator.updated / manual.takeover / ticket.resumed pass through.
   // ----------------------------------------------------------------
-  it("holds a stray customer reply while waiting_for_supplier (agent loop never runs)", async () => {
+  it("holds a stray customer reply while waiting_for_fulfillment_operator (agent loop never runs)", async () => {
     const parkedAgent: AgentConfig = {
       id: AgentId("parked-agent"),
       name: "Parked",
-      description: "Parked on the supplier.",
+      description: "Parked on the fulfillmentOperator.",
       mode: "primary",
       provider: "openrouter",
       model: "google/gemini-3.5-flash",
@@ -939,7 +939,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             provider: "gmail",
             mailbox: "support@merchant.com",
           });
-          yield* repo.transitionStatus(created.id, "waiting_for_supplier", {
+          yield* repo.transitionStatus(created.id, "waiting_for_fulfillment_operator", {
             reason: "test setup",
           });
           const result = yield* runtime.handleEvent({
@@ -965,27 +965,27 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ),
     );
 
-    expect(out.result.type).toBe("PausedWaitingForSupplier");
-    expect(out.fetched.status).toBe("waiting_for_supplier");
+    expect(out.result.type).toBe("PausedWaitingForFulfillmentOperator");
+    expect(out.fetched.status).toBe("waiting_for_fulfillment_operator");
     const actions = out.entries.map((e) => e.action);
-    expect(actions).toContain("event.held_waiting_for_supplier");
+    expect(actions).toContain("event.held_waiting_for_fulfillment_operator");
     expect(actions).not.toContain("llm.decision");
   });
 
   // ----------------------------------------------------------------
-  // supplier.updated consumer: the complement of the guard above — a
-  // supplier update PASSES the park guard, re-enters the agent loop
+  // fulfillment_operator.updated consumer: the complement of the guard above — a
+  // fulfillmentOperator update PASSES the park guard, re-enters the agent loop
   // (so it can draft the customer reply), and resolves the ticket.
   // ----------------------------------------------------------------
-  it("re-enters the agent loop on supplier.updated and resolves the ticket", async () => {
+  it("re-enters the agent loop on fulfillment_operator.updated and resolves the ticket", async () => {
     const reengageAgent: AgentConfig = {
       id: AgentId("reengage-agent"),
       name: "Re-engage",
-      description: "Drafts the customer reply after a supplier update.",
+      description: "Drafts the customer reply after a fulfillmentOperator update.",
       mode: "primary",
       provider: "openrouter",
       model: "google/gemini-3.5-flash",
-      promptTemplate: "Reply to the customer with the supplier's update.",
+      promptTemplate: "Reply to the customer with the fulfillmentOperator's update.",
       tools: [],
       permissionOverrides: {},
       handoffs: [],
@@ -1031,14 +1031,14 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             provider: "gmail",
             mailbox: "support@merchant.com",
           });
-          yield* repo.transitionStatus(created.id, "waiting_for_supplier", {
+          yield* repo.transitionStatus(created.id, "waiting_for_fulfillment_operator", {
             reason: "test setup",
           });
           const result = yield* runtime.handleEvent({
-            type: "supplier.updated",
+            type: "fulfillment_operator.updated",
             ticketId: created.id,
             payload: {
-              supplierId: "sup-1",
+              fulfillmentOperatorId: "sup-1",
               note: "Reshipped via DHL; new ETA Friday.",
               proposedResolution: "reship",
             },
@@ -1056,7 +1056,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const actions = out.entries.map((e) => e.action);
     // The loop ran (not held) — an LLM decision was recorded.
     expect(actions).toContain("llm.decision");
-    expect(actions).not.toContain("event.held_waiting_for_supplier");
+    expect(actions).not.toContain("event.held_waiting_for_fulfillment_operator");
   });
 
   it("restart-from-triage: inlines the whole thread so triage sees what was already done", async () => {
@@ -1491,13 +1491,13 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   // Delivery specialist (missing-package-agent), expanded for refund
   // requests that cite a delivery problem. BRANCH B3 — the agent cannot
   // verify the claim (the tracking number resolves to `no_provider`), so it
-  // pings the merchant (Telegram heads-up) AND escalates to the supplier,
-  // which parks the ticket in waiting_for_supplier. Exercises the REAL agent
+  // pings the merchant (Telegram heads-up) AND escalates to the fulfillmentOperator,
+  // which parks the ticket in waiting_for_fulfillment_operator. Exercises the REAL agent
   // config end-to-end (tools must include tracking.lookup + merchant.notify;
-  // supplier.escalate must be auto-allowed; the turn budget must cover the
-  // get_order -> tracking.lookup -> merchant.notify -> supplier.escalate run).
+  // fulfillment_operator.escalate must be auto-allowed; the turn budget must cover the
+  // get_order -> tracking.lookup -> merchant.notify -> fulfillment_operator.escalate run).
   // ----------------------------------------------------------------
-  it("missing-package: an unverifiable delivery claim pings the merchant and escalates to the supplier (parks)", async () => {
+  it("missing-package: an unverifiable delivery claim pings the merchant and escalates to the fulfillmentOperator (parks)", async () => {
     const orderId = OrderId("gid://shopify/Order/88001");
     const order: ShopifyOrder = {
       id: orderId,
@@ -1557,7 +1557,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c3",
-        tool: "supplier.escalate",
+        tool: "fulfillment_operator.escalate",
         input: {
           problem:
             "Order #8001 to Lyon, FR — customer reports the courier won't deliver; please chase the carrier or reship.",
@@ -1569,13 +1569,13 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       },
     ];
     const mn = makeMerchantNotificationServiceTest({});
-    const supplierLayer = SupplierEscalationServiceTest({
+    const fulfillmentOperatorLayer = FulfillmentOperatorEscalationServiceTest({
       escalate: () =>
         Effect.succeed({
           kind: "escalated" as const,
           escalationId: "esc-9",
-          supplierId: "sup-9",
-          supplierEmail: "wh@x.com",
+          fulfillmentOperatorId: "sup-9",
+          fulfillmentOperatorEmail: "wh@x.com",
         }),
     });
     const env = Layer.mergeAll(
@@ -1603,7 +1603,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         ]),
       }),
       ConversationServiceTest({}),
-      supplierLayer,
+      fulfillmentOperatorLayer,
       mn.layer,
       approvalLinkLayer,
       platformMailNoop,
@@ -1648,9 +1648,9 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ),
     );
 
-    // Parked for the supplier — not auto-refunded, not resolved.
-    expect(out.result.type).toBe("PausedWaitingForSupplier");
-    expect(out.fetched.status).toBe("waiting_for_supplier");
+    // Parked for the fulfillmentOperator — not auto-refunded, not resolved.
+    expect(out.result.type).toBe("PausedWaitingForFulfillmentOperator");
+    expect(out.fetched.status).toBe("waiting_for_fulfillment_operator");
     // The merchant got the Telegram heads-up before we escalated.
     expect(mn.handle.sent).toHaveLength(1);
   });
@@ -1663,7 +1663,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   // reach a reply with tracking.lookup in its loop, instead of escalating
   // every in-transit order.
   // ----------------------------------------------------------------
-  it("missing-package: a normally-moving parcel gets a return-for-refund reply, not a supplier escalation", async () => {
+  it("missing-package: a normally-moving parcel gets a return-for-refund reply, not a fulfillmentOperator escalation", async () => {
     const orderId = OrderId("gid://shopify/Order/88002");
     const order: ShopifyOrder = {
       id: orderId,
@@ -1786,10 +1786,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ),
     );
 
-    // A reply was drafted and parked for approval — NOT escalated to a supplier.
+    // A reply was drafted and parked for approval — NOT escalated to a fulfillmentOperator.
     expect(out.result.type).toBe("PausedWaitingForApproval");
     expect(out.fetched.status).toBe("waiting_for_approval");
-    expect(out.fetched.status).not.toBe("waiting_for_supplier");
+    expect(out.fetched.status).not.toBe("waiting_for_fulfillment_operator");
     expect(out.pending).toHaveLength(1);
     expect(out.pending[0]!.tool).toBe("conversation.reply");
   });
@@ -4323,12 +4323,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // ----------------------------------------------------------------
-  // BRANCH A with supplierEscalationSheet configured: the runtime
-  // injects the `[Supplier escalation sheet: ...]` header into the
+  // BRANCH A with fulfillmentOperatorEscalationSheet configured: the runtime
+  // injects the `[FulfillmentOperator escalation sheet: ...]` header into the
   // missing-package-agent's system prompt; the agent calls
-  // `supplier.add_sheet_row` BEFORE the customer reply.
+  // `fulfillment_operator.add_sheet_row` BEFORE the customer reply.
   // ----------------------------------------------------------------
-  it("missing-package BRANCH A with supplier sheet configured: calls supplier.add_sheet_row before conversation.reply", async () => {
+  it("missing-package BRANCH A with fulfillmentOperator sheet configured: calls fulfillment_operator.add_sheet_row before conversation.reply", async () => {
     const orderId = OrderId("gid://shopify/Order/77777");
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
@@ -4396,7 +4396,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c3",
-        tool: "supplier.read_sheet_columns",
+        tool: "fulfillment_operator.read_sheet_columns",
         input: {
           spreadsheetId: "sheet-warehouse",
           range: "Escalations!A:F",
@@ -4405,7 +4405,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c4",
-        tool: "supplier.add_sheet_row",
+        tool: "fulfillment_operator.add_sheet_row",
         input: {
           spreadsheetId: "sheet-warehouse",
           range: "Escalations!A:F",
@@ -4437,7 +4437,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     // Tenant has a sheet configured → runtime should inject the header
-    // → agent should emit the supplier.add_sheet_row tool call.
+    // → agent should emit the fulfillment_operator.add_sheet_row tool call.
     const tenantsWithSheet = TenantRepositoryTest({
       settingsByTenant: new Map([
         [
@@ -4447,7 +4447,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             refundPolicy: defaultRefundPolicy,
             discountPolicy: defaultDiscountPolicy,
             retentionDays: 730,
-            supplierEscalationSheet: {
+            fulfillmentOperatorEscalationSheet: {
               spreadsheetId: "sheet-warehouse",
               range: "Escalations!A:F",
               description: "warehouse ops",
@@ -4534,17 +4534,17 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     // Runtime parks waiting on the conversation.reply approval.
     expect(out.result.type).toBe("PausedWaitingForApproval");
 
-    // supplier.read_sheet_columns + supplier.add_sheet_row both ran
+    // fulfillment_operator.read_sheet_columns + fulfillment_operator.add_sheet_row both ran
     // (auto-allowed via agent override), in that order, then
     // conversation.reply parked for approval (defaultPermission ask).
     const toolInvocations = out.auditEntries
       .filter((e) => e.action === "tool.invoked")
       .map((e) => (e.details as { tool?: string }).tool);
-    expect(toolInvocations).toContain("supplier.read_sheet_columns");
-    expect(toolInvocations).toContain("supplier.add_sheet_row");
+    expect(toolInvocations).toContain("fulfillment_operator.read_sheet_columns");
+    expect(toolInvocations).toContain("fulfillment_operator.add_sheet_row");
     // The columns must be read BEFORE the row is appended.
-    expect(toolInvocations.indexOf("supplier.read_sheet_columns")).toBeLessThan(
-      toolInvocations.indexOf("supplier.add_sheet_row"),
+    expect(toolInvocations.indexOf("fulfillment_operator.read_sheet_columns")).toBeLessThan(
+      toolInvocations.indexOf("fulfillment_operator.add_sheet_row"),
     );
     // conversation.reply at the ask stage short-circuits BEFORE execute,
     // so there's no tool.invoked row for it — the approval row carries it.
@@ -4929,12 +4929,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   // ----------------------------------------------------------------
   // Damaged-product BRANCH A → PATH REPLACEMENT: the photos confirm the
   // damage (productMatch=match) and the fix is a replacement, so the
-  // agent escalates to the warehouse/supplier instead of replying. The
-  // runtime records the escalation (via SupplierEscalationService), parks
-  // the ticket in waiting_for_supplier, and ends the tick (no customer
-  // reply yet — that happens later, on supplier.updated).
+  // agent escalates to the warehouse/fulfillment-operator instead of replying. The
+  // runtime records the escalation (via FulfillmentOperatorEscalationService), parks
+  // the ticket in waiting_for_fulfillment_operator, and ends the tick (no customer
+  // reply yet — that happens later, on fulfillment_operator.updated).
   // ----------------------------------------------------------------
-  it("hands off to damaged-product-agent BRANCH A and escalates a verified replacement to the supplier", async () => {
+  it("hands off to damaged-product-agent BRANCH A and escalates a verified replacement to the fulfillmentOperator", async () => {
     const orderId = OrderId("gid://shopify/Order/55556");
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
@@ -5005,12 +5005,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "ticket.update_context",
         input: { productMatch: "match" },
       },
-      // turn 5 — PATH REPLACEMENT: escalate to the supplier (parks the
+      // turn 5 — PATH REPLACEMENT: escalate to the fulfillmentOperator (parks the
       // ticket; no customer reply on this tick)
       {
         type: "tool_call",
         callId: "c4",
-        tool: "supplier.escalate",
+        tool: "fulfillment_operator.escalate",
         input: {
           problem:
             "Order #9002 — customer received Ceramic Mug damaged (photos confirm a cracked rim); please ship a replacement and check for a batch/packaging defect.",
@@ -5022,14 +5022,14 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     let captured: Record<string, unknown> | undefined;
-    const supplierLayer = SupplierEscalationServiceTest({
+    const fulfillmentOperatorLayer = FulfillmentOperatorEscalationServiceTest({
       escalate: (input) => {
         captured = input as unknown as Record<string, unknown>;
         return Effect.succeed({
           kind: "escalated" as const,
           escalationId: "esc-dp1",
-          supplierId: "sup-1",
-          supplierEmail: "wh@x.com",
+          fulfillmentOperatorId: "sup-1",
+          fulfillmentOperatorEmail: "wh@x.com",
         });
       },
     });
@@ -5064,7 +5064,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         ]),
       }),
       ConversationServiceTest({}),
-      supplierLayer,
+      fulfillmentOperatorLayer,
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
@@ -5123,10 +5123,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ),
     );
 
-    // A verified-match replacement parks the ticket for the supplier instead
+    // A verified-match replacement parks the ticket for the fulfillmentOperator instead
     // of drafting a customer reply.
-    expect(out.result.type).toBe("PausedWaitingForSupplier");
-    expect(out.fetched.status).toBe("waiting_for_supplier");
+    expect(out.result.type).toBe("PausedWaitingForFulfillmentOperator");
+    expect(out.fetched.status).toBe("waiting_for_fulfillment_operator");
     expect(out.fetched.currentAgentId).toBe(damagedProductAgent.id);
     expect(out.fetched.context["productMatch"]).toBe("match");
 
@@ -5141,7 +5141,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const tools = out.entries
       .filter((e) => e.action === "tool.invoked")
       .map((e) => (e.details as { tool?: string }).tool);
-    expect(tools).toContain("supplier.escalate");
+    expect(tools).toContain("fulfillment_operator.escalate");
     // The replacement path escalates instead of drafting a customer reply
     // on this tick.
     expect(tools).not.toContain("conversation.reply");
@@ -6139,7 +6139,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       },
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
     });
 
@@ -6573,7 +6573,7 @@ describe("AgentRuntime — blocked senders", () => {
     refundPolicy: defaultRefundPolicy,
     discountPolicy: defaultDiscountPolicy,
     retentionDays: 730,
-    supplierEscalationSheet: null,
+    fulfillmentOperatorEscalationSheet: null,
     legalAcceptance: null,
     blockedSenders: {
       emails: ["spammer@gmail.com"],

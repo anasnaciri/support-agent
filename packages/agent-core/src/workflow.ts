@@ -7,7 +7,7 @@ export type WorkflowResult =
       readonly type: "PausedWaitingForApproval";
       readonly approvalId: ApprovalId;
     }
-  | { readonly type: "PausedWaitingForSupplier" }
+  | { readonly type: "PausedWaitingForFulfillmentOperator" }
   // A manager took the ticket over from the dashboard. The runtime holds
   // every event (customer replies, timers) without running the agent until
   // a human hands the ticket back (which transitions it out of

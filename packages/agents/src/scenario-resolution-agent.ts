@@ -17,7 +17,7 @@ import { AgentId, type AgentConfig } from "@support-agent/agent-core";
  *   - A gated (`ask`) action is NOT a stopping point. The runtime QUEUES it (a
  *     pending approval row) and feeds back a "queued, not executed" observation;
  *     the loop continues. The agent can queue several actions (recommend a
- *     refund, escalate to a supplier, …) AND draft the customer reply in one
+ *     refund, escalate to a fulfillment operator, …) AND draft the customer reply in one
  *     run, then stop.
  *   - At end-of-loop the runtime maps the accumulated state to a status: any
  *     queued actions → one `waiting_for_approval` bundle the merchant approves
@@ -25,7 +25,7 @@ import { AgentId, type AgentConfig } from "@support-agent/agent-core";
  *     actionable → `human_takeover` (never a silent close).
  *
  * The SCENARIO supplies the steering. The runtime injects a trusted
- * `[Scenario playbook: …]` header (the merchant's free-text notes + supplier
+ * `[Scenario playbook: …]` header (the merchant's free-text notes + fulfillment operator
  * guidance) and clamps the tool/permission envelope (which remedy tools are
  * enabled, and `allow` vs `ask` for each) — see slice 5. This base prompt is
  * scenario-agnostic; it teaches the LOOP and defers the WHAT to that header.
@@ -59,17 +59,17 @@ export const scenarioResolutionAgent: AgentConfig = {
     "TYPICAL SHAPE OF A RUN (adapt to the scenario, this is not a fixed script):",
     "  1. Read the ticket + look up the order / customer / tracking you need.",
     "  2. Optionally `knowledge.search` for the relevant policy.",
-    "  3. Take the remedy the scenario calls for (e.g. `refund.recommend` or `refund.create`, `discount.create`, `supplier.escalate`). Each gated action is queued, not run.",
+    "  3. Take the remedy the scenario calls for (e.g. `refund.recommend` or `refund.create`, `discount.create`, `fulfillment_operator.escalate`). Each gated action is queued, not run.",
     "  4. If the store owner should know something (a claim you can't verify, a suspicious pattern, a policy gap), call `merchant.notify` (email + chat; it does not pause the ticket and is not a customer message).",
     "  5. Draft the customer reply with `conversation.reply` (or, if you genuinely need information only the customer can give before you can proceed, `conversation.ask_customer` instead, which pauses the ticket until they answer).",
     "  6. STOP: reply with a one-line plain-text final message summarizing what you did. Do not call another tool.",
     "",
     "WRITING THE CUSTOMER REPLY (`conversation.reply`): use the `[Thread context: ...]` header on the customer's message to fill `threadId` and `to[0].email`. Keep it to a few short, warm, specific sentences grounded in the tool results. Never invent order details, tracking, or policy. `to[0].name`: null unless clearly known. `subject`: null (inherits `Re: ...`). `bodyHtml`: null. `inReplyToMessageId`: null. `draftId`: a stable string like `scenario-reply-<threadId>`.",
     "",
-    "TRACKING CAUTION: if `tracking.lookup` returns `kind: \"no_provider\"` with `reason: \"sync_pending\"` or live tracking is otherwise unavailable for an old shipment, do not tell the customer it is simply shipped or imply it is moving normally. Say the carrier status needs verification, use `merchant.notify` or `supplier.escalate` when available, and draft only a cautious reply grounded in the lookup/order facts.",
+    "TRACKING CAUTION: if `tracking.lookup` returns `kind: \"no_provider\"` with `reason: \"sync_pending\"` or live tracking is otherwise unavailable for an old shipment, do not tell the customer it is simply shipped or imply it is moving normally. Say the carrier status needs verification, use `merchant.notify` or `fulfillment_operator.escalate` when available, and draft only a cautious reply grounded in the lookup/order facts.",
     "",
     "JUDGING LATE OR STUCK: a `kind: \"live\"` lookup carries two time counters: `transitDays` (whole days the shipment has been in transit) and `daysSinceLastScan` (whole days since the most recent carrier checkpoint). Use them instead of doing date arithmetic yourself, and never conclude an order is late merely because the customer said so. There is no fixed number of days that counts as too long: the only threshold is the store's own promise. Find that promise in this order. (1) If a trusted `[Store shipping facts: ...]` header is present, it states the exact number of days in transit past which THIS store treats a shipment as delayed, and that number wins; use it and do not go looking for another. (2) Otherwise call `knowledge.search` for the shipping policy and read its stated delivery window, using the one that matches this order's destination when several are given.",
-    "Once you have the threshold: `transitDays` at or past it means the order is LATE, and `daysSinceLastScan` reaching it means the parcel has gone silent for as long as the store's entire promised delivery time, so it is STUCK, even when `status` still reads `in_transit`, because a moving parcel scans and a stalled one does not. On a shipment that is late or stuck, open a supplier check rather than reassuring the customer that the order is on schedule. If neither the header nor the store's documents give you a window, do NOT invent one and do NOT substitute a number of your own. You cannot confirm lateness, so say so and let a human weigh in.",
+    "Once you have the threshold: `transitDays` at or past it means the order is LATE, and `daysSinceLastScan` reaching it means the parcel has gone silent for as long as the store's entire promised delivery time, so it is STUCK, even when `status` still reads `in_transit`, because a moving parcel scans and a stalled one does not. On a shipment that is late or stuck, open a fulfillment operator check rather than reassuring the customer that the order is on schedule. If neither the header nor the store's documents give you a window, do NOT invent one and do NOT substitute a number of your own. You cannot confirm lateness, so say so and let a human weigh in.",
     "Either counter may be `null` when the carrier did not report it. A `null` is not evidence the shipment is fine. You cannot confirm lateness or a stall from it, so do not tell the customer the order is on schedule; fall back to `status` + `lastScan`, and treat an unverifiable delay the way the TRACKING CAUTION above treats an unverifiable status.",
     "CHECK THE TRACKING BELONGS TO THIS ORDER: a `kind: \"live\"` lookup also carries `destinationCountry`, the carrier's own recipient country for the shipment. When BOTH it and the order's `shippingAddress.country` are present and they DIFFER, the tracking number probably belongs to a different order or shipment, not this one: do NOT summarise its status as this order's, and do NOT escalate off it. Say the tracking could not be confirmed for this order and use `merchant.notify` so a human can check the fulfillment's tracking number. Only country granularity is available, so a match means \"same country\", not \"same address\"; when either side is `null` you cannot compare, so ignore the check and judge on the rest of the result.",
     "",
@@ -110,13 +110,13 @@ export const scenarioResolutionAgent: AgentConfig = {
     "discount.create",
     "order.cancel",
     "order.update_shipping_address",
-    // Supplier-tick sync: when a supplier's portal update reports a new
+    // Fulfillment operator-tick sync: when a fulfillment operator's portal update reports a new
     // tracking number (a reship, a re-label), the agent writes it onto the
     // order's fulfillment instead of only mentioning it in the reply. `allow`
-    // by default — the supplier already holds an ungated manual edit of the
+    // by default — the fulfillment operator already holds an ungated manual edit of the
     // same field in their portal.
     "order.update_tracking",
-    "supplier.escalate",
+    "fulfillment_operator.escalate",
   ],
   permissionOverrides: {},
   handoffs: [],

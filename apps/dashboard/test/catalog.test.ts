@@ -32,8 +32,8 @@ const catalog: CatalogResponse = {
       defaultPermission: "ask",
     }),
     tool({
-      name: "supplier.add_sheet_row",
-      displayName: "Escalate to supplier",
+      name: "fulfillment_operator.add_sheet_row",
+      displayName: "Escalate to fulfillmentOperator",
       tenantControl: "permission-toggle",
       defaultPermission: "ask",
     }),
@@ -63,7 +63,7 @@ const agent = (over: Partial<AgentDto> = {}): AgentDto => ({
   tools: [
     "shopify.get_order",
     "conversation.reply",
-    "supplier.add_sheet_row",
+    "fulfillment_operator.add_sheet_row",
     "refund.create",
   ],
   permissionOverrides: {},
@@ -87,7 +87,7 @@ describe("tenantConfigurableActions", () => {
     const actions = tenantConfigurableActions(agent(), catalog);
     expect(actions.map((a) => a.tool.name)).toEqual([
       "conversation.reply",
-      "supplier.add_sheet_row",
+      "fulfillment_operator.add_sheet_row",
       "refund.create",
     ]);
     // shopify.get_order (internal) is excluded entirely.
@@ -102,11 +102,11 @@ describe("tenantConfigurableActions", () => {
 
   it("reflects an in-code permission pin as the agent default", () => {
     const actions = tenantConfigurableActions(
-      agent({ permissionOverrides: { "supplier.add_sheet_row": "allow" } }),
+      agent({ permissionOverrides: { "fulfillment_operator.add_sheet_row": "allow" } }),
       catalog,
     );
     expect(
-      actions.find((a) => a.tool.name === "supplier.add_sheet_row")?.agentDefault,
+      actions.find((a) => a.tool.name === "fulfillment_operator.add_sheet_row")?.agentDefault,
     ).toBe("allow");
   });
 });
@@ -115,7 +115,7 @@ describe("merchantConfigurableTools", () => {
   it("keeps only tools with a tenantControl, in catalog order", () => {
     expect(merchantConfigurableTools(catalog).map((t) => t.name)).toEqual([
       "conversation.reply",
-      "supplier.add_sheet_row",
+      "fulfillment_operator.add_sheet_row",
       "refund.create",
     ]);
     // shopify.get_order (internal plumbing) never reaches the matrix.
@@ -128,7 +128,7 @@ describe("capabilitiesForProvider", () => {
     agents: [],
     tools: [
       tool({
-        name: "supplier.read_sheet_columns",
+        name: "fulfillment_operator.read_sheet_columns",
         defaultPermission: "allow",
         requiredConnectorScopes: {
           provider: "google_sheets",
@@ -136,8 +136,8 @@ describe("capabilitiesForProvider", () => {
         },
       }),
       tool({
-        name: "supplier.add_sheet_row",
-        displayName: "Escalate to supplier",
+        name: "fulfillment_operator.add_sheet_row",
+        displayName: "Escalate to fulfillmentOperator",
         requiredConnectorScopes: {
           provider: "google_sheets",
           scopes: [SHEETS_SCOPE],
@@ -165,12 +165,12 @@ describe("capabilitiesForProvider", () => {
   it("lists one friendly capability per tool, sorted by label", () => {
     expect(capabilitiesForProvider(scopedCatalog, "google_sheets")).toEqual([
       {
-        tool: "supplier.add_sheet_row",
+        tool: "fulfillment_operator.add_sheet_row",
         label: "Add row",
         scopes: [SHEETS_SCOPE],
       },
       {
-        tool: "supplier.read_sheet_columns",
+        tool: "fulfillment_operator.read_sheet_columns",
         label: "Read sheet",
         scopes: [SHEETS_SCOPE],
       },
@@ -189,7 +189,7 @@ describe("capabilitiesForProvider", () => {
       (c) => c.tool,
     );
     expect(tools).not.toContain("conversation.reply");
-    expect(tools).not.toContain("supplier.add_sheet_row");
+    expect(tools).not.toContain("fulfillment_operator.add_sheet_row");
   });
 
   it("excludes a tool that matches the provider but requires no scope", () => {
@@ -216,7 +216,7 @@ describe("platformCapabilitiesForProvider", () => {
   it("surfaces Shopify features that use scopes no agent tool declares", () => {
     const caps = platformCapabilitiesForProvider("shopify");
     // Restock needs write_inventory (no tool claims it); policy/page import
-    // needs both read_legal_policies and read_online_store_pages; supplier
+    // needs both read_legal_policies and read_online_store_pages; fulfillmentOperator
     // tracking edits need fulfillment-order write scopes.
     expect(caps.map((c) => c.scopes)).toEqual([
       ["write_inventory"],
@@ -283,10 +283,10 @@ describe("currentToolPermission", () => {
   it("falls back to the agent default (pin) when no tenant override", () => {
     expect(
       currentToolPermission(
-        agent({ permissionOverrides: { "supplier.add_sheet_row": "allow" } }),
+        agent({ permissionOverrides: { "fulfillment_operator.add_sheet_row": "allow" } }),
         catalog,
         null,
-        "supplier.add_sheet_row",
+        "fulfillment_operator.add_sheet_row",
       ),
     ).toBe("allow");
   });

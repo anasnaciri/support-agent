@@ -133,19 +133,19 @@ export function AppShell({
     };
   }, [resizing]);
 
-  // Supplier portal: a constrained external role gets a BARE shell — no merchant
+  // Fulfillment partner portal: a constrained external role gets a BARE shell — no merchant
   // icon rail, secondary sidebar, or workspace switcher. Access is enforced by
-  // the api (decideSupplierAuthz); this only keeps merchant chrome off their UI.
+  // the api (decideFulfillmentOperatorAuthz); this only keeps merchant chrome off their UI.
   // Placed after all hooks above so the rules-of-hooks order is unconditional.
-  if (pathname.startsWith("/supplier")) {
+  if (pathname.startsWith("/fulfillment-operator")) {
     return (
       <div className="flex min-h-screen flex-col bg-background">
         <header className="flex items-center justify-between border-b border-border/60 px-6 py-3">
           <div className="flex items-center gap-3">
             <span className="text-sm font-semibold tracking-tight">
-              Supplier portal
+              Fulfillment partner portal
             </span>
-            {/* Cross-org switcher: a supplier serving several merchants (and a
+            {/* Cross-org switcher: a fulfillment partner serving several merchants (and a
                 dual-role user with their own store) switches workspaces here. */}
             {workspaces && activeWorkspaceId ? (
               <WorkspaceSwitcher

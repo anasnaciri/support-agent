@@ -33,12 +33,12 @@ export type RbacPermissionId =
   | "audit.view"
   | "members.manage"
   | "account.manage"
-  // Supplier portal — the heavily-constrained external role. A supplier sees
-  // ONLY tickets escalated to them and can ONLY post a supplier update. Kept
-  // separate from every merchant `tickets.*` permission so a Supplier role grants
-  // no merchant surface (and the api gates supplier endpoints on these alone).
-  | "supplier.tickets.view"
-  | "supplier.tickets.respond";
+  // Fulfillment partner portal — the heavily-constrained external role. A partner sees
+  // ONLY tickets escalated to them and can ONLY post a fulfillment partner update. Kept
+  // separate from every merchant `tickets.*` permission so a Fulfillment partner role grants
+  // no merchant surface (and the api gates fulfillmentOperator endpoints on these alone).
+  | "fulfillment_operator.tickets.view"
+  | "fulfillment_operator.tickets.respond";
 
 export type RbacPermissionCategory =
   | "Tickets"
@@ -47,7 +47,7 @@ export type RbacPermissionCategory =
   | "Settings"
   | "Members"
   | "Audit"
-  | "Supplier";
+  | "Fulfillment partner";
 
 export interface RbacPermissionDef {
   readonly id: RbacPermissionId;
@@ -211,20 +211,20 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     description: "Invite teammates, assign roles, and edit role permissions.",
     category: "Members",
   },
-  // ---- Supplier ----
+  // ---- Fulfillment partner ----
   {
-    id: "supplier.tickets.view",
+    id: "fulfillment_operator.tickets.view",
     label: "View escalated tickets",
-    description: "See the tickets a merchant has escalated to this supplier.",
-    category: "Supplier",
+    description: "See the tickets a merchant has escalated to this fulfillment partner.",
+    category: "Fulfillment partner",
   },
   {
-    id: "supplier.tickets.respond",
+    id: "fulfillment_operator.tickets.respond",
     label: "Respond to escalated tickets",
     description:
-      "Post an update or resolution on a ticket escalated to this supplier.",
-    category: "Supplier",
-    implies: ["supplier.tickets.view"],
+      "Post an update or resolution on a ticket escalated to this fulfillment partner.",
+    category: "Fulfillment partner",
+    implies: ["fulfillment_operator.tickets.view"],
   },
 ];
 

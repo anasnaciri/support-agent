@@ -17,7 +17,7 @@ import { ticketActionMenuItems } from "@/lib/ticket-actions-menu";
 import { ticketStatusLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { EscalateSupplierDialog } from "./EscalateSupplierDialog";
+import { EscalateFulfillmentOperatorDialog } from "./EscalateFulfillmentOperatorDialog";
 
 // Merchant-facing copy for the hand-settable status targets; unknown targets
 // fall back to a humanized "Mark as <status>". Mirrors the Next page.
@@ -48,8 +48,8 @@ interface Props {
   readonly canTakeOver: boolean;
   readonly canResume: boolean;
   readonly showRetrySend: boolean;
-  /** Offer "Escalate to supplier" in the ⋮ menu (not already with a supplier, not terminal). */
-  readonly canEscalateSupplier: boolean;
+  /** Offer "Escalate to fulfillment partner" when no partner wait is open. */
+  readonly canEscalateFulfillmentOperator: boolean;
   /** Offer "Block sender" in the ⋮ menu (ticket has a customer email + member holds settings.blocked_senders). */
   readonly canBlockSender: boolean;
   /** Hand-settable status targets (matrix-validated by the api). */
@@ -214,7 +214,7 @@ export function TicketHeaderActions({
   canTakeOver,
   canResume,
   showRetrySend,
-  canEscalateSupplier,
+  canEscalateFulfillmentOperator,
   canBlockSender,
   statusTargets,
   refundSlot,
@@ -322,13 +322,13 @@ export function TicketHeaderActions({
     }));
   const menuItems = [
     ...statusItems,
-    ...(canEscalateSupplier
+    ...(canEscalateFulfillmentOperator
       ? [
           {
-            key: "escalateSupplier",
-            label: "Escalate to supplier",
+            key: "escalateFulfillmentOperator",
+            label: "Escalate to fulfillment partner",
             title:
-              "Hand this ticket to your warehouse/supplier and wait for their update",
+              "Ask the party responsible for fulfilling this shipment to act, then wait for their update",
             pending: false,
             run: () => {
               setMenuOpen(false);
@@ -419,7 +419,7 @@ export function TicketHeaderActions({
         />
       ) : null}
 
-      <EscalateSupplierDialog
+      <EscalateFulfillmentOperatorDialog
         workspaceId={workspaceId}
         ticketId={ticketId}
         open={escalateOpen}

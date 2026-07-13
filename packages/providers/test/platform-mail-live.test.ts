@@ -18,7 +18,7 @@ import {
 import {
   PlatformMailServiceLive,
   ResendConfig,
-  renderSupplierEscalationEmail,
+  renderFulfillmentOperatorEscalationEmail,
 } from "../src/platform-mail-live.js";
 
 const okResponse = (): Response =>
@@ -64,12 +64,12 @@ const tenantRepoWith = (
             refundPolicy: defaultRefundPolicy,
             discountPolicy: defaultDiscountPolicy,
             retentionDays: DEFAULT_RETENTION_DAYS,
-            supplierEscalationSheet: null,
+            fulfillmentOperatorEscalationSheet: null,
             legalAcceptance: null,
           }),
         ),
       setRefundPolicy: () => Effect.void,
-      setSupplierEscalationSheet: () => Effect.void,
+      setFulfillmentOperatorEscalationSheet: () => Effect.void,
       setLegalAcceptance: () => Effect.void,
     }),
   );
@@ -80,7 +80,7 @@ const tenantRepoMissing = (): Layer.Layer<TenantRepository> =>
     TenantRepository.of({
       getSettings: () => Effect.fail(new TenantNotFound({ tenantId })),
       setRefundPolicy: () => Effect.fail(new TenantNotFound({ tenantId })),
-      setSupplierEscalationSheet: () =>
+      setFulfillmentOperatorEscalationSheet: () =>
         Effect.fail(new TenantNotFound({ tenantId })),
       setLegalAcceptance: () => Effect.fail(new TenantNotFound({ tenantId })),
     }),
@@ -270,35 +270,35 @@ describe("PlatformMailServiceLive — Resend", () => {
   });
 });
 
-describe("renderSupplierEscalationEmail (copy builder)", () => {
+describe("renderFulfillmentOperatorEscalationEmail (copy builder)", () => {
   it("includes the portal link, the order ref, and the problem — but no customer PII", () => {
-    const { subject, text, html } = renderSupplierEscalationEmail({
+    const { subject, text, html } = renderFulfillmentOperatorEscalationEmail({
       tenantId,
       escalationId: "esc-1",
-      supplierEmail: "wh@acme.com",
-      portalUrl: "https://app.example.com/supplier/tickets/esc-1",
+      fulfillmentOperatorEmail: "wh@acme.com",
+      portalUrl: "https://app.example.com/fulfillment-operator/tickets/esc-1",
       problem: "Order #1001 to Berlin, DE is stuck — please chase or reship",
       orderRef: "#1001",
     });
     expect(subject).toContain("#1001");
-    expect(text).toContain("https://app.example.com/supplier/tickets/esc-1");
+    expect(text).toContain("https://app.example.com/fulfillment-operator/tickets/esc-1");
     expect(text).toContain("please chase or reship");
-    expect(html).toContain("https://app.example.com/supplier/tickets/esc-1");
+    expect(html).toContain("https://app.example.com/fulfillment-operator/tickets/esc-1");
     // The input never carries customer data; assert nothing leaked in anyway.
     expect(text).not.toContain("@example.com");
     expect(`${subject}${text}${html}`.toLowerCase()).not.toContain("customer email");
   });
 
   it("falls back to a generic call-to-action when no portal URL is configured", () => {
-    const { text } = renderSupplierEscalationEmail({
+    const { text } = renderFulfillmentOperatorEscalationEmail({
       tenantId,
       escalationId: "esc-2",
-      supplierEmail: "wh@acme.com",
+      fulfillmentOperatorEmail: "wh@acme.com",
       portalUrl: null,
       problem: "Stuck order",
       orderRef: null,
     });
-    expect(text).toContain("Log in to your supplier portal");
-    expect(text).not.toContain("/supplier/tickets/");
+    expect(text).toContain("Log in to your fulfillment partner portal");
+    expect(text).not.toContain("/fulfillment-operator/tickets/");
   });
 });

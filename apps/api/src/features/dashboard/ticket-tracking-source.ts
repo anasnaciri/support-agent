@@ -1,7 +1,7 @@
 // Which tracking number the ticket's Tracking card should follow.
 //
 // The Shopify fulfillment is the CANONICAL record of an order's tracking
-// number — it's what `order.update_tracking`, the supplier portal's pencil
+// number — it's what `order.update_tracking`, the fulfillment partner portal's pencil
 // edit, and a merchant editing in the Shopify admin all write to, and it's
 // re-read live on every request. The ticket's `liveTrackingStatus` stamp is a
 // point-in-time snapshot of the agent's last `tracking.lookup`; it goes stale

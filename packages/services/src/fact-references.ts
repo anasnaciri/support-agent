@@ -351,19 +351,19 @@ export interface ActionReference {
  * The tools a scenario playbook may name — the scenario-resolution agent's
  * surface: its always-on baseline (reads, the customer channel, knowledge,
  * context, the merchant heads-up) plus the remedy tools the scenario envelope
- * gates. Tools no playbook can meaningfully direct (handoff, the raw supplier
+ * gates. Tools no playbook can meaningfully direct (handoff, the raw fulfillmentOperator
  * sheet, status writes) stay out so the `/` menu reads as a list of things the
  * agent can DO for a customer.
  */
 const ACTIONABLE_TOOLS: ReadonlyArray<string> = [
-  // Remedies — gated per-scenario by `enabledActions` / `supplierMode`.
+  // Remedies — gated per-scenario by `enabledActions` / `fulfillmentOperatorMode`.
   "refund.create",
   "refund.recommend",
   "discount.create",
   "order.cancel",
   "order.update_shipping_address",
   "order.update_tracking",
-  "supplier.escalate",
+  "fulfillment_operator.escalate",
   // Baseline — always available to the scenario agent.
   "conversation.reply",
   "conversation.ask_customer",

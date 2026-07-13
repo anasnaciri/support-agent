@@ -4,7 +4,7 @@ stateDiagram-v2
     new --> in_progress: agent loop
     in_progress --> waiting_for_approval: tool perm = ask
     in_progress --> waiting_for_customer: conversation.ask_customer
-    in_progress --> waiting_for_supplier: supplier.escalate escalated
+    in_progress --> waiting_for_fulfillment_operator: fulfillment_operator.escalate escalated
     in_progress --> resolved: final_message
     in_progress --> human_takeover: escalate (creds / max_turns / not-wired / reply-send fail)
 
@@ -13,8 +13,8 @@ stateDiagram-v2
     waiting_for_approval --> waiting_for_approval: stray event HELD
 
     waiting_for_customer --> in_progress: customer.replied
-    waiting_for_supplier --> in_progress: supplier.updated
-    waiting_for_supplier --> waiting_for_supplier: stray event HELD
+    waiting_for_fulfillment_operator --> in_progress: fulfillment_operator.updated
+    waiting_for_fulfillment_operator --> waiting_for_fulfillment_operator: stray event HELD
 
     human_takeover --> in_progress: hand back / reply delivered on retry
     human_takeover --> human_takeover: stray event HELD

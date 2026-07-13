@@ -123,7 +123,7 @@ export const reviveDomainEvent = (event: DomainEvent): DomainEvent => {
     case "ticket.created":
     case "approval.approved":
     case "approval.rejected":
-    case "supplier.updated":
+    case "fulfillment_operator.updated":
     case "timer.expired":
     case "manual.takeover":
     case "ticket.resumed":

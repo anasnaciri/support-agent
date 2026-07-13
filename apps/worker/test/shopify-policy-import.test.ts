@@ -246,7 +246,7 @@ describe("selectImportablePages (conservative heuristic)", () => {
       page({ title: "Our blog", handle: "blog" }),
       page({ title: "Affiliate program", handle: "affiliates" }),
       // "about" embedded in a longer name is NOT a match — conservative.
-      page({ title: "About our suppliers", handle: "about-our-suppliers" }),
+      page({ title: "About our fulfillmentOperators", handle: "about-our-fulfillmentOperators" }),
     ];
     expect(titles(pages)).toEqual([]);
   });

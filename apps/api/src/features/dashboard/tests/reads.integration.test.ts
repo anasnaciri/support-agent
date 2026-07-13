@@ -6,7 +6,7 @@ import {
   ticketDetail,
   tickets,
   ticketsList,
-  createSupplier,
+  createFulfillmentOperator,
   insertEscalation,
   makeDbClient,
   tenants,
@@ -157,9 +157,9 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
 });
 
 // Concurrent wait states: a ticket parked `waiting_for_approval` can ALSO carry
-// an open supplier escalation. ticketsList + ticketDetail derive BOTH facts from
+// an open fulfillment partner escalation. ticketsList + ticketDetail derive BOTH facts from
 // rows (pending approvals / open escalations) into `waitingOn` so the dashboard
-// can render a second "waiting on supplier" chip.
+// can render a second "waiting on fulfillmentOperator" chip.
 describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
   const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
   const orgId = `org_${randomUUID().slice(0, 8)}`;
@@ -179,7 +179,7 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
       name: "waiting-on-test",
       workosOrganizationId: orgId,
     });
-    const supplier = await createSupplier(raw.db, tenantId, {
+    const fulfillmentOperator = await createFulfillmentOperator(raw.db, tenantId, {
       name: "WH",
       email: "wh@waiting.test",
     });
@@ -223,7 +223,7 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
     await insertEscalation(raw.db, {
       tenantId,
       ticketId: bothTicketId,
-      supplierId: supplier.id,
+      fulfillmentOperatorId: fulfillmentOperator.id,
       problem: "P",
       orderRef: null,
       shipCity: null,
@@ -235,29 +235,29 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
   afterAll(async () => {
     if (!raw) return;
     // approvals is NO ACTION → before tickets; tickets cascades escalations; tenant
-    // cascades the supplier.
+    // cascades the fulfillment partner.
     await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${tenantId}`);
     await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${tenantId}`);
     await raw.db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
     await raw.close();
   });
 
-  it("ticketsList derives waitingOn per ticket (approval + supplier)", async () => {
+  it("ticketsList derives waitingOn per ticket (approval + fulfillmentOperator)", async () => {
     if (!raw) return;
     const page = await ticketsList(raw.db, tenantId, {}, 1, 50);
     const byId = new Map(page.rows.map((r) => [r.id, r]));
     expect(byId.get(bothTicketId)?.waitingOn).toEqual({
       approval: true,
-      supplier: true,
+      fulfillmentOperator: true,
     });
     expect(byId.get(bothTicketId)?.scenarioKey).toBe("delivery_issue");
     expect(byId.get(approvalOnlyTicketId)?.waitingOn).toEqual({
       approval: true,
-      supplier: false,
+      fulfillmentOperator: false,
     });
     expect(byId.get(plainTicketId)?.waitingOn).toEqual({
       approval: false,
-      supplier: false,
+      fulfillmentOperator: false,
     });
 
     const scenarioSearch = await ticketsList(
@@ -273,7 +273,7 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
   it("ticketDetail derives waitingOn (both waits held at once)", async () => {
     if (!raw) return;
     const detail = await ticketDetail(raw.db, tenantId, bothTicketId);
-    expect(detail?.ticket.waitingOn).toEqual({ approval: true, supplier: true });
+    expect(detail?.ticket.waitingOn).toEqual({ approval: true, fulfillmentOperator: true });
     expect(detail?.ticket.scenarioKey).toBe("delivery_issue");
   });
 });

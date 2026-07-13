@@ -24,9 +24,9 @@ describe("riskFlagLabel", () => {
     );
   });
 
-  it("humanises the supplier-unreachable flag", () => {
-    expect(riskFlagLabel("supplier_unreachable")).toBe(
-      "Supplier could not be reached",
+  it("humanises the fulfillment partner-unreachable flag", () => {
+    expect(riskFlagLabel("fulfillment_operator_unreachable")).toBe(
+      "Fulfillment partner could not be reached",
     );
   });
 });

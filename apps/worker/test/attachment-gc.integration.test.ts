@@ -8,12 +8,12 @@ import {
   DbClient,
   DbClientLive,
   approvals,
-  createSupplier,
+  createFulfillmentOperator,
   insertEscalation,
   makeDbClient,
-  suppliers,
+  fulfillmentOperators,
   ticketAttachments,
-  ticketSupplierEscalations,
+  ticketFulfillmentOperatorEscalations,
   tickets,
   tenants,
 } from "@support-agent/db";
@@ -27,11 +27,11 @@ import {
 // Orphaned-upload GC against real Postgres. The predicate is the whole design,
 // so each retain/reclaim rule gets its own assertion:
 //   - unused + old + nothing pending → reclaimed (blob AND row)
-//   - used (sent on a reply / bound into a supplier update) → retained forever
+//   - used (sent on a reply / bound into a fulfillmentOperator update) → retained forever
 //   - unused but young → retained
 //   - inbound (customer) attachment → never swept
 //   - unused but the ticket has a PENDING approval → retained (draft may hold it)
-//   - unused but its escalation is still OPEN → retained (supplier may still post)
+//   - unused but its escalation is still OPEN → retained (fulfillmentOperator may still post)
 //   - another tenant's orphan → never touched
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -76,7 +76,7 @@ describeIfDb("attachment GC (Live, integration)", () => {
   const runLive = <A, E>(eff: Effect.Effect<A, E, DbClient | BlobStorage>) =>
     Effect.runPromise(Effect.provide(eff, gcLayer).pipe(Effect.scoped));
 
-  let supplierId = "";
+  let fulfillmentOperatorId = "";
   const ticketIds: string[] = [];
 
   const seedTicket = async (tenantId: string): Promise<string> => {
@@ -97,7 +97,7 @@ describeIfDb("attachment GC (Live, integration)", () => {
   const seedAttachment = async (params: {
     readonly tenantId: string;
     readonly ticketId: string;
-    readonly source: "inbound" | "merchant" | "supplier";
+    readonly source: "inbound" | "merchant" | "fulfillment_operator";
     readonly createdAt: Date;
     readonly usedAt?: Date | null;
     readonly escalationId?: string | null;
@@ -147,11 +147,11 @@ describeIfDb("attachment GC (Live, integration)", () => {
       { id: tenantA, name: "attachment-gc-A", settings: {} },
       { id: tenantB, name: "attachment-gc-B", settings: {} },
     ]);
-    const supplier = await createSupplier(raw.db, tenantA, {
+    const fulfillmentOperator = await createFulfillmentOperator(raw.db, tenantA, {
       name: "GC Warehouse",
       email: `gc-${randomUUID().slice(0, 8)}@example.com`,
     });
-    supplierId = supplier.id;
+    fulfillmentOperatorId = fulfillmentOperator.id;
   });
 
   afterAll(async () => {
@@ -163,12 +163,12 @@ describeIfDb("attachment GC (Live, integration)", () => {
       .delete(ticketAttachments)
       .where(sql`${ticketAttachments.tenantId} IN (${tenantA}, ${tenantB})`);
     await raw.db
-      .delete(ticketSupplierEscalations)
-      .where(sql`${ticketSupplierEscalations.tenantId} IN (${tenantA}, ${tenantB})`);
+      .delete(ticketFulfillmentOperatorEscalations)
+      .where(sql`${ticketFulfillmentOperatorEscalations.tenantId} IN (${tenantA}, ${tenantB})`);
     await raw.db
       .delete(tickets)
       .where(sql`${tickets.tenantId} IN (${tenantA}, ${tenantB})`);
-    await raw.db.delete(suppliers).where(eq(suppliers.tenantId, tenantA));
+    await raw.db.delete(fulfillmentOperators).where(eq(fulfillmentOperators.tenantId, tenantA));
     await raw.db
       .delete(tenants)
       .where(sql`${tenants.id} IN (${tenantA}, ${tenantB})`);
@@ -271,13 +271,13 @@ describeIfDb("attachment GC (Live, integration)", () => {
     expect(blobs.has(staged.storageKey)).toBe(false);
   });
 
-  it("retains a supplier upload while its escalation is still OPEN", async () => {
+  it("retains a fulfillmentOperator upload while its escalation is still OPEN", async () => {
     if (!raw) return;
     const ticketId = await seedTicket(tenantA);
     const { id: escalationId } = await insertEscalation(raw.db, {
       tenantId: tenantA,
       ticketId,
-      supplierId,
+      fulfillmentOperatorId,
       problem: "where is it",
       orderRef: null,
       shipCity: null,
@@ -287,7 +287,7 @@ describeIfDb("attachment GC (Live, integration)", () => {
     const staged = await seedAttachment({
       tenantId: tenantA,
       ticketId,
-      source: "supplier",
+      source: "fulfillment_operator",
       createdAt: old,
       escalationId,
     });
@@ -297,9 +297,9 @@ describeIfDb("attachment GC (Live, integration)", () => {
 
     // Resolved escalation + never bound into the update → abandoned upload.
     await raw.db
-      .update(ticketSupplierEscalations)
+      .update(ticketFulfillmentOperatorEscalations)
       .set({ status: "resolved", resolvedAt: now })
-      .where(eq(ticketSupplierEscalations.id, escalationId));
+      .where(eq(ticketFulfillmentOperatorEscalations.id, escalationId));
     const after = await runLive(gcTenantAttachments(tenantA, now));
     expect(after.reclaimed).toBe(1);
     expect(blobs.has(staged.storageKey)).toBe(false);

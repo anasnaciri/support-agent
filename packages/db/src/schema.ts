@@ -157,7 +157,7 @@ export const tickets = pgTable(
     ),
     check(
       "tickets_status_check",
-      sql`${t.status} IN ('new','triaging','in_progress','waiting_for_customer','waiting_for_supplier','waiting_for_approval','approved_action_running','resolved','archived','failed','human_takeover')`,
+      sql`${t.status} IN ('new','triaging','in_progress','waiting_for_customer','waiting_for_fulfillment_operator','waiting_for_approval','approved_action_running','resolved','archived','failed','human_takeover')`,
     ),
     // Mirrors CONVERSATION_PROVIDERS in @support-agent/services. NULL passes
     // the CHECK (unstamped legacy tickets / non-conversation channels).
@@ -847,7 +847,7 @@ export type ImageHashInsert = typeof imageHashes.$inferInsert;
  * Index of attachment blobs bound to a ticket — the durable mapping from a
  * ticket to a BlobStorage key. Bytes live in R2, never here. `source` records
  * who put the file on the ticket: `inbound` (connector-ingested customer
- * attachment), `supplier` (portal upload), or `merchant` (dashboard upload).
+ * attachment), `fulfillmentOperator` (portal upload), or `merchant` (dashboard upload).
  * Everything outside the trust boundary references rows by `id`; storage keys
  * stay server-side.
  */
@@ -863,13 +863,13 @@ export const ticketAttachments = pgTable(
       .references(() => tickets.id, { onDelete: "cascade" }),
     source: text("source").notNull(),
     /**
-     * The supplier escalation this file was uploaded against — set only for
-     * `source='supplier'` rows. It scopes the update's id validation (a second
+     * The fulfillmentOperator escalation this file was uploaded against — set only for
+     * `source='fulfillment_operator'` rows. It scopes the update's id validation (a second
      * escalation can't re-send the first one's files) and drives the portal's
      * "files you sent" projection. Merchant/inbound rows carry null.
      */
     escalationId: uuid("escalation_id").references(
-      () => ticketSupplierEscalations.id,
+      () => ticketFulfillmentOperatorEscalations.id,
       { onDelete: "cascade" },
     ),
     filename: text("filename").notNull(),
@@ -879,7 +879,7 @@ export const ticketAttachments = pgTable(
     uploadedBy: text("uploaded_by"),
     /**
      * When the file was consumed into something durable — sent on a customer
-     * reply, or bound into a supplier's posted update. NULL means "uploaded,
+     * reply, or bound into a fulfillmentOperator's posted update. NULL means "uploaded,
      * never used": an orphan the attachment GC sweep may reclaim once it ages
      * out.
      */
@@ -899,7 +899,7 @@ export const ticketAttachments = pgTable(
     ),
     check(
       "ticket_attachments_source_check",
-      sql`${t.source} IN ('inbound','supplier','merchant')`,
+      sql`${t.source} IN ('inbound','fulfillment_operator','merchant')`,
     ),
   ],
 );
@@ -1096,19 +1096,20 @@ export type MemberInvitationRow = typeof memberInvitations.$inferSelect;
 export type MemberInvitationInsert = typeof memberInvitations.$inferInsert;
 
 // ---------------------------------------------------------------------------
-// Supplier portal (master-plan §19 / supplier-escalation loop)
+// Fulfillment Operator portal (master-plan §19 / escalation loop)
 // ---------------------------------------------------------------------------
 
-// A supplier/warehouse entity scoped to one workspace. Created at invite time so
-// an escalation can target it before the supplier ever signs in;
+// A fulfillmentOperator/warehouse entity scoped to one workspace. Created at invite time so
+// an escalation can target it before the fulfillmentOperator ever signs in;
 // `user_decision_uuid` is bound on their first authenticated load (mirrors
-// member_role_assignments). A supplier is a heavily constrained WorkOS member
-// with the "Supplier" RBAC role — these rows just hold the named identity + the
+// member_role_assignments). A fulfillmentOperator is a heavily constrained WorkOS member
+// with the "Fulfillment partner" role identity —
+// these rows hold the identity + the
 // ticket-visibility binding. One WorkOS user (userDecisionUuid) may be bound to
-// MANY workspaces (one supplier ↔ many merchants); supplier-portal access is
-// anchored by this binding, org-independent (see resolveSupplierAuth).
-export const suppliers = pgTable(
-  "suppliers",
+// MANY workspaces (one fulfillmentOperator ↔ many merchants); fulfillment-operator-portal access is
+// anchored by this binding, org-independent (see resolveFulfillmentOperatorAuth).
+export const fulfillmentOperators = pgTable(
+  "fulfillment_operators",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
@@ -1122,30 +1123,30 @@ export const suppliers = pgTable(
       .defaultNow(),
   },
   (t) => [
-    uniqueIndex("suppliers_tenant_email_unique").on(
+    uniqueIndex("fulfillment_operators_tenant_email_unique").on(
       t.tenantId,
       sql`lower(${t.email})`,
     ),
-    // A WorkOS user binds to at most one supplier row PER tenant, but may be
-    // bound across many tenants (one supplier ↔ many merchants).
-    uniqueIndex("suppliers_tenant_user_unique")
+    // A WorkOS user binds to at most one fulfillmentOperator row PER tenant, but may be
+    // bound across many tenants (one fulfillmentOperator ↔ many merchants).
+    uniqueIndex("fulfillment_operators_tenant_user_unique")
       .on(t.tenantId, t.userDecisionUuid)
       .where(sql`${t.userDecisionUuid} IS NOT NULL`),
-    // Cross-tenant lookup: every workspace a signed-in supplier can switch to.
-    index("suppliers_user_idx").on(t.userDecisionUuid),
-    index("suppliers_tenant_idx").on(t.tenantId),
+    // Cross-tenant lookup: every workspace a signed-in fulfillmentOperator can switch to.
+    index("fulfillment_operators_user_idx").on(t.userDecisionUuid),
+    index("fulfillment_operators_tenant_idx").on(t.tenantId),
   ],
 );
 
 // The per-ticket escalation record + the MINIMAL privacy projection, denormalised
-// at escalate time so the supplier query never joins back to tickets / customer
-// tables: the supplier sees the agent's problem statement, the order ref, the
+// at escalate time so the fulfillmentOperator query never joins back to tickets / customer
+// tables: the fulfillmentOperator sees the agent's problem statement, the order ref, the
 // ship-to city/country, and the tracking number — never the customer email,
 // full address, or conversation thread. `note`/`proposed_resolution` hold the
-// supplier's reply. The notification ledger (`notified_at` / `notify_attempts`
+// fulfillmentOperator's reply. The notification ledger (`notified_at` / `notify_attempts`
 // / `last_notify_error`) is the durable outbox the worker sweep relays.
-export const ticketSupplierEscalations = pgTable(
-  "ticket_supplier_escalations",
+export const ticketFulfillmentOperatorEscalations = pgTable(
+  "ticket_fulfillment_operator_escalations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
@@ -1154,9 +1155,9 @@ export const ticketSupplierEscalations = pgTable(
     ticketId: uuid("ticket_id")
       .notNull()
       .references(() => tickets.id, { onDelete: "cascade" }),
-    supplierId: uuid("supplier_id")
+    fulfillmentOperatorId: uuid("fulfillment_operator_id")
       .notNull()
-      .references(() => suppliers.id, { onDelete: "restrict" }),
+      .references(() => fulfillmentOperators.id, { onDelete: "restrict" }),
     problem: text("problem").notNull(),
     orderRef: text("order_ref"),
     shipCity: text("ship_city"),
@@ -1175,29 +1176,32 @@ export const ticketSupplierEscalations = pgTable(
   },
   (t) => [
     check(
-      "ticket_supplier_escalations_status_check",
+      "fulfillment_operator_escalations_status_check",
       sql`${t.status} IN ('open','resolved')`,
     ),
-    // The supplier's "tickets escalated to me" list.
-    index("tse_supplier_status_idx").on(t.supplierId, t.status),
-    index("tse_ticket_idx").on(t.ticketId),
-    index("tse_tenant_idx").on(t.tenantId),
+    // The fulfillmentOperator's "tickets escalated to me" list.
+    index("fulfillment_operator_escalations_operator_status_idx").on(
+      t.fulfillmentOperatorId,
+      t.status,
+    ),
+    index("fulfillment_operator_escalations_ticket_idx").on(t.ticketId),
+    index("fulfillment_operator_escalations_tenant_idx").on(t.tenantId),
     // The notification sweep scans unsent rows oldest-first.
-    index("tse_unsent_idx")
+    index("fulfillment_operator_escalations_unsent_idx")
       .on(t.createdAt)
       .where(sql`${t.notifiedAt} IS NULL`),
   ],
 );
 
-export type SupplierRow = typeof suppliers.$inferSelect;
-export type SupplierInsert = typeof suppliers.$inferInsert;
-export type TicketSupplierEscalationRow =
-  typeof ticketSupplierEscalations.$inferSelect;
-export type TicketSupplierEscalationInsert =
-  typeof ticketSupplierEscalations.$inferInsert;
+export type FulfillmentOperatorRow = typeof fulfillmentOperators.$inferSelect;
+export type FulfillmentOperatorInsert = typeof fulfillmentOperators.$inferInsert;
+export type TicketFulfillmentOperatorEscalationRow =
+  typeof ticketFulfillmentOperatorEscalations.$inferSelect;
+export type TicketFulfillmentOperatorEscalationInsert =
+  typeof ticketFulfillmentOperatorEscalations.$inferInsert;
 
 // The durable outbox for customer-reply DELIVERY (the SMTP/Gmail/Graph send),
-// distinct from the supplier-notification outbox above. When a
+// distinct from the fulfillment-operator-notification outbox above. When a
 // `conversation.reply` / `conversation.ask_customer` send FAILS — in the agent
 // loop OR on approval-resume — the runtime persists the exact drafted message
 // here instead of losing it: the ticket is flagged `reply_delivery_failed` and

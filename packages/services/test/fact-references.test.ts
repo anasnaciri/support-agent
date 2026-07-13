@@ -23,7 +23,7 @@ const settings = (
     refundPolicy: defaultRefundPolicy,
     discountPolicy: defaultDiscountPolicy,
     retentionDays: DEFAULT_RETENTION_DAYS,
-    supplierEscalationSheet: null,
+    fulfillmentOperatorEscalationSheet: null,
     legalAcceptance: null,
     shippingFacts: null,
     returnsFacts: null,
@@ -186,7 +186,7 @@ describe("actionReferenceCatalog", () => {
       "order.cancel",
       "order.update_shipping_address",
       "order.update_tracking",
-      "supplier.escalate",
+      "fulfillment_operator.escalate",
       "conversation.ask_customer",
       "knowledge.search",
       "ticket.update_context",
@@ -277,7 +277,7 @@ describe("tokenizeActionReferences (the stored-note backfill)", () => {
     // This is what makes the backfill safe — the agent's prompt is byte-for-byte
     // what it was before the merchant-facing chips existed.
     const legacy =
-      "Verify the carrier status first with tracking.lookup, escalate with supplier.escalate, and only then refund.create.";
+      "Verify the carrier status first with tracking.lookup, escalate with fulfillment_operator.escalate, and only then refund.create.";
     const { resolved } = resolveFactReferences(
       tokenizeActionReferences(legacy),
       null,

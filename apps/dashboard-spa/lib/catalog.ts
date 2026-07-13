@@ -110,14 +110,14 @@ export interface ConnectorCapability {
 
 /**
  * Connector-capability labels, intentionally separate from a tool's agent-facing
- * `displayName`: the agent page calls `supplier.add_sheet_row` "Escalate to
- * supplier", but on the *connection* the plainer "Add row" describes what the
+ * `displayName`: the agent page calls `fulfillment_operator.add_sheet_row` "Escalate to
+ * fulfillmentOperator", but on the *connection* the plainer "Add row" describes what the
  * grant actually does. Only tools that need a friendlier-than-default name go
  * here; everything else falls back to `displayName`, then a humanized name.
  */
 const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
-  "supplier.read_sheet_columns": "Read sheet",
-  "supplier.add_sheet_row": "Add row",
+  "fulfillment_operator.read_sheet_columns": "Read sheet",
+  "fulfillment_operator.add_sheet_row": "Add row",
 };
 
 /** "shopify.get_order" -> "Get order". Drops the namespace, de-snakes, caps. */
@@ -194,7 +194,7 @@ export const capabilitiesForProvider = (
  *    pickup-locations tool, so it isn't repeated here.
  *  - The post-connect knowledge-base import job reads `read_legal_policies`
  *    (shipping/refund policies) and `read_online_store_pages` (About/Contact/FAQ).
- *  - Supplier portal tracking edits call `fulfillmentTrackingInfoUpdate`,
+ *  - Fulfillment partner portal tracking edits call `fulfillmentTrackingInfoUpdate`,
  *    which needs fulfillment-order write scopes.
  */
 const PLATFORM_CAPABILITIES: Readonly<
@@ -212,8 +212,8 @@ const PLATFORM_CAPABILITIES: Readonly<
       scopes: ["read_legal_policies", "read_online_store_pages"],
     },
     {
-      tool: "platform:shopify.supplier_tracking",
-      label: "Update shipment tracking from supplier portal",
+      tool: "platform:shopify.fulfillment_operator_tracking",
+      label: "Update shipment tracking from fulfillment partner portal",
       scopes: SHOPIFY_FULFILLMENT_TRACKING_SCOPES,
     },
   ],

@@ -33,7 +33,7 @@ describe("ticketStatusLabel", () => {
       "triaging",
       "in_progress",
       "waiting_for_customer",
-      "waiting_for_supplier",
+      "waiting_for_fulfillment_operator",
       "waiting_for_approval",
       "approved_action_running",
       "resolved",
@@ -104,11 +104,11 @@ describe("toolActionLabel", () => {
     expect(toolActionLabel("conversation.reply")).toBe("Reply to the customer");
     expect(toolActionLabel("refund.create")).toBe("Issue a refund");
     expect(toolActionLabel("discount.create")).toBe("Issue a discount code");
-    expect(toolActionLabel("supplier.add_sheet_row")).toBe(
-      "Log the issue with the supplier",
+    expect(toolActionLabel("fulfillment_operator.add_sheet_row")).toBe(
+      "Log the issue with the fulfillment partner",
     );
-    expect(toolActionLabel("supplier.escalate")).toBe(
-      "Ask the supplier for help",
+    expect(toolActionLabel("fulfillment_operator.escalate")).toBe(
+      "Ask the fulfillment partner for help",
     );
   });
 

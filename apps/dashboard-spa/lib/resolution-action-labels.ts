@@ -1,6 +1,6 @@
 // Plain-language copy for the resolution-policy editor — the merchant never sees
 // a tool id. The `tool` values map 1:1 to the runtime's remedy tools
-// (SCENARIO_REMEDY_TOOLS); supplier handling is the radio (supplierMode), not a
+// (SCENARIO_REMEDY_TOOLS); fulfillment partner handling is the radio (fulfillmentOperatorMode), not a
 // checklist action. The NAME of an action comes from TOOL_DISPLAY_NAMES, so the
 // checkbox here, the `/` chip in a playbook, and the ticket timeline all call it
 // the same thing; only the `help` line is local to this screen.
@@ -38,8 +38,8 @@ export const REMEDY_ACTIONS: ReadonlyArray<RemedyAction> = [
   ),
 ];
 
-/** Gated by the supplier radio, not by the action checklist. */
-export const SUPPLIER_ESCALATE_TOOL = "supplier.escalate";
+/** Gated by the fulfillment partner radio, not by the action checklist. */
+export const FULFILLMENT_OPERATOR_ESCALATE_TOOL = "fulfillment_operator.escalate";
 
 /**
  * The actions this scenario will NOT let the agent take — mirrors the runtime's
@@ -53,35 +53,35 @@ export const SUPPLIER_ESCALATE_TOOL = "supplier.escalate";
  */
 export const deniedActionsFor = (
   enabledTools: ReadonlySet<string>,
-  supplierMode: string,
+  fulfillmentOperatorMode: string,
 ): ReadonlySet<string> => {
   const denied = new Set(
     REMEDY_ACTIONS.map((a) => a.tool).filter((t) => !enabledTools.has(t)),
   );
-  if (supplierMode === "none") denied.add(SUPPLIER_ESCALATE_TOOL);
+  if (fulfillmentOperatorMode === "none") denied.add(FULFILLMENT_OPERATOR_ESCALATE_TOOL);
   return denied;
 };
 
-export interface SupplierModeOption {
+export interface FulfillmentOperatorModeOption {
   readonly value: "escalate_and_wait" | "notify_and_proceed" | "none";
   readonly label: string;
   readonly help: string;
 }
 
-export const SUPPLIER_MODE_OPTIONS: ReadonlyArray<SupplierModeOption> = [
+export const FULFILLMENT_OPERATOR_MODE_OPTIONS: ReadonlyArray<FulfillmentOperatorModeOption> = [
   {
     value: "escalate_and_wait",
-    label: "Escalate to my supplier and wait",
-    help: "Loop the supplier in and pause the ticket until they respond.",
+    label: "Escalate to my fulfillment partner and wait",
+    help: "Loop the fulfillment partner in and pause the ticket until they respond.",
   },
   {
     value: "notify_and_proceed",
-    label: "Notify my supplier and keep helping",
-    help: "Tell the supplier, but resolve for the customer now.",
+    label: "Notify my fulfillment partner and keep helping",
+    help: "Tell the fulfillment partner, but resolve for the customer now.",
   },
   {
     value: "none",
-    label: "Don't involve a supplier",
+    label: "Don't involve a fulfillment partner",
     help: "Handle it between the store and the customer.",
   },
 ];

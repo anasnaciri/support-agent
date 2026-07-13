@@ -420,7 +420,7 @@ const scenarios: readonly Scenario[] = [
     agent: MP,
     category: "missing_package",
     subject: "Package marked delivered — never received it",
-    summary: "Delivered per carrier for #1002; logged to the warehouse escalation sheet, then verify-with-customer reply drafted (BRANCH A + supplier sheet).",
+    summary: "Delivered per carrier for #1002; logged to the warehouse escalation sheet, then verify-with-customer reply drafted (BRANCH A + fulfillment operator sheet).",
     customerEmail: "trevor.hughes@example.com",
     customerName: "Trevor Hughes",
     orderId: "#1002",
@@ -429,7 +429,7 @@ const scenarios: readonly Scenario[] = [
     ageMinutes: 34,
     executedTools: [
       { tool: "shopify.get_order" },
-      { tool: "supplier.add_sheet_row" },
+      { tool: "fulfillment_operator.add_sheet_row" },
     ],
     terminal: {
       kind: "approval",

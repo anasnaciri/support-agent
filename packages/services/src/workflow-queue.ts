@@ -63,7 +63,7 @@ export const workflowEventKey = (
     case "message.received":
       return `thread:${event.tenantId}:${event.threadId}`;
     case "customer.replied":
-    case "supplier.updated":
+    case "fulfillment_operator.updated":
     case "timer.expired":
     case "manual.takeover":
     case "ticket.resumed":

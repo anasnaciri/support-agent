@@ -12,7 +12,7 @@ import type { AgentId, TicketId, TenantId } from "@support-agent/agent-core";
 //
 // Tag in `services`, Live in `db` (dependency rule: the runtime never imports
 // db; the outer Layer provides the Live impl). The worker sweep reads/writes the
-// outbox through the plain db store functions directly (like supplier-notify).
+// outbox through the plain db store functions directly (like fulfillment-operator-notify).
 
 // ------------------------------------------------------------
 // The risk flag the runtime stamps on the ticket + the dashboard renders.

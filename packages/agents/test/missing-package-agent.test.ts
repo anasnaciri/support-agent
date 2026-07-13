@@ -20,9 +20,9 @@ describe("missing-package-agent config", () => {
       "shopify.get_customer",
       "tracking.lookup",
       "ticket.update_context",
-      "supplier.read_sheet_columns",
-      "supplier.add_sheet_row",
-      "supplier.escalate",
+      "fulfillment_operator.read_sheet_columns",
+      "fulfillment_operator.add_sheet_row",
+      "fulfillment_operator.escalate",
       "conversation.reply",
       "conversation.ask_customer",
       "knowledge.search",
@@ -33,33 +33,33 @@ describe("missing-package-agent config", () => {
     expect(missingPackageAgent.tools).not.toContain("agent.handoff");
     expect(missingPackageAgent.handoffs).toEqual([]);
     expect(missingPackageAgent.maxTurnsPerTick).toBeGreaterThan(1);
-    // The supplier-sheet read + write are auto-allowed inside this agent —
+    // The fulfillment-operator sheet read + write are auto-allowed here —
     // the reply still needs an operator approval, but discovering the
     // columns and logging the warehouse row shouldn't pause the ticket.
     expect(
-      missingPackageAgent.permissionOverrides["supplier.read_sheet_columns"],
+      missingPackageAgent.permissionOverrides["fulfillment_operator.read_sheet_columns"],
     ).toBe("allow");
-    expect(missingPackageAgent.permissionOverrides["supplier.add_sheet_row"]).toBe(
+    expect(missingPackageAgent.permissionOverrides["fulfillment_operator.add_sheet_row"]).toBe(
       "allow",
     );
-    // Escalating to the supplier parks the ticket in waiting_for_supplier — it
+    // Escalating to the fulfillment operator parks in waiting_for_fulfillment_operator — it
     // must be auto-allowed so it parks instead of creating an approval.
-    expect(missingPackageAgent.permissionOverrides["supplier.escalate"]).toBe(
+    expect(missingPackageAgent.permissionOverrides["fulfillment_operator.escalate"]).toBe(
       "allow",
     );
     // BRANCH A reads the sheet's own columns before appending, rather
     // than assuming a fixed schema.
     expect(missingPackageAgent.promptTemplate).toContain(
-      "supplier.read_sheet_columns",
+      "fulfillment_operator.read_sheet_columns",
     );
     // Prompt must describe the three decision branches so the model
     // picks the right one based on fulfillment state.
     expect(missingPackageAgent.promptTemplate).toContain("BRANCH A");
     expect(missingPackageAgent.promptTemplate).toContain("BRANCH B");
     expect(missingPackageAgent.promptTemplate).toContain("BRANCH C");
-    // BRANCH A guards the supplier-sheet write on the runtime header.
+    // BRANCH A guards the fulfillment-operator sheet write on the runtime header.
     expect(missingPackageAgent.promptTemplate).toContain(
-      "[Supplier escalation sheet:",
+      "[Fulfillment operator escalation sheet:",
     );
     // Delivery-claim VERIFY: the agent checks live carrier status before it
     // either escalates or tells the customer it's on its way.

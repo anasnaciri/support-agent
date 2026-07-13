@@ -175,7 +175,7 @@ export const importShopifyPolicies = (
 /**
  * Page names we import, compared after normalizing both the handle and the
  * title to bare lowercase alphanumerics ("About Us" / "about-us" / "F.A.Q."
- * all normalize cleanly). Exact membership only — "About our suppliers"
+ * all normalize cleanly). Exact membership only — "About our fulfillmentOperators"
  * does NOT match. Conservative by design (see the module header).
  */
 const IMPORTED_PAGE_NAMES: ReadonlySet<string> = new Set([

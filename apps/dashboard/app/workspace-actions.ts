@@ -10,8 +10,8 @@ import { WORKSPACE_COOKIE, WORKSPACE_COOKIE_MAX_AGE } from "@/lib/workspace";
 
 /**
  * Pin the session to a workspace (cookie) and reload from that workspace's
- * surface home — the merchant dashboard for a merchant workspace, the supplier
- * portal for a supplier one (unified switcher).
+ * surface home — the merchant dashboard for a merchant workspace, the fulfillment partner
+ * portal for a fulfillment partner one (unified switcher).
  */
 export const switchWorkspaceAction = async (
   formData: FormData,

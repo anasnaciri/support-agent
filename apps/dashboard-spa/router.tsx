@@ -13,8 +13,8 @@ import { TicketDetailPage } from "@/features/tickets/TicketDetailPage";
 import { ApprovalsPage } from "@/features/approvals/ApprovalsPage";
 import { ApprovalDetailPage } from "@/features/approvals/ApprovalDetailPage";
 import { UsagePage } from "@/features/usage/UsagePage";
-import { SupplierTicketsPage } from "@/features/supplier/SupplierTicketsPage";
-import { SupplierTicketDetailPage } from "@/features/supplier/SupplierTicketDetailPage";
+import { FulfillmentOperatorTicketsPage } from "@/features/fulfillment-operator/FulfillmentOperatorTicketsPage";
+import { FulfillmentOperatorTicketDetailPage } from "@/features/fulfillment-operator/FulfillmentOperatorTicketDetailPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { AccountSettingsPage } from "@/features/settings/AccountSettingsPage";
 import { IntegrationsPage } from "@/features/settings/IntegrationsPage";
@@ -30,8 +30,8 @@ import { ScenariosPage } from "@/features/settings/ScenariosPage";
 import { NotificationsPage } from "@/features/settings/NotificationsPage";
 import { MembersPage } from "@/features/settings/MembersPage";
 import { AgentPage } from "@/features/settings/AgentPage";
-import { SuppliersPage } from "@/features/settings/SuppliersPage";
-import { SupplierEscalationPage } from "@/features/settings/SupplierEscalationPage";
+import { FulfillmentOperatorsPage } from "@/features/settings/FulfillmentOperatorsPage";
+import { FulfillmentOperatorEscalationPage } from "@/features/settings/FulfillmentOperatorEscalationPage";
 import { LegalPage } from "@/features/settings/LegalPage";
 import { NotFoundPage } from "@/features/not-found/NotFoundPage";
 import { NewWorkspacePage } from "@/features/workspaces/NewWorkspacePage";
@@ -132,17 +132,17 @@ const settingsAgentsSplatRoute = authedChild("/settings/agents/$", () => (
 const settingsPermissionsRoute = authedChild("/settings/permissions", () => (
   <ClientRedirect to="/settings/agent" />
 ));
-const settingsSuppliersRoute = authedChild("/settings/suppliers", SuppliersPage);
-const settingsSupplierEscalationRoute = authedChild(
-  "/settings/supplier-escalation",
-  SupplierEscalationPage,
+const settingsFulfillmentOperatorsRoute = authedChild("/settings/fulfillment-operators", FulfillmentOperatorsPage);
+const settingsFulfillmentOperatorEscalationRoute = authedChild(
+  "/settings/fulfillment-operator-escalation",
+  FulfillmentOperatorEscalationPage,
 );
 const settingsLegalRoute = authedChild("/settings/legal", LegalPage);
 const newWorkspaceRoute = authedChild("/workspaces/new", NewWorkspacePage);
-const supplierTicketsRoute = authedChild("/supplier/tickets", SupplierTicketsPage);
-const supplierTicketDetailRoute = authedChild(
-  "/supplier/tickets/$escalationId",
-  SupplierTicketDetailPage,
+const fulfillmentOperatorTicketsRoute = authedChild("/fulfillment-operator/tickets", FulfillmentOperatorTicketsPage);
+const fulfillmentOperatorTicketDetailRoute = authedChild(
+  "/fulfillment-operator/tickets/$escalationId",
+  FulfillmentOperatorTicketDetailPage,
 );
 
 const publicRoute = (path: string, component: () => React.JSX.Element) =>
@@ -183,12 +183,12 @@ const routeTree = rootRoute.addChildren([
     settingsAgentsRoute,
     settingsAgentsSplatRoute,
     settingsPermissionsRoute,
-    settingsSuppliersRoute,
-    settingsSupplierEscalationRoute,
+    settingsFulfillmentOperatorsRoute,
+    settingsFulfillmentOperatorEscalationRoute,
     settingsLegalRoute,
     newWorkspaceRoute,
-    supplierTicketsRoute,
-    supplierTicketDetailRoute,
+    fulfillmentOperatorTicketsRoute,
+    fulfillmentOperatorTicketDetailRoute,
   ]),
   signInRoute,
   signUpRoute,

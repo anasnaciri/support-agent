@@ -74,7 +74,7 @@ describe("isStatusTransitionAllowed", () => {
       "triaging",
       "in_progress",
       "waiting_for_customer",
-      "waiting_for_supplier",
+      "waiting_for_fulfillment_operator",
       "waiting_for_approval",
       "approved_action_running",
     ] as const) {
@@ -90,7 +90,7 @@ describe("isStatusTransitionAllowed", () => {
       "triaging",
       "in_progress",
       "waiting_for_customer",
-      "waiting_for_supplier",
+      "waiting_for_fulfillment_operator",
       "waiting_for_approval",
       "approved_action_running",
       "human_takeover",
@@ -113,7 +113,7 @@ describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
       "new",
       "triaging",
       "approved_action_running",
-      "waiting_for_supplier",
+      "waiting_for_fulfillment_operator",
       "waiting_for_approval",
       "human_takeover",
     ] as const) {
@@ -179,34 +179,34 @@ describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
   });
 });
 
-// A ticket can be waiting on approval AND on a supplier at once (both facts are
+// A ticket can be waiting on approval AND on a fulfillmentOperator at once (both facts are
 // row-derived: pending approval rows, open escalation rows). The single
 // tickets.status carries the PRIMARY wait — approval wins because the merchant
-// is the next unblocker; the supplier wait is passive (the open escalation row
+// is the next unblocker; the fulfillmentOperator wait is passive (the open escalation row
 // + notify outbox carry it). This helper is the one place that precedence
 // lives.
 describe("primaryWaitStatus", () => {
   it("approval wins when both waits hold", () => {
     expect(
-      primaryWaitStatus({ approvalPending: true, supplierOpen: true }),
+      primaryWaitStatus({ approvalPending: true, fulfillmentOperatorOpen: true }),
     ).toBe("waiting_for_approval");
   });
 
   it("approval alone parks on approval", () => {
     expect(
-      primaryWaitStatus({ approvalPending: true, supplierOpen: false }),
+      primaryWaitStatus({ approvalPending: true, fulfillmentOperatorOpen: false }),
     ).toBe("waiting_for_approval");
   });
 
-  it("supplier alone parks on the supplier", () => {
+  it("fulfillmentOperator alone parks on the fulfillmentOperator", () => {
     expect(
-      primaryWaitStatus({ approvalPending: false, supplierOpen: true }),
-    ).toBe("waiting_for_supplier");
+      primaryWaitStatus({ approvalPending: false, fulfillmentOperatorOpen: true }),
+    ).toBe("waiting_for_fulfillment_operator");
   });
 
   it("no waits → null (nothing to park on)", () => {
     expect(
-      primaryWaitStatus({ approvalPending: false, supplierOpen: false }),
+      primaryWaitStatus({ approvalPending: false, fulfillmentOperatorOpen: false }),
     ).toBeNull();
   });
 });

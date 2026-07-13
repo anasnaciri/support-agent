@@ -234,6 +234,7 @@ function RoleRow({
   const renameM = useMemberWrite({
     mutationFn: () => api.renameRole(ctx, role.id, name.trim()),
     okText: OK_COPY.role_renamed,
+    mapErrors: true,
   });
   const deleteM = useMemberWrite({
     mutationFn: () => api.deleteRole(ctx, role.id),
@@ -243,6 +244,7 @@ function RoleRow({
   const saveM = useMemberWrite({
     mutationFn: () => api.setRolePermissions(ctx, role.id, [...selected]),
     okText: OK_COPY.permissions_saved,
+    mapErrors: true,
   });
 
   const grantCount = role.isOwner ? catalogLength : role.permissionIds.length;
@@ -352,7 +354,11 @@ function RoleRow({
               </div>
             </fieldset>
           ))}
-          {!role.isOwner ? (
+          {role.isOwner ? (
+            <p className="text-xs text-muted-foreground">
+              The Owner role always has every permission.
+            </p>
+          ) : (
             <Button
               type="submit"
               variant="outline"
@@ -361,10 +367,6 @@ function RoleRow({
             >
               Save permissions
             </Button>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              The Owner role always has every permission.
-            </p>
           )}
         </form>
       </div>

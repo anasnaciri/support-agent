@@ -50,20 +50,20 @@ export const decideAuthz = (
 };
 
 /**
- * Supplier-endpoint authorization — deliberately STRICTER than decideAuthz. A
- * supplier is an external party with a heavily-constrained Supplier role, so
- * supplier endpoints must NOT honor open mode (a real supplier always has an
- * explicit assignment row) and must require a `supplier.tickets.*` permission. A
+ * FulfillmentOperator-endpoint authorization — deliberately STRICTER than decideAuthz. A
+ * fulfillmentOperator is an external party with a heavily-constrained FulfillmentOperator role, so
+ * fulfillmentOperator endpoints must NOT honor open mode (a real fulfillmentOperator always has an
+ * explicit assignment row) and must require a `fulfillment_operator.tickets.*` permission. A
  * merchant member who lacks those is denied; an owner may preview.
  *
  * - No acting user id → 401.
  * - Not assigned in this workspace → 403 (the open-mode bypass that decideAuthz
- *   grants must never reach a supplier endpoint).
+ *   grants must never reach a fulfillment partner endpoint).
  * - Owner → allow.
  * - Otherwise the member's effective (implication-expanded) permissions must
  *   include `required`.
  */
-export const decideSupplierAuthz = (
+export const decideFulfillmentOperatorAuthz = (
   access: MemberAccess,
   userDecisionUuid: string | undefined,
   required: RbacPermissionId,

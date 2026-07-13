@@ -16,8 +16,8 @@ describe("DEFAULT_SHOPIFY_SCOPES", () => {
       "write_orders", // refund.create + order.cancel
       "write_discounts", // discount.create
       "read_locations", // shopify.list_pickup_locations
-      "write_merchant_managed_fulfillment_orders", // supplier tracking edits
-      "write_third_party_fulfillment_orders", // supplier tracking edits
+      "write_merchant_managed_fulfillment_orders", // fulfillmentOperator tracking edits
+      "write_third_party_fulfillment_orders", // fulfillmentOperator tracking edits
     ]) {
       expect(DEFAULT_SHOPIFY_SCOPES).toContain(scope);
     }

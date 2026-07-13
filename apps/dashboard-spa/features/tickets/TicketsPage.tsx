@@ -171,7 +171,7 @@ export function TicketsPage() {
                         </span>
                       </Badge>
                       {/* Concurrent wait: a ticket parked waiting_for_approval
-                          can also carry an open supplier escalation. */}
+                          can also carry an open fulfillment partner escalation. */}
                       {extraWaitChips(r.status, r.waitingOn).map((s) => (
                         <Badge key={s} variant={ticketStatusVariant(s)}>
                           {ticketStatusLabel(s)}

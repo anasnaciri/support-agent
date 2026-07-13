@@ -69,7 +69,7 @@ const settingsFixture = () =>
     refundPolicy: defaultRefundPolicy,
     discountPolicy: defaultDiscountPolicy,
     retentionDays: 730,
-    supplierEscalationSheet: null,
+    fulfillmentOperatorEscalationSheet: null,
     legalAcceptance: null,
   });
 
@@ -190,7 +190,7 @@ describe("AgentRuntime tracking.lookup side effects", () => {
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
     });
     const env = Layer.mergeAll(
@@ -295,7 +295,7 @@ describe("AgentRuntime tracking.lookup side effects", () => {
       refundPolicy: defaultRefundPolicy,
       discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
-      supplierEscalationSheet: null,
+      fulfillmentOperatorEscalationSheet: null,
       legalAcceptance: null,
     });
     const env = Layer.mergeAll(
@@ -543,7 +543,7 @@ describe("AgentRuntime tracking.lookup side effects", () => {
     expect(out.status).toBe("human_takeover");
   });
 
-  // Regression: prod ticket 03649e6f (2026-07-12). A supplier reship synced
+  // Regression: prod ticket 03649e6f (2026-07-12). A fulfillmentOperator reship synced
   // via `order.update_tracking` replaced the fulfillment's number on Shopify,
   // but the liveTrackingStatus snapshot (old number + its exception scan)
   // stayed on the ticket forever — misleading both the dashboard Tracking

@@ -68,15 +68,15 @@ describeIfDb("TicketAttachmentStoreLive", () => {
         Effect.provide(
           Effect.gen(function* () {
             const store = yield* TicketAttachmentStore;
-            const supplierPhoto = yield* store.record({
+            const fulfillmentOperatorPhoto = yield* store.record({
               tenantId: TenantId(tenantId),
               ticketId: TicketId(ticketA),
-              source: "supplier",
+              source: "fulfillment_operator",
               filename: "replacement-label.pdf",
               contentType: "application/pdf",
               sizeBytes: 1234,
               storageKey: `upload/${tenantId}/${ticketA}/label.pdf`,
-              uploadedBy: "supplier-user-1",
+              uploadedBy: "fulfillment-operator-user-1",
             });
             const merchantPhoto = yield* store.record({
               tenantId: TenantId(tenantId),
@@ -101,12 +101,12 @@ describeIfDb("TicketAttachmentStoreLive", () => {
             const resolved = yield* store.getByIds(
               TenantId(tenantId),
               TicketId(ticketA),
-              [merchantPhoto.id, crossTicket.id, randomUUID(), supplierPhoto.id],
+              [merchantPhoto.id, crossTicket.id, randomUUID(), fulfillmentOperatorPhoto.id],
             );
             const wrongTicket = yield* store.getByIds(
               TenantId(tenantId),
               TicketId(ticketB),
-              [supplierPhoto.id],
+              [fulfillmentOperatorPhoto.id],
             );
             const listed = yield* store.listForTicket(
               TenantId(tenantId),
@@ -128,14 +128,14 @@ describeIfDb("TicketAttachmentStoreLive", () => {
               TenantId(tenantId),
               TicketId(ticketA),
             );
-            return { supplierPhoto, resolved, wrongTicket, listed, bindings };
+            return { fulfillmentOperatorPhoto, resolved, wrongTicket, listed, bindings };
           }),
           layer,
         ),
       );
 
-      expect(result.supplierPhoto.uploadedBy).toBe("supplier-user-1");
-      expect(result.supplierPhoto.createdAt).toBeInstanceOf(Date);
+      expect(result.fulfillmentOperatorPhoto.uploadedBy).toBe("fulfillment-operator-user-1");
+      expect(result.fulfillmentOperatorPhoto.createdAt).toBeInstanceOf(Date);
       expect(result.resolved.map((r) => r.filename)).toEqual([
         "photo.png",
         "replacement-label.pdf",
@@ -143,8 +143,8 @@ describeIfDb("TicketAttachmentStoreLive", () => {
       expect(result.wrongTicket).toHaveLength(0);
       expect(result.listed).toHaveLength(2);
       expect(result.listed.map((r) => r.source).sort()).toEqual([
+        "fulfillment_operator",
         "merchant",
-        "supplier",
       ]);
       expect(result.bindings.map((r) => [r.id, r.messageId])).toEqual([
         [result.resolved[0]!.id, "sent-1"],

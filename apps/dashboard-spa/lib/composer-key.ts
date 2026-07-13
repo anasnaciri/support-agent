@@ -15,7 +15,7 @@ export type ComposerKeyMode =
 //  - a live refresh flips locked → approval (the drafted reply must fill the
 //    input without a page refresh),
 //  - a different approval becomes the pending one,
-//  - the same approval is redrafted with a new body (e.g. a supplier update
+//  - the same approval is redrafted with a new body (e.g. a fulfillment partner update
 //    while waiting_for_approval).
 // It must NOT change on ordinary refetches of the same pending approval, or
 // the manager's in-progress edits would be wiped.

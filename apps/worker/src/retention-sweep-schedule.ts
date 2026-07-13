@@ -94,7 +94,7 @@ export const registerRetentionSweep = async (
         }
 
         // Second pass on the same daily cron: reclaim uploads nobody ever sent
-        // (a staged chip removed, a supplier update abandoned). Independent of
+        // (a staged chip removed, a fulfillment partner update abandoned). Independent of
         // the ticket sweep above — a live ticket keeps accumulating orphans.
         const gc = await Effect.runPromise(
           Effect.provide(gcAllTenantAttachments(), opts.runtimeLayer).pipe(

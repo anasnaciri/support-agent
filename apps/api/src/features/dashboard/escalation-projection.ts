@@ -7,19 +7,19 @@ import {
 import { ShopifyService } from "@support-agent/services";
 import { isNonEmptyString, looksLikeGid } from "./shopify-panels.js";
 
-// The order projection a MANUAL supplier escalation carries — the same
-// customer-PII-free slice the agent's supplier.escalate tool sends (order ref,
+// The order projection a MANUAL fulfillment partner escalation carries — the same
+// customer-PII-free slice the agent's fulfillment_operator.escalate tool sends (order ref,
 // ship city/country, tracking number), derived server-side from the ticket's
 // bound order so the merchant doesn't have to retype it.
 
-export interface SupplierOrderProjection {
+export interface FulfillmentOperatorOrderProjection {
   readonly orderRef: string | null;
   readonly shipCity: string | null;
   readonly shipCountry: string | null;
   readonly trackingNumber: string | null;
 }
 
-const NULL_PROJECTION: SupplierOrderProjection = {
+const NULL_PROJECTION: FulfillmentOperatorOrderProjection = {
   orderRef: null,
   shipCity: null,
   shipCountry: null,
@@ -27,14 +27,14 @@ const NULL_PROJECTION: SupplierOrderProjection = {
 };
 
 /**
- * Project the supplier-visible order facts. Deliberately excludes the
+ * Project the fulfillment-partner-visible order facts. Deliberately excludes the
  * customer's name/street/email — city + country are enough for the warehouse
  * to identify the shipment. Tracking comes from the NEWEST fulfillment that
  * actually carries a number (a reshipped order's latest label, not the first).
  */
-export const supplierOrderProjection = (
+export const fulfillmentOperatorOrderProjection = (
   order: ShopifyOrder | null,
-): SupplierOrderProjection => {
+): FulfillmentOperatorOrderProjection => {
   if (!order) return NULL_PROJECTION;
   const tracked = order.fulfillments
     .filter((f) => f.trackingNumbers.length > 0)
@@ -54,7 +54,7 @@ export const supplierOrderProjection = (
 };
 
 /**
- * The ticket's bound order for SUPPLIER-facing data: canonical
+ * The ticket's bound order for FULFILLMENT_OPERATOR-facing data: canonical
  * `identifiedOrderId` GID or nothing. Unlike the panels'
  * `resolveOrderForContext`, this never falls back to the customer's
  * `quotedOrderRef` or fuzzy name/confirmation lookups — an untrusted hint

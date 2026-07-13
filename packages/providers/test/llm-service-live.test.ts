@@ -402,7 +402,7 @@ describe("LLMServiceLive — decision mapping", () => {
   });
 });
 
-// Regression: prod ticket 4746d9d6 (2026-07-09). A `supplier.updated` tick ran
+// Regression: prod ticket 4746d9d6 (2026-07-09). A `fulfillment_operator.updated` tick ran
 // three good turns, then OpenRouter/gemini-3.5-flash returned a response with no
 // tool calls, blank text, and a ZEROED usage block (`inputTokens: 0` on a prompt
 // that had been ~6.7k tokens the turn before — the prompt was never billed, so the

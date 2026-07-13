@@ -20,7 +20,7 @@ export type TicketAction =
   | "resolve"
   | "issueRefund"
   | "cancelOrder"
-  | "escalateSupplier"
+  | "escalateFulfillmentOperator"
   | "reply";
 
 const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
@@ -142,18 +142,18 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
       text: "Couldn't find that ticket to cancel on.",
     },
   },
-  escalateSupplier: {
+  escalateFulfillmentOperator: {
     escalated: {
       tone: "success",
-      text: "Escalated to your supplier. The ticket waits for their update; they've been sent a portal link.",
+      text: "Escalated to your fulfillment partner. The ticket waits for their update; they've been sent a portal link.",
     },
-    no_supplier: {
+    no_fulfillment_operator: {
       tone: "warning",
-      text: "No supplier is set up for this workspace. Add one in Settings → Suppliers first.",
+      text: "No fulfillment partner is set up for this workspace. Add one in Settings → Fulfillment partners first.",
     },
     already_escalated: {
       tone: "info",
-      text: "This ticket is already with your supplier. No change.",
+      text: "This ticket is already with your fulfillment partner. No change.",
     },
     transition_not_allowed: {
       tone: "warning",

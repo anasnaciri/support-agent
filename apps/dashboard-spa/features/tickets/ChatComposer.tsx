@@ -103,7 +103,7 @@ const uploadErrorText = (error: string): string => {
 };
 
 /**
- * Attach a file that already lives on this ticket — the file a supplier sent
+ * Attach a file that already lives on this ticket — the file a fulfillment partner sent
  * back, a customer's photo, or something the team uploaded on an earlier
  * reply. Staging one costs no upload: the reply carries its existing id.
  */
@@ -268,7 +268,7 @@ export function ChatComposer({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Files already indexed on this ticket (supplier answers, customer photos,
+  // Files already indexed on this ticket (fulfillment partner answers, customer photos,
   // earlier uploads) — offered in the picker so forwarding one costs no upload.
   const indexQ = useQuery({
     queryKey: qk.ticketAttachments(workspaceId, ticketId),

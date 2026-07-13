@@ -11,7 +11,7 @@ const StatusLiteral = Schema.Literal(
   "triaging",
   "in_progress",
   "waiting_for_customer",
-  "waiting_for_supplier",
+  "waiting_for_fulfillment_operator",
   "waiting_for_approval",
   "approved_action_running",
   "resolved",

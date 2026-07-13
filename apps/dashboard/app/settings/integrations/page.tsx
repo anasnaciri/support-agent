@@ -299,7 +299,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                               p === "shopify"
                                 ? "The agent loses order, customer, and refund access for this store until you reconnect."
                                 : p === "google_sheets"
-                                  ? "Sheets-backed workflows (like supplier escalation) stop working until you reconnect."
+                                  ? "Sheets-backed workflows (like fulfillment partner escalation) stop working until you reconnect."
                                   : "The agent stops reading and replying to this mailbox immediately. Open tickets can't send replies until you reconnect."
                             }
                             confirmLabel="Disconnect"

@@ -70,7 +70,7 @@ export const renderDataProcessingNoticeHtml = (): string => {
     </p>
     <ul>
       <li>OpenRouter, Anthropic, or OpenAI — tenant-selected LLM inference;</li>
-      <li>Google — Gmail mailbox connector and Google Sheets supplier workflows;</li>
+      <li>Google — Gmail mailbox connector and Google Sheets fulfillment partner workflows;</li>
       <li>Microsoft — Outlook / Microsoft 365 mailbox connector;</li>
       <li>Shopify — commerce data;</li>
       <li>Resend — platform/system mail;</li>
@@ -87,9 +87,9 @@ export const renderDataProcessingNoticeHtml = (): string => {
 
     <h2>Sharing on merchant instructions</h2>
     <p>
-      When a ticket is escalated to a supplier — through the supplier portal or
+      When a ticket is escalated to a fulfillment partner — through the fulfillment partner portal or
       a merchant-connected spreadsheet — relevant order, shipping, and
-      conversation details are shared with that supplier. Suppliers are chosen
+      conversation details are shared with that fulfillment partner. Fulfillment partners are chosen
       by the merchant and act on the merchant's instructions; they are not
       Support Agent subprocessors.
     </p>

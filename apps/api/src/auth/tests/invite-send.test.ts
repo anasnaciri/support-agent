@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveInvitationId } from "../invite-send.js";
 import type { WorkosOrgAdminDirectory } from "../workos-directory.js";
 
-// The api decides which WorkOS invitation id to persist for a member/supplier
+// The api decides which WorkOS invitation id to persist for a member/fulfillment-operator
 // invite: a caller-minted one (the Next dashboard sends WorkOS's id from its
 // server action) is used as-is, otherwise the api sends the invitation itself
 // (the Vite SPA has no WORKOS_API_KEY). A missing admin directory or a failed

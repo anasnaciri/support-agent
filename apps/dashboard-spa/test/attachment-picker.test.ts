@@ -13,7 +13,7 @@ const file = (
   filename: `${id}.png`,
   contentType: "image/png",
   sizeBytes: 1024,
-  source: "supplier",
+  source: "fulfillment_operator",
   createdAt: "2026-07-09T10:00:00.000Z",
   ...overrides,
 });
@@ -21,7 +21,7 @@ const file = (
 describe("attachmentSourceLabel", () => {
   it("names each source in merchant-facing words (no schema jargon)", () => {
     expect(attachmentSourceLabel("inbound")).toBe("From the customer");
-    expect(attachmentSourceLabel("supplier")).toBe("From the supplier");
+    expect(attachmentSourceLabel("fulfillment_operator")).toBe("From the fulfillment partner");
     expect(attachmentSourceLabel("merchant")).toBe("Uploaded by your team");
   });
 });
@@ -36,7 +36,7 @@ describe("attachmentPickerState", () => {
     expect(state.available.map((a) => a.id)).toEqual(["a", "c"]);
   });
 
-  it("sorts newest first so the file the supplier just sent is on top", () => {
+  it("sorts newest first so the file the fulfillment partner just sent is on top", () => {
     const state = attachmentPickerState({
       index: [
         file("old", { createdAt: "2026-07-01T00:00:00.000Z" }),

@@ -68,7 +68,7 @@ import {
 import { parseThreadId } from "./conversation-thread-id.js";
 import { ConversationService } from "./conversation-service.js";
 import { KnowledgeBaseService } from "./knowledge-base.js";
-import { SupplierEscalationService } from "./supplier-escalation-service.js";
+import { FulfillmentOperatorEscalationService } from "./fulfillment-operator-escalation-service.js";
 import {
   REPLY_DELIVERY_FAILED_FLAG,
   isReplyDeliverySendFailure,
@@ -152,14 +152,14 @@ const TRACKING_OUTCOME_RISK_FLAGS = new Set([
   "tracking_lookup_failed",
 ]);
 
-const supplierDisabledForSelectedScenario = (
+const fulfillmentOperatorDisabledForSelectedScenario = (
   policy: ResolutionPolicy,
   context: Readonly<Record<string, unknown>>,
 ): boolean => {
   const key = context["scenarioKey"];
   if (typeof key !== "string") return false;
   return policy.scenarios.some(
-    (scenario) => scenario.key === key && scenario.supplierMode === "none",
+    (scenario) => scenario.key === key && scenario.fulfillmentOperatorMode === "none",
   );
 };
 
@@ -213,13 +213,13 @@ const AgentRuntimeLayer = Layer.effect(
     // absent in lean test layers (which then skip the dedup, as before).
     const maybeProcessed = yield* Effect.serviceOption(ProcessedMessageStore);
     const maybeExecutions = yield* Effect.serviceOption(ToolExecutionStore);
-    // Optional supplier-escalation service. Present in the worker (which wires
-    // SupplierEscalationServiceLive); absent in lean test layers. Consulted on
+    // Optional fulfillment-operator-escalation service. Present in the worker (which wires
+    // FulfillmentOperatorEscalationServiceLive); absent in lean test layers. Consulted on
     // an approval resume to detect a STILL-OPEN escalation the just-approved
     // bundle didn't itself create (concurrent wait states) — absent/erroring
     // service degrades to `false` (the old resolve-if-no-escalate behavior).
-    const maybeSupplierEscalation = yield* Effect.serviceOption(
-      SupplierEscalationService,
+    const maybeFulfillmentOperatorEscalation = yield* Effect.serviceOption(
+      FulfillmentOperatorEscalationService,
     );
     // Optional merchant push channel (Telegram, …) — present when the
     // deployment wires one; absent in lean test layers. Strictly
@@ -675,20 +675,20 @@ const AgentRuntimeLayer = Layer.effect(
                   .pipe(Effect.catchAll(() => Effect.succeed(null)))
               )?.resolutionPolicy ?? defaultResolutionPolicy;
             if (
-              toolToRun.name === "supplier.escalate" &&
-              supplierDisabledForSelectedScenario(
+              toolToRun.name === "fulfillment_operator.escalate" &&
+              fulfillmentOperatorDisabledForSelectedScenario(
                 approvalResolutionPolicy,
                 working.context,
               )
             ) {
               yield* escalateToHuman(
                 working.id,
-                "scenario_supplier_disabled",
+                "scenario_fulfillment_operator_disabled",
                 { approvalId: approval.id, tool: approval.tool },
               );
               return {
                 type: "HumanTakeoverRequired",
-                reason: "scenario_supplier_disabled",
+                reason: "scenario_fulfillment_operator_disabled",
               } as const;
             }
             // Policy re-check (audit L8): the approval can be acted on days
@@ -1054,37 +1054,37 @@ const AgentRuntimeLayer = Layer.effect(
                 approvalId: stillPending[0]!.id,
               } as const;
             }
-            // All actions decided. If one was a supplier escalation, the ticket is
-            // now waiting on the SUPPLIER (not done): park `waiting_for_supplier`
-            // so the agent re-engages on `supplier.updated`, exactly like the
-            // in-loop escalate path. A `no_supplier` escalate (escalated:false)
+            // All actions decided. If one was a fulfillmentOperator escalation, the ticket is
+            // now waiting on the FULFILLMENT_OPERATOR (not done): park `waiting_for_fulfillment_operator`
+            // so the agent re-engages on `fulfillment_operator.updated`, exactly like the
+            // in-loop escalate path. A `no_fulfillment_operator` escalate (escalated:false)
             // is not a wait — it falls through to resolve.
             const escalatedInBundle = ran.some(
               (r) =>
-                r.tool === "supplier.escalate" &&
+                r.tool === "fulfillment_operator.escalate" &&
                 (r.result as { readonly escalated?: boolean } | null)
                   ?.escalated === true,
             );
             // Concurrent wait states: the ticket may ALREADY carry an open
             // escalation from a PRIOR tick (queued alongside this approval).
-            // Resolving now would close the ticket out from under that supplier
+            // Resolving now would close the ticket out from under that fulfillmentOperator
             // wait. Consult the row-derived source of truth; absent/erroring
             // service degrades to `false` (the old bundle-only behavior).
-            const hasOpenEscalation = Option.isSome(maybeSupplierEscalation)
-              ? yield* maybeSupplierEscalation.value
+            const hasOpenEscalation = Option.isSome(maybeFulfillmentOperatorEscalation)
+              ? yield* maybeFulfillmentOperatorEscalation.value
                   .hasOpenEscalationForTicket(working.tenantId, working.id)
                   .pipe(Effect.catchAll(() => Effect.succeed(false)))
               : false;
-            const escalatedToSupplier = escalatedInBundle || hasOpenEscalation;
-            if (escalatedToSupplier) {
-              working = yield* lifecycle.parkWaitingForSupplier({
+            const escalatedToFulfillmentOperator = escalatedInBundle || hasOpenEscalation;
+            if (escalatedToFulfillmentOperator) {
+              working = yield* lifecycle.parkWaitingForFulfillmentOperator({
                 ticketId: working.id,
                 tenantId: working.tenantId,
                 agentId: trigger.agentId,
-                tool: "supplier.escalate",
+                tool: "fulfillment_operator.escalate",
                 callId: `approval-${trigger.id}`,
               });
-              return { type: "PausedWaitingForSupplier" } as const;
+              return { type: "PausedWaitingForFulfillmentOperator" } as const;
             }
             // Nothing left to wait on — resolve once.
             working = yield* lifecycle.resolve({
@@ -1461,17 +1461,17 @@ const AgentRuntimeLayer = Layer.effect(
             }
           }
 
-          // 2.96. Hold events while the ticket is parked on the supplier. A ticket in
-          // `waiting_for_supplier` belongs to the warehouse until they respond, so
+          // 2.96. Hold events while the ticket is parked on the fulfillmentOperator. A ticket in
+          // `waiting_for_fulfillment_operator` belongs to the warehouse until they respond, so
           // a stray customer reply or follow-up timer must NOT re-enter the agent
-          // loop (the agent would answer the customer while the supplier still
+          // loop (the agent would answer the customer while the fulfillmentOperator still
           // owns the ticket — mirrors the approval/takeover park guards above). Only
-          // `supplier.updated` (the supplier responded — the loop below drafts the
+          // `fulfillment_operator.updated` (the fulfillmentOperator responded — the loop below drafts the
           // customer reply) and the human-control events (`manual.takeover` /
           // `ticket.resumed`) pass through.
-          if (working.status === "waiting_for_supplier") {
+          if (working.status === "waiting_for_fulfillment_operator") {
             const passthrough =
-              event.type === "supplier.updated" ||
+              event.type === "fulfillment_operator.updated" ||
               event.type === "manual.takeover" ||
               event.type === "ticket.resumed";
             if (!passthrough) {
@@ -1480,11 +1480,11 @@ const AgentRuntimeLayer = Layer.effect(
                   tenantId: working.tenantId,
                   ticketId: working.id,
                   actor: { type: "system", id: "runtime" },
-                  action: "event.held_waiting_for_supplier",
+                  action: "event.held_waiting_for_fulfillment_operator",
                   details: { eventType: event.type },
                 }),
               );
-              return { type: "PausedWaitingForSupplier" } as const;
+              return { type: "PausedWaitingForFulfillmentOperator" } as const;
             }
           }
             return null;
@@ -1529,7 +1529,7 @@ const AgentRuntimeLayer = Layer.effect(
               ),
             );
           // Load tenant settings once per tick — `buildSystemPrompt` reads
-          // `supplierEscalationSheet` to optionally append the supplier
+          // `fulfillmentOperatorEscalationSheet` to optionally append the fulfillmentOperator
           // header to the agent prompt. DB failures fall back to `null`
           // so the runtime continues with the bare agent prompt rather
           // than crashing on a settings-table issue.
@@ -1660,7 +1660,7 @@ const AgentRuntimeLayer = Layer.effect(
           let agent: AgentConfig = withScenario(agentBase, working.context);
           // Some ticks re-enter the agent loop with no inbound customer message —
           // a resume (dashboard retry / restart-from-triage / hand-back), or a
-          // supplier responding on a parked ticket. The agent starts blind, so
+          // fulfillmentOperator responding on a parked ticket. The agent starts blind, so
           // pre-fetch the full thread and let it re-orient on the ACTUAL
           // conversation and what was already done, instead of being told to
           // fetch it itself (triage has no such tool). See `shouldPrefetchThread`.
@@ -2124,8 +2124,8 @@ const AgentRuntimeLayer = Layer.effect(
                   current.context,
                 );
                 if (
-                  tool.name === "supplier.escalate" &&
-                  supplierDisabledForSelectedScenario(
+                  tool.name === "fulfillment_operator.escalate" &&
+                  fulfillmentOperatorDisabledForSelectedScenario(
                     currentResolutionPolicy,
                     current.context,
                   )
@@ -2134,7 +2134,7 @@ const AgentRuntimeLayer = Layer.effect(
                     role: "tool",
                     toolCallId: decision.callId,
                     toolName: tool.name,
-                    content: { error: "scenario_supplier_disabled" },
+                    content: { error: "scenario_fulfillment_operator_disabled" },
                   });
                   return { agent, current, done: null };
                 }
@@ -2394,17 +2394,17 @@ const AgentRuntimeLayer = Layer.effect(
                   return { agent, current, done: { type: "PausedWaitingForCustomer" } as const };
                 }
                 if (
-                  tool.name === "supplier.escalate" &&
+                  tool.name === "fulfillment_operator.escalate" &&
                   (exec.right as { readonly escalated?: boolean }).escalated === true
                 ) {
-                  // Producer for `waiting_for_supplier` (mirror of ask_customer) —
-                  // ONLY when a supplier was actually found (`escalated: true`). A
-                  // `no_supplier` result falls through to the generic tool-result
+                  // Producer for `waiting_for_fulfillment_operator` (mirror of ask_customer) —
+                  // ONLY when a fulfillmentOperator was actually found (`escalated: true`). A
+                  // `no_fulfillment_operator` result falls through to the generic tool-result
                   // push below so the agent reads it and falls back to a direct
                   // reply (it must NOT park a ticket nobody is working). The escalation
                   // row was written by the tool's service; here we park the ticket +
                   // audit in one tx, then end the tick. The ticket re-engages on
-                  // `supplier.updated` (the consumer). Runs only when escalate
+                  // `fulfillment_operator.updated` (the consumer). Runs only when escalate
                   // resolved to `allow` (per-agent) — under the default `ask`, the
                   // permission gate above parks in waiting_for_approval instead.
                   //
@@ -2412,28 +2412,28 @@ const AgentRuntimeLayer = Layer.effect(
                   // actions, BOTH waits hold and `primaryWaitStatus` picks the
                   // park — approval wins, so the queued bundle parks (one
                   // merchant ping, guard 2.9 armed) instead of stranding the
-                  // pending rows on a waiting_for_supplier ticket. The open
-                  // escalation row still carries the supplier wait, and the
-                  // notify outbox emails the supplier regardless of status.
+                  // pending rows on a waiting_for_fulfillment_operator ticket. The open
+                  // escalation row still carries the fulfillmentOperator wait, and the
+                  // notify outbox emails the fulfillmentOperator regardless of status.
                   // (Escalate-first ticks have an empty queue — any reply the
-                  // agent still owes is drafted when the supplier answers.)
+                  // agent still owes is drafted when the fulfillmentOperator answers.)
                   const wait = primaryWaitStatus({
                     approvalPending:
                       agent.autonomousLoop === true && queuedApprovals.length > 0,
-                    supplierOpen: true,
+                    fulfillmentOperatorOpen: true,
                   });
                   if (wait === "waiting_for_approval") {
                     const done = yield* parkQueuedBundle(current, agent, turn);
                     return { agent, current, done };
                   }
-                  current = yield* lifecycle.parkWaitingForSupplier({
+                  current = yield* lifecycle.parkWaitingForFulfillmentOperator({
                     ticketId: current.id,
                     tenantId: current.tenantId,
                     agentId: agent.id,
                     tool: tool.name,
                     callId: decision.callId,
                   });
-                  return { agent, current, done: { type: "PausedWaitingForSupplier" } as const };
+                  return { agent, current, done: { type: "PausedWaitingForFulfillmentOperator" } as const };
                 }
                 messages.push({
                   role: "tool",
@@ -2947,15 +2947,15 @@ const AgentRuntimeLayer = Layer.effect(
               } as const;
             }
 
-            if (decision.type === "escalate_supplier") {
+            if (decision.type === "escalate_fulfillment_operator") {
               yield* escalateToHuman(
                 current.id,
-                "escalate_supplier_not_wired",
+                "escalate_fulfillment_operator_not_wired",
                 { turn },
               );
               return {
                 type: "HumanTakeoverRequired",
-                reason: "escalate_supplier not wired in Phase 1",
+                reason: "escalate_fulfillment_operator not wired in Phase 1",
               } as const;
             }
 

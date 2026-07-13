@@ -68,7 +68,7 @@ export const purgeLeakedTenants = async (
        )
   `;
   // 2. tickets — FK to tenants (NO ACTION); cascades ticket_state_transitions,
-  //    ticket_message_ids, reply_deliveries, ticket_supplier_escalations, …
+  //    ticket_message_ids, reply_deliveries, ticket_fulfillment_operator_escalations, …
   await sql`DELETE FROM tickets WHERE ${inScope("tenant_id")}`;
   // 3. audit_log — no FK; would orphan tenant-scoped rows otherwise.
   await sql`DELETE FROM audit_log WHERE ${inScope("tenant_id")}`;

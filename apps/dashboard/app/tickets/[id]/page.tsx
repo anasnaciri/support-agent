@@ -352,14 +352,14 @@ const TICKET_MENU_ACTIONS: Record<
 const TERMINAL = new Set(["resolved", "archived", "human_takeover", "failed"]);
 // Manual close ("Resolve" button) is offered while the ticket is genuinely live
 // and not parked on machinery that owns its own exit (an approval row, a
-// supplier escalation, an in-flight approved action). human_takeover IS
+// fulfillment partner escalation, an in-flight approved action). human_takeover IS
 // included — a manager who owns the ticket can close it themselves.
 const RESOLVE_HIDDEN = new Set([
   "resolved",
   "archived",
   "failed",
   "waiting_for_approval",
-  "waiting_for_supplier",
+  "waiting_for_fulfillment_operator",
   "approved_action_running",
 ]);
 // Friendlier labels for the status changes folded into the ⋮ menu.
@@ -800,18 +800,18 @@ export default async function TicketDetailPage({ params, searchParams }: Params)
         ] as string)
       : null;
   // Concurrent wait states: a ticket parked waiting_for_approval can ALSO carry
-  // an open supplier escalation (status shows the primary wait). Key the
-  // supplier facts off the row-derived flag, falling back to status for an
+  // an open fulfillment partner escalation (status shows the primary wait). Key the
+  // fulfillmentOperator facts off the row-derived flag, falling back to status for an
   // older api that doesn't send waitingOn.
-  const waitingOnSupplier =
-    ticketRow.waitingOn?.supplier ?? ticketRow.status === "waiting_for_supplier";
+  const waitingOnFulfillmentOperator =
+    ticketRow.waitingOn?.fulfillmentOperator ?? ticketRow.status === "waiting_for_fulfillment_operator";
   const lockedMessage =
     ticketRow.status === "resolved" || ticketRow.status === "archived"
       ? "This ticket is closed. Reopen it from the status menu to reply."
       : ticketRow.status === "failed"
         ? "This ticket is closed. Reopen it from the status menu to reply."
-        : waitingOnSupplier
-          ? "Waiting on the supplier. Take over to reply to the customer."
+        : waitingOnFulfillmentOperator
+          ? "Waiting on the fulfillment partner. Take over to reply to the customer."
           : "The agent is handling this conversation. Take over to reply yourself.";
   const composerMode: ComposerMode | null =
     singleApproval && singleApprovalDraft !== null

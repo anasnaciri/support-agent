@@ -2,7 +2,7 @@ import type { TicketAttachmentRecord } from "@support-agent/services";
 import type { TicketAttachmentSummary } from "@support-agent/dashboard-contracts";
 
 /**
- * Upload validation shared by the merchant (dashboard) and supplier (portal)
+ * Upload validation shared by the merchant (dashboard) and fulfillmentOperator (portal)
  * attachment endpoints. Uploads are raw bytes with the file's content type on
  * the request; this module owns the allowlist, the size cap, and a magic-byte
  * sniff so a declared type can't lie about the payload that will later be

@@ -232,7 +232,7 @@ describe("TenantAgentOverridesServiceTest", () => {
           yield* s.setToolPermission(
             tenantA,
             agentX,
-            "supplier.add_sheet_row",
+            "fulfillment_operator.add_sheet_row",
             "allow",
           );
           yield* s.setToolPermission(tenantA, agentX, "conversation.reply", "allow");
@@ -243,7 +243,7 @@ describe("TenantAgentOverridesServiceTest", () => {
     );
     expect(out.get(agentX)?.toolPermissions).toEqual({
       "conversation.reply": "allow",
-      "supplier.add_sheet_row": "allow",
+      "fulfillment_operator.add_sheet_row": "allow",
     });
   });
 
@@ -257,7 +257,7 @@ describe("TenantAgentOverridesServiceTest", () => {
           yield* s.setToolPermission(
             tenantA,
             agentX,
-            "supplier.add_sheet_row",
+            "fulfillment_operator.add_sheet_row",
             "allow",
           );
           yield* s.clearToolPermission(tenantA, agentX, "conversation.reply");
@@ -268,7 +268,7 @@ describe("TenantAgentOverridesServiceTest", () => {
     );
     expect(out.size).toBe(1);
     expect(out.get(agentX)?.toolPermissions).toEqual({
-      "supplier.add_sheet_row": "allow",
+      "fulfillment_operator.add_sheet_row": "allow",
     });
   });
 

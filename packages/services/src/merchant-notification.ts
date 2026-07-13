@@ -346,7 +346,7 @@ export const summarizeApprovalAction = (
     }
     case "order.update_tracking": {
       // Show the NUMBER being written — that's what the merchant would
-      // sanity-check against the supplier's message.
+      // sanity-check against the fulfillmentOperator's message.
       const number =
         typeof input["trackingNumber"] === "string"
           ? input["trackingNumber"]

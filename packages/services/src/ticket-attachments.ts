@@ -10,12 +10,12 @@ import type {
  * Persistent index of attachment blobs bound to a ticket. The bytes live in
  * `BlobStorage`; a row here is the ONLY durable mapping from a ticket to a
  * storage key. Rows are referenced by opaque `id` everywhere outside the
- * trust boundary (dashboard clients, the supplier portal, LLM tool args) —
+ * trust boundary (dashboard clients, the fulfillmentOperator portal, LLM tool args) —
  * `getByIds` resolves ids strictly within one tenant + ticket, so a tampered
  * or hallucinated id can never reach another tenant's blob.
  */
 
-export type TicketAttachmentSource = "inbound" | "supplier" | "merchant";
+export type TicketAttachmentSource = "inbound" | "fulfillment_operator" | "merchant";
 
 export interface RecordTicketAttachmentInput {
   readonly tenantId: TenantId;
@@ -27,11 +27,11 @@ export interface RecordTicketAttachmentInput {
   readonly storageKey: string;
   /**
    * Who uploaded it — WorkOS user id for merchants, portal user id for
-   * suppliers, null for connector-ingested customer attachments.
+   * fulfillmentOperators, null for connector-ingested customer attachments.
    */
   readonly uploadedBy?: string | null;
   /**
-   * The supplier escalation this file was uploaded against — supplier uploads
+   * The fulfillmentOperator escalation this file was uploaded against — fulfillmentOperator uploads
    * only. Scopes the update's id validation to one escalation and drives the
    * portal's "files you sent" view.
    */
@@ -59,7 +59,7 @@ export interface TicketAttachmentRecord {
    * rendering should use `listMessageBindingsForTicket`.
    */
   readonly messageId: string | null;
-  /** When the file was consumed into a sent reply or a supplier update. */
+  /** When the file was consumed into a sent reply or a fulfillmentOperator update. */
   readonly usedAt: Date | null;
   readonly createdAt: Date;
 }

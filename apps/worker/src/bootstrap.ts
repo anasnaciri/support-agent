@@ -50,7 +50,7 @@ import {
   CustomAgentServiceLive,
   DbClient,
   DbClientLive,
-  SupplierEscalationServiceLive,
+  FulfillmentOperatorEscalationServiceLive,
   ReplyDeliveryServiceLive,
   ImageHashStoreLive,
   TicketAttachmentStoreLive,
@@ -310,9 +310,9 @@ export const buildWorker = async (
     // are provided their own copy via inner Layer.provide; both copies
     // collapse to the same Live impl, so duplicating is harmless.
     TenantRepositoryLive,
-    // Backs the supplier.escalate tool — records the escalation row + resolves
-    // the workspace's supplier so the runtime can park in waiting_for_supplier.
-    SupplierEscalationServiceLive,
+    // Backs `fulfillment_operator.escalate` — records the escalation row + resolves
+    // the workspace's fulfillmentOperator so the runtime can park in waiting_for_fulfillment_operator.
+    FulfillmentOperatorEscalationServiceLive,
     // Durable outbox for FAILED customer-reply sends: the runtime enqueues here
     // on a send failure so the retry cron + the dashboard retry button can
     // re-send the verbatim draft. DbClient-backed (satisfied by the dbLayer
@@ -538,7 +538,7 @@ export const buildWorker = async (
   // + Google OAuth env are set, swap in the Live layer that resolves
   // per-tenant tokens from `connector_connections`. Otherwise fall back
   // to an in-memory Test layer so the worker still boots — the
-  // `supplier.add_sheet_row` tool will fail with `SheetsNotFound` if
+  // `fulfillment_operator.add_sheet_row` tool will fail with `SheetsNotFound` if
   // invoked, but the rest of the runtime is unaffected.
   const sheets =
     credKeyB64 && googleClientId && googleClientSecret

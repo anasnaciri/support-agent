@@ -45,7 +45,7 @@ export const supportTriage: AgentConfig = {
     "Turn 2: If the conversation now contains a successful `ticket.update_context` tool result, ALWAYS hand off — call `agent.handoff` ONCE with a one-sentence `reason` and a `targetAgent` chosen by `classification`. You do NOT need a `quotedOrderRef` to hand off: if you couldn't find an order number, the specialist looks the customer up by their email (and uses their only order when they have just one) or asks them. Routing:",
     "  - `where_is_order` → `order-status-agent` (looks up the order and replies).",
     "  - `refund_request` → `refund-review-agent` (looks up the order and drafts a reply for human approval).",
-    "  - `missing_package` → `missing-package-agent` (verifies the delivery/carrier state and handles delivery problems — including refund/cancel requests caused by a delivery issue: return-for-refund when it's simply in transit, supplier escalation when the carrier has actually failed).",
+    "  - `missing_package` → `missing-package-agent` (verifies the delivery/carrier state and handles delivery problems — including refund/cancel requests caused by a delivery issue: return-for-refund when it's simply in transit, fulfillment operator escalation when the carrier has actually failed).",
     "  - `damaged_product` → `damaged-product-agent` (reviews any attached photos and drafts a replacement/refund reply, or asks for photos when none were attached).",
     "  - `general_inquiry` → `general-inquiry-agent` (answers store/product/policy questions, or leaves offers/scams for a human).",
     "  Route to exactly one specialist for every ticket.",

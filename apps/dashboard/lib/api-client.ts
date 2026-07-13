@@ -110,7 +110,7 @@ export interface DashboardContext {
   readonly tenantName: string;
   readonly workspaceId: string;
   /**
-   * Every workspace the user can reach — merchant (their stores) AND supplier
+   * Every workspace the user can reach — merchant (their stores) AND fulfillmentOperator
    * (merchants that escalate to them), each tagged by kind, for the unified
    * switcher.
    */
@@ -218,28 +218,28 @@ const fetchMeSession = async (ctx: CallCtx): Promise<MePermissionsResponse> => {
   return body as MePermissionsResponse;
 };
 
-// Binding-anchored supplier workspaces (cross-org) for the unified switcher.
+// Binding-anchored fulfillment partner workspaces (cross-org) for the unified switcher.
 // Identity-only; also completes the cross-tenant bootstrap server-side.
-const fetchSupplierWorkspaces = async (
+const fetchFulfillmentOperatorWorkspaces = async (
   accessToken: string,
 ): Promise<WorkspacesResponse> => {
-  const { status, body } = await call("/supplier/workspaces", {
+  const { status, body } = await call("/fulfillment-operator/workspaces", {
     ctx: { accessToken },
   });
   if (status !== 200) {
-    throw new Error(`dashboard api ${status} on /supplier/workspaces`);
+    throw new Error(`dashboard api ${status} on /fulfillment-operator/workspaces`);
   }
   return body as WorkspacesResponse;
 };
 
-// Supplier permissions for the ACTIVE workspace when it's a supplier one (the
+// FulfillmentOperator permissions for the ACTIVE workspace when it's a fulfillment partner one (the
 // merchant /me/session resolves via org and would 404 across orgs).
-const fetchSupplierSession = async (
+const fetchFulfillmentOperatorSession = async (
   ctx: CallCtx,
 ): Promise<MePermissionsResponse> => {
-  const { status, body } = await call("/supplier/session", { ctx });
+  const { status, body } = await call("/fulfillment-operator/session", { ctx });
   if (status !== 200) {
-    throw new Error(`dashboard api ${status} on /supplier/session`);
+    throw new Error(`dashboard api ${status} on /fulfillment-operator/session`);
   }
   return body as MePermissionsResponse;
 };
@@ -281,15 +281,15 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
   const userDecisionUuid = dashboardUserDecisionUuid(user.id);
   const userEmail = user.email ?? null;
   // Two lists (in parallel): the org-scoped merchant workspaces and the
-  // binding-anchored supplier workspaces (cross-org). The supplier fetch also
+  // binding-anchored fulfillment partner workspaces (cross-org). The fulfillmentOperator fetch also
   // completes the cross-tenant bootstrap server-side.
-  const [{ workspaces: merchantWorkspaces }, { workspaces: supplierWorkspaces }] =
+  const [{ workspaces: merchantWorkspaces }, { workspaces: fulfillmentOperatorWorkspaces }] =
     await Promise.all([
       fetchWorkspaces(accessToken),
-      fetchSupplierWorkspaces(accessToken),
+      fetchFulfillmentOperatorWorkspaces(accessToken),
     ]);
   // Probe merchant access on the org's default workspace: only a real merchant
-  // there surfaces the org's merchant workspaces (a pure supplier merely belongs
+  // there surfaces the org's merchant workspaces (a pure fulfillment partner merely belongs
   // to the merchant's WorkOS org). Reused for permissions when it's the active.
   const merchantDefault = merchantWorkspaces[0];
   const merchantMe = merchantDefault
@@ -297,7 +297,7 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
     : null;
   const workspaces = mergeWorkspaces(
     merchantWorkspaces,
-    supplierWorkspaces,
+    fulfillmentOperatorWorkspaces,
     merchantMe ? hasMerchantAccess(merchantMe) : false,
   );
   // The cookie is advisory — a stale value (deleted workspace) resolves to
@@ -307,12 +307,12 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
     | UnifiedWorkspace
     | null;
   if (!active) redirect(ONBOARDING_PATH);
-  // Permissions follow the active workspace's kind. Supplier → /supplier/session
+  // Permissions follow the active workspace's kind. FulfillmentOperator → /fulfillment-operator/session
   // (binding-anchored). Merchant → the probe if it's the default, else a fresh
   // /me/session for the active workspace.
   const me =
-    active.kind === "supplier"
-      ? await fetchSupplierSession({ accessToken, userEmail, workspaceId: active.id })
+    active.kind === "fulfillment_operator"
+      ? await fetchFulfillmentOperatorSession({ accessToken, userEmail, workspaceId: active.id })
       : active.id === merchantDefault?.id && merchantMe
         ? merchantMe
         : await fetchMeSession({ accessToken, userEmail, workspaceId: active.id });
@@ -354,10 +354,10 @@ export const getShellWorkspaces = async (): Promise<ShellWorkspaces | null> => {
     const { user, organizationId, accessToken } = session;
     if (!user || !organizationId || !accessToken) return null;
     const userEmail = user.email ?? null;
-    const [{ workspaces: merchantWorkspaces }, { workspaces: supplierWorkspaces }] =
+    const [{ workspaces: merchantWorkspaces }, { workspaces: fulfillmentOperatorWorkspaces }] =
       await Promise.all([
         fetchWorkspaces(accessToken),
-        fetchSupplierWorkspaces(accessToken),
+        fetchFulfillmentOperatorWorkspaces(accessToken),
       ]);
     const merchantDefault = merchantWorkspaces[0];
     let merchantMe: MePermissionsResponse | null = null;
@@ -370,7 +370,7 @@ export const getShellWorkspaces = async (): Promise<ShellWorkspaces | null> => {
     }
     const workspaces = mergeWorkspaces(
       merchantWorkspaces,
-      supplierWorkspaces,
+      fulfillmentOperatorWorkspaces,
       merchantMe ? hasMerchantAccess(merchantMe) : false,
     );
     const active = pickActiveWorkspace(workspaces, await workspaceCookie()) as
@@ -380,8 +380,8 @@ export const getShellWorkspaces = async (): Promise<ShellWorkspaces | null> => {
     let permissions: ReadonlyArray<RbacPermissionId> | null = null;
     try {
       const me =
-        active.kind === "supplier"
-          ? await fetchSupplierSession({ accessToken, userEmail, workspaceId: active.id })
+        active.kind === "fulfillment_operator"
+          ? await fetchFulfillmentOperatorSession({ accessToken, userEmail, workspaceId: active.id })
           : active.id === merchantDefault?.id && merchantMe
             ? merchantMe
             : await fetchMeSession({ accessToken, userEmail, workspaceId: active.id });
@@ -516,10 +516,10 @@ export interface TicketShopifyPanels {
   readonly shopDomain: string | null;
 }
 
-// Supplier portal — the minimal privacy projection the api returns (no customer
-// PII). Mirrors the db's SupplierEscalation{ListItem,Detail} shapes; redefined
+// FulfillmentOperator portal — the minimal privacy projection the api returns (no customer
+// PII). Mirrors the db's FulfillmentOperatorEscalation{ListItem,Detail} shapes; redefined
 // here because the dashboard (Path B) imports only agent-core + contracts.
-export interface SupplierEscalationListItemView {
+export interface FulfillmentOperatorEscalationListItemView {
   readonly id: string;
   readonly ticketId: string;
   readonly problem: string;
@@ -530,8 +530,8 @@ export interface SupplierEscalationListItemView {
   readonly status: string;
   readonly createdAt: string;
 }
-export interface SupplierEscalationDetailView
-  extends SupplierEscalationListItemView {
+export interface FulfillmentOperatorEscalationDetailView
+  extends FulfillmentOperatorEscalationListItemView {
   readonly note: string | null;
   readonly proposedResolution: string | null;
 }
@@ -1014,7 +1014,7 @@ export const api = {
   ): Promise<CallResult> =>
     call("/resolution-agent", { method: "POST", body: { enabled }, ctx }),
 
-  setSupplierSheet: (
+  setFulfillmentOperatorSheet: (
     ctx: CallCtx,
     input: {
       readonly spreadsheetId: string;
@@ -1022,10 +1022,10 @@ export const api = {
       readonly description: string | null;
     },
   ): Promise<CallResult> =>
-    call("/supplier-sheet", { method: "POST", body: input, ctx }),
+    call("/fulfillment-operator-sheet", { method: "POST", body: input, ctx }),
 
-  clearSupplierSheet: (ctx: CallCtx): Promise<CallResult> =>
-    call("/supplier-sheet/clear", { method: "POST", ctx }),
+  clearFulfillmentOperatorSheet: (ctx: CallCtx): Promise<CallResult> =>
+    call("/fulfillment-operator-sheet/clear", { method: "POST", ctx }),
 
   disconnect: (ctx: CallCtx, provider: string): Promise<CallResult> =>
     call(`/connections/${encodeURIComponent(provider)}/disconnect`, {
@@ -1460,32 +1460,32 @@ export const api = {
       ctx,
     }),
 
-  // ---- Supplier portal ----
-  supplierTickets: async (
+  // ---- FulfillmentOperator portal ----
+  fulfillmentOperatorTickets: async (
     ctx: CallCtx,
-  ): Promise<ReadonlyArray<SupplierEscalationListItemView>> =>
+  ): Promise<ReadonlyArray<FulfillmentOperatorEscalationListItemView>> =>
     (
-      (await okBody("/supplier/tickets", ctx)) as {
-        tickets: ReadonlyArray<SupplierEscalationListItemView>;
+      (await okBody("/fulfillment-operator/tickets", ctx)) as {
+        tickets: ReadonlyArray<FulfillmentOperatorEscalationListItemView>;
       }
     ).tickets,
 
-  supplierTicket: async (
+  fulfillmentOperatorTicket: async (
     ctx: CallCtx,
     id: string,
-  ): Promise<SupplierEscalationDetailView | null> => {
+  ): Promise<FulfillmentOperatorEscalationDetailView | null> => {
     const { status, body } = await call(
-      `/supplier/tickets/${encodeURIComponent(id)}`,
+      `/fulfillment-operator/tickets/${encodeURIComponent(id)}`,
       { ctx },
     );
     if (status === 404) return null;
     if (status !== 200) {
-      throw new Error(`dashboard api ${status} on /supplier/tickets/:id`);
+      throw new Error(`dashboard api ${status} on /fulfillment-operator/tickets/:id`);
     }
-    return body as SupplierEscalationDetailView;
+    return body as FulfillmentOperatorEscalationDetailView;
   },
 
-  supplierUpdate: (
+  fulfillmentOperatorUpdate: (
     ctx: CallCtx,
     id: string,
     input: {
@@ -1493,14 +1493,14 @@ export const api = {
       readonly proposedResolution?: string | null;
     },
   ): Promise<CallResult> =>
-    call(`/supplier/tickets/${encodeURIComponent(id)}/update`, {
+    call(`/fulfillment-operator/tickets/${encodeURIComponent(id)}/update`, {
       method: "POST",
       body: input,
       ctx,
       on403: "return",
     }),
 
-  inviteSupplier: (
+  inviteFulfillmentOperator: (
     ctx: CallCtx,
     input: {
       readonly email: string;
@@ -1508,5 +1508,5 @@ export const api = {
       readonly workosInvitationId?: string;
     },
   ): Promise<CallResult> =>
-    call("/supplier/invite", { method: "POST", body: input, ctx }),
+    call("/fulfillment-operator/invite", { method: "POST", body: input, ctx }),
 };

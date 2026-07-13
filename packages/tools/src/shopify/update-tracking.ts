@@ -8,16 +8,16 @@ import { ShopifyService } from "@support-agent/services";
 
 const Input = Schema.Struct({
   // Same id shapes `order.cancel` accepts: a Shopify GID. By the time a new
-  // tracking number arrives (a supplier update), the agent has already fetched
+  // tracking number arrives (a fulfillmentOperator update), the agent has already fetched
   // the order and has the GID in scope; order names like `#1001` are NOT
   // accepted.
   orderId: Schema.String,
   trackingNumber: Schema.String,
-  // The carrier, or null when the supplier didn't name one (the fulfillment's
+  // The carrier, or null when the fulfillmentOperator didn't name one (the fulfillment's
   // current carrier is then carried over so the write never drops it).
   trackingCompany: Schema.NullOr(Schema.String),
   // The number being REPLACED — the disambiguator when the order carries
-  // several fulfillments (same rule the supplier portal's manual edit uses).
+  // several fulfillments (same rule the fulfillmentOperator portal's manual edit uses).
   currentTrackingNumber: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
@@ -32,17 +32,17 @@ const Output = Schema.Struct({
 export const shopifyUpdateTracking = defineTool({
   name: "order.update_tracking",
   description:
-    "Replace the tracking number on a Shopify order's fulfillment after the supplier or carrier issued a new one, e.g. a reshipment went out under a new number or the parcel was re-labelled. Use it when a supplier update reports a new tracking number, so the order record stays in sync; only pass a tracking number that was explicitly stated, never guess or construct one. The `orderId` must be a Shopify GID (`gid://shopify/Order/...`); order names like `#1001` are NOT accepted, call `shopify.get_order` first. When the order has more than one fulfillment, pass `currentTrackingNumber` (the old number being replaced, read from the order's fulfillments) so the right fulfillment is updated; without it only an order with exactly ONE fulfillment can be updated (`AmbiguousFulfillment` otherwise). `trackingCompany`: the carrier when one was named, else null to keep the fulfillment's current carrier. The store does NOT email the customer about this change; share the new tracking number in your reply instead. Returns what the store saved. Never call it twice for the same number; if the result is unclear, re-check via `shopify.get_order` instead of retrying.",
+    "Replace the tracking number on a Shopify order's fulfillment after the fulfillment operator or carrier issued a new one, e.g. a reshipment went out under a new number or the parcel was re-labelled. Use it when a fulfillment operator update reports a new tracking number, so the order record stays in sync; only pass a tracking number that was explicitly stated, never guess or construct one. The `orderId` must be a Shopify GID (`gid://shopify/Order/...`); order names like `#1001` are NOT accepted, call `shopify.get_order` first. When the order has more than one fulfillment, pass `currentTrackingNumber` (the old number being replaced, read from the order's fulfillments) so the right fulfillment is updated; without it only an order with exactly ONE fulfillment can be updated (`AmbiguousFulfillment` otherwise). `trackingCompany`: the carrier when one was named, else null to keep the fulfillment's current carrier. The store does NOT email the customer about this change; share the new tracking number in your reply instead. Returns what the store saved. Never call it twice for the same number; if the result is unclear, re-check via `shopify.get_order` instead of retrying.",
   displayDescription:
-    "The agent updates an order's tracking number when the supplier or carrier reports a new one, for example after a reshipment.",
+    "The agent updates an order's tracking number when the fulfillment partner or carrier reports a new one, for example after a reshipment.",
   tenantControl: "permission-toggle",
   inputSchema: Input,
   outputSchema: Output,
   risk: "write",
   // `allow` by default, unlike the other order writes: the tracking number's
-  // authority is the supplier's own statement, and the supplier already holds
+  // authority is the fulfillmentOperator's own statement, and the fulfillmentOperator already holds
   // an UNGATED manual edit of the same fulfillment field in their portal
-  // (supplier-tracking.ts). Requiring merchant approval to transcribe it would
+  // (fulfillment-operator-tracking.ts). Requiring merchant approval to transcribe it would
   // add friction the manual path doesn't have. Tenants flip it to `ask` with
   // the per-agent toggle.
   defaultPermission: "allow",
@@ -81,8 +81,8 @@ export const shopifyUpdateTracking = defineTool({
           ),
         );
 
-      // Which fulfillment? Same rule as the supplier portal's manual edit
-      // (supplier-tracking.ts): the fulfillment currently carrying the number
+      // Which fulfillment? Same rule as the fulfillmentOperator portal's manual edit
+      // (fulfillment-operator-tracking.ts): the fulfillment currently carrying the number
       // being replaced is the one being talked about; with no match, only an
       // order with exactly ONE fulfillment is safe — refuse rather than guess.
       if (order.fulfillments.length === 0) {

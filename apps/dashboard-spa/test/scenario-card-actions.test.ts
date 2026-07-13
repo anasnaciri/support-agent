@@ -33,7 +33,7 @@ const scenario: ResolutionScenarioView = {
   builtin: true,
   enabled: true,
   enabledActions: [{ tool: "refund.create", permission: "ask" }],
-  supplierMode: "escalate_and_wait",
+  fulfillmentOperatorMode: "escalate_and_wait",
   notes: "Once it is genuinely lost, make the customer whole with /refund.create.",
 };
 

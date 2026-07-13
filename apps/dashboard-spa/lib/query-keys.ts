@@ -11,10 +11,10 @@ import type {
 export const qk = {
   authSession: ["auth-session"] as const,
   workspaces: ["workspaces"] as const, // NOT workspace-scoped
-  supplierWorkspaces: ["supplier-workspaces"] as const, // identity-scoped, cross-org
+  fulfillmentOperatorWorkspaces: ["fulfillment-operator-workspaces"] as const, // identity-scoped, cross-org
   openRouterPricing: ["openrouter-pricing"] as const, // NOT workspace-scoped
   me: (w: string) => ["me", w] as const,
-  supplierSession: (w: string) => ["supplier-session", w] as const,
+  fulfillmentOperatorSession: (w: string) => ["fulfillment-operator-session", w] as const,
 
   today: (w: string) => ["today", w] as const,
   tickets: (w: string, f: TicketsFilter, page: number, limit: number) =>
@@ -52,14 +52,14 @@ export const qk = {
   roles: (w: string) => ["roles", w] as const,
   permissionCatalog: (w: string) => ["permission-catalog", w] as const,
   shopCurrency: (w: string) => ["shop-currency", w] as const,
-  supplierTickets: (w: string) => ["supplier-tickets", w] as const,
-  supplierTicket: (w: string, id: string) => ["supplier-ticket", w, id] as const,
+  fulfillmentOperatorTickets: (w: string) => ["fulfillment-operator-tickets", w] as const,
+  fulfillmentOperatorTicket: (w: string, id: string) => ["fulfillment-operator-ticket", w, id] as const,
 } as const;
 
 /** Everything scoped to a workspace shares this prefix — invalidate on switch. */
 export const workspaceScopedKeyPrefixes = [
   "me",
-  "supplier-session",
+  "fulfillment-operator-session",
   "today",
   "tickets",
   "ticket",
@@ -81,6 +81,6 @@ export const workspaceScopedKeyPrefixes = [
   "roles",
   "permission-catalog",
   "shop-currency",
-  "supplier-tickets",
-  "supplier-ticket",
+  "fulfillment-operator-tickets",
+  "fulfillment-operator-ticket",
 ] as const;

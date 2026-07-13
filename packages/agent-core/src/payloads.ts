@@ -108,22 +108,22 @@ export interface TicketInput {
 }
 
 /**
- * A file the supplier uploaded alongside their update. `id` is a
+ * A file the fulfillment partner uploaded alongside their update. `id` is a
  * `ticket_attachments` row id — the only handle that travels; the agent
  * passes it to `conversation.reply`'s `attachmentIds` to forward the file
- * to the customer. `filename` is supplier-controlled (untrusted display).
+ * to the customer. `filename` is fulfillment-partner-controlled (untrusted display).
  */
-export interface SupplierUpdateAttachment {
+export interface FulfillmentOperatorUpdateAttachment {
   readonly id: string;
   readonly filename: string;
 }
 
-export interface SupplierUpdate {
-  readonly supplierId: string;
+export interface FulfillmentOperatorUpdate {
+  readonly fulfillmentOperatorId: string;
   readonly note: string;
   readonly proposedResolution: string | null;
   /** Files uploaded with this update (absent for legacy events / no files). */
-  readonly attachments?: ReadonlyArray<SupplierUpdateAttachment>;
+  readonly attachments?: ReadonlyArray<FulfillmentOperatorUpdateAttachment>;
   /**
    * The escalation this update answers. Scopes the runtime's tool-execution
    * dedup marker per escalation, so a ticket escalated twice can reply to each
@@ -132,8 +132,8 @@ export interface SupplierUpdate {
   readonly escalationId?: string;
 }
 
-export interface SupplierEscalationPayload {
-  readonly supplierId: string;
+export interface FulfillmentOperatorEscalationPayload {
+  readonly fulfillmentOperatorId: string;
   readonly orderId: OrderId;
   readonly customerId: CustomerId | null;
   readonly reason: string;

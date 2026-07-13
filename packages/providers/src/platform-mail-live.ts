@@ -6,7 +6,7 @@ import {
   TenantRepository,
   type SendAccountDeletedInput,
   type SendApprovalLinkInput,
-  type SendSupplierEscalationInput,
+  type SendFulfillmentOperatorEscalationInput,
 } from "@support-agent/services";
 
 // ============================================================
@@ -144,8 +144,8 @@ const renderAccountDeletedEmail = (input: SendAccountDeletedInput): {
   return { subject, text, html };
 };
 
-export const renderSupplierEscalationEmail = (
-  input: SendSupplierEscalationInput,
+export const renderFulfillmentOperatorEscalationEmail = (
+  input: SendFulfillmentOperatorEscalationInput,
 ): {
   readonly subject: string;
   readonly text: string;
@@ -160,7 +160,7 @@ export const renderSupplierEscalationEmail = (
       .replace(/>/gu, "&gt;");
   const cta = input.portalUrl
     ? `Open the ticket to respond: ${input.portalUrl}`
-    : `Log in to your supplier portal to view and respond to this ticket.`;
+    : `Log in to your fulfillment partner portal to view and respond to this ticket.`;
   const text = [
     `A support ticket has been escalated to you${orderBit}.`,
     ``,
@@ -176,7 +176,7 @@ export const renderSupplierEscalationEmail = (
   ${
     input.portalUrl
       ? `<p style="margin-top:24px"><a href="${escape(input.portalUrl)}" style="background:#0345fc;color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px;display:inline-block">Open the ticket</a></p>`
-      : `<p style="margin-top:24px">Log in to your supplier portal to view and respond to this ticket.</p>`
+      : `<p style="margin-top:24px">Log in to your fulfillment partner portal to view and respond to this ticket.</p>`
   }
 </body></html>`;
   return { subject, text, html };
@@ -240,14 +240,15 @@ export const PlatformMailServiceLive = Layer.effect(
       });
 
     return PlatformMailService.of({
-      // The supplier (external) is addressed directly; no tenant lookup. The
-      // escalation id is a stable Resend idempotency key so a sweep that sends
-      // twice before stamping notified_at doesn't double-mail within 24h.
-      sendSupplierEscalation: (input) =>
+      // The fulfillment operator (external) is addressed directly; no tenant lookup.
+      // Keep the historical Resend wire key permanently: Resend owns that
+      // idempotency namespace, and changing it during the domain migration can
+      // double-mail an escalation that sent just before its DB stamp failed.
+      sendFulfillmentOperatorEscalation: (input) =>
         post(
           input.tenantId,
-          input.supplierEmail,
-          renderSupplierEscalationEmail(input),
+          input.fulfillmentOperatorEmail,
+          renderFulfillmentOperatorEscalationEmail(input),
           `supplier-escalation:${input.escalationId}`,
         ),
       sendAccountDeleted: (input) =>

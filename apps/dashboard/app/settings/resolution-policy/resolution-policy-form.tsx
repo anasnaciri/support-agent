@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   PERMISSION_OPTIONS,
   REMEDY_ACTIONS,
-  SUPPLIER_MODE_OPTIONS,
+  FULFILLMENT_OPERATOR_MODE_OPTIONS,
 } from "./action-labels";
 import { saveResolutionPolicyAction } from "./actions";
 import {
@@ -48,7 +48,7 @@ interface CustomCard {
  * they apply are immutable, forced server-side) and carry those values as
  * hidden inputs. Custom cards make the name + recognition editable and add a
  * remove button. The editable fields — which remedy actions the agent may take
- * and whether each needs approval, supplier handling, the Active toggle, and
+ * and whether each needs approval, fulfillment partner handling, the Active toggle, and
  * free-text notes — are identical for both.
  */
 function ScenarioCard({
@@ -64,7 +64,7 @@ function ScenarioCard({
   const byTool = new Map(
     (scenario?.enabledActions ?? []).map((a) => [a.tool, a.permission]),
   );
-  const defaultSupplierMode = scenario?.supplierMode ?? "none";
+  const defaultFulfillmentOperatorMode = scenario?.fulfillmentOperatorMode ?? "none";
 
   return (
     <Card>
@@ -219,18 +219,18 @@ function ScenarioCard({
           ])
         )}
 
-        {/* Supplier handling. */}
+        {/* Fulfillment partner handling. */}
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium">
-            When a supplier is involved
+            When a fulfillment partner is involved
           </legend>
-          {SUPPLIER_MODE_OPTIONS.map((o) => (
+          {FULFILLMENT_OPERATOR_MODE_OPTIONS.map((o) => (
             <label key={o.value} className="flex items-start gap-2">
               <input
                 type="radio"
-                name={fieldName(formKey, "supplierMode")}
+                name={fieldName(formKey, "fulfillmentOperatorMode")}
                 value={o.value}
-                defaultChecked={defaultSupplierMode === o.value}
+                defaultChecked={defaultFulfillmentOperatorMode === o.value}
                 className="mt-0.5 size-4 border-input accent-primary"
               />
               <span className="text-sm">
@@ -263,7 +263,7 @@ function ScenarioCard({
 
 /**
  * The scenario editor. Built-in cards are fixed; merchants can add their own
- * scenarios (name + when-it-applies + the same action/supplier/notes controls)
+ * scenarios (name + when-it-applies + the same action/fulfillment-operator/notes controls)
  * and remove the custom ones. A hidden manifest lists every card's form key so
  * the server action can reconstruct the list (built-ins, existing customs, and
  * freshly-added `__new_*` cards alike) from the submitted FormData.

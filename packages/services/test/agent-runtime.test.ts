@@ -34,7 +34,7 @@ import {
   type ScenarioPolicy,
   type ShippingFacts,
   type ReturnsFacts,
-  type SupplierEscalationSheet,
+  type FulfillmentOperatorEscalationSheet,
 } from "../src/index.js";
 
 describe("deliveryScopeFor — ticket.resumed retry token", () => {
@@ -90,19 +90,19 @@ describe("deliveryScopeFor — ticket.resumed retry token", () => {
   });
 });
 
-describe("deliveryScopeFor — supplier.updated per escalation", () => {
+describe("deliveryScopeFor — fulfillment_operator.updated per escalation", () => {
   const update = (escalationId?: string): DomainEvent => ({
-    type: "supplier.updated",
+    type: "fulfillment_operator.updated",
     ticketId: TicketId("c-1"),
     payload: {
-      supplierId: "sup-1",
+      fulfillmentOperatorId: "sup-1",
       note: "n",
       proposedResolution: null,
       ...(escalationId ? { escalationId } : {}),
     },
   });
 
-  // A ticket can be escalated to the supplier more than once (supplier updates
+  // A ticket can be escalated to the fulfillmentOperator more than once (fulfillmentOperator updates
   // always re-engage the agent, which may escalate again). Each escalation's
   // update must get its OWN scope, or the second update's reply cross-dedups
   // against the first and the agent silently sends nothing.
@@ -191,7 +191,7 @@ const withPreamble = (body: string): string =>
 
 // Pure-helper tests for the runtime's system-prompt composition. Full
 // end-to-end behavior lives in `apps/worker/test/agent-runtime.e2e.test.ts`;
-// this file only pins the supplier-escalation header injection rule so
+// this file only pins the fulfillment-operator-escalation header injection rule so
 // changes there are caught without booting the LLM scriptedness layer.
 
 const baseAgent = (overrides: Partial<AgentConfig> = {}): AgentConfig => ({
@@ -206,7 +206,7 @@ const baseAgent = (overrides: Partial<AgentConfig> = {}): AgentConfig => ({
 });
 
 const makeSettings = (
-  sheet: SupplierEscalationSheet | null,
+  sheet: FulfillmentOperatorEscalationSheet | null,
   shippingFacts: ShippingFacts | null = null,
   returnsFacts: ReturnsFacts | null = null,
 ): TenantSettings =>
@@ -215,7 +215,7 @@ const makeSettings = (
     refundPolicy: defaultRefundPolicy,
     discountPolicy: defaultDiscountPolicy,
     retentionDays: DEFAULT_RETENTION_DAYS,
-    supplierEscalationSheet: sheet,
+    fulfillmentOperatorEscalationSheet: sheet,
     legalAcceptance: null,
     shippingFacts,
     returnsFacts,
@@ -247,7 +247,7 @@ describe("buildSystemPrompt", () => {
     )!;
     const agent = applyScenarioEnvelope(
       baseAgent({
-        tools: ["conversation.reply", "refund.create", "supplier.escalate"],
+        tools: ["conversation.reply", "refund.create", "fulfillment_operator.escalate"],
       }),
       scenario,
     );
@@ -259,7 +259,7 @@ describe("buildSystemPrompt", () => {
     expect(prompt).not.toContain("/knowledge.search");
   });
 
-  it("returns the bare prompt when the agent doesn't use supplier.add_sheet_row", () => {
+  it("returns the bare prompt when the agent doesn't use fulfillment_operator.add_sheet_row", () => {
     const agent = baseAgent({ tools: ["shopify.get_order", "conversation.reply"] });
     const settings = makeSettings({
       spreadsheetId: "sheet-1",
@@ -281,7 +281,7 @@ describe("buildSystemPrompt", () => {
 
   it("returns the bare prompt when the tenant has no sheet configured", () => {
     const agent = baseAgent({
-      tools: ["supplier.add_sheet_row", "conversation.reply"],
+      tools: ["fulfillment_operator.add_sheet_row", "conversation.reply"],
     });
     expect(buildSystemPrompt(agent, makeSettings(null))).toBe(
       withPreamble("Base prompt for testing."),
@@ -289,15 +289,15 @@ describe("buildSystemPrompt", () => {
   });
 
   it("returns the bare prompt when tenantSettings is null (load failure)", () => {
-    const agent = baseAgent({ tools: ["supplier.add_sheet_row"] });
+    const agent = baseAgent({ tools: ["fulfillment_operator.add_sheet_row"] });
     expect(buildSystemPrompt(agent, null)).toBe(
       withPreamble("Base prompt for testing."),
     );
   });
 
-  it("appends the supplier-escalation header when both conditions hold", () => {
+  it("appends the fulfillment-operator header when both conditions hold", () => {
     const agent = baseAgent({
-      tools: ["supplier.add_sheet_row", "conversation.reply"],
+      tools: ["fulfillment_operator.add_sheet_row", "conversation.reply"],
     });
     const settings = makeSettings({
       spreadsheetId: "abc123",
@@ -307,7 +307,7 @@ describe("buildSystemPrompt", () => {
     const got = buildSystemPrompt(agent, settings);
     expect(got).toContain("Base prompt for testing.");
     expect(got).toContain(
-      "[Supplier escalation sheet: spreadsheetId=abc123, range=Escalations!A:F]",
+      "[Fulfillment operator escalation sheet: spreadsheetId=abc123, range=Escalations!A:F]",
     );
   });
 
@@ -377,7 +377,7 @@ describe("buildSystemPrompt", () => {
     expect(got).toContain("Free over $50, otherwise $4.95");
     // The number the agent acts on must be stated, not left to retrieval.
     expect(got).toContain("14");
-    expect(got).toMatch(/delayed[\s\S]{0,120}supplier/i);
+    expect(got).toMatch(/delayed[\s\S]{0,120}fulfillment operator/i);
   });
 
   it("renders each customs payer as a merchant-facing sentence, and omits it when unset", () => {
@@ -496,9 +496,9 @@ describe("buildSystemPrompt", () => {
     expect(method("customer_choice")).toMatch(/refund[\s\S]{0,80}(choose|choice)/i);
   });
 
-  it("appends both the supplier and knowledge headers when applicable", () => {
+  it("appends both fulfillment-operator and knowledge headers when applicable", () => {
     const agent = baseAgent({
-      tools: ["supplier.add_sheet_row", "knowledge.search"],
+      tools: ["fulfillment_operator.add_sheet_row", "knowledge.search"],
     });
     const settings = makeSettings({
       spreadsheetId: "s1",
@@ -507,7 +507,7 @@ describe("buildSystemPrompt", () => {
     });
     const got = buildSystemPrompt(agent, settings, ["Shipping policy"]);
     expect(got).toContain(
-      "[Supplier escalation sheet: spreadsheetId=s1, range=Escalations!A:F]",
+      "[Fulfillment operator escalation sheet: spreadsheetId=s1, range=Escalations!A:F]",
     );
     expect(got).toContain(
       '[Store knowledge base. Call knowledge.search to read: "Shipping policy"]',
@@ -635,33 +635,33 @@ describe("applyOverride — tool permissions", () => {
   });
 
   it("lets the tenant choice win over an in-code permission pin", () => {
-    // missing-package-agent pins supplier.add_sheet_row to `allow` in code; a
+    // missing-package-agent pins fulfillment_operator.add_sheet_row to `allow` in code; a
     // tenant who flips it to "ask first" must win.
     const agent = baseAgent({
-      tools: ["supplier.add_sheet_row"],
-      permissionOverrides: { "supplier.add_sheet_row": "allow" },
+      tools: ["fulfillment_operator.add_sheet_row"],
+      permissionOverrides: { "fulfillment_operator.add_sheet_row": "allow" },
     });
     const next = applyOverride(
       agent,
-      mapOf(override({ toolPermissions: { "supplier.add_sheet_row": "ask" } })),
+      mapOf(override({ toolPermissions: { "fulfillment_operator.add_sheet_row": "ask" } })),
     );
-    expect(next.permissionOverrides["supplier.add_sheet_row"]).toBe("ask");
+    expect(next.permissionOverrides["fulfillment_operator.add_sheet_row"]).toBe("ask");
   });
 
   it("keeps unrelated in-code pins while overriding one tool", () => {
     const agent = baseAgent({
       permissionOverrides: {
-        "supplier.read_sheet_columns": "allow",
-        "supplier.add_sheet_row": "allow",
+        "fulfillment_operator.read_sheet_columns": "allow",
+        "fulfillment_operator.add_sheet_row": "allow",
       },
     });
     const next = applyOverride(
       agent,
-      mapOf(override({ toolPermissions: { "supplier.add_sheet_row": "ask" } })),
+      mapOf(override({ toolPermissions: { "fulfillment_operator.add_sheet_row": "ask" } })),
     );
     expect(next.permissionOverrides).toEqual({
-      "supplier.read_sheet_columns": "allow",
-      "supplier.add_sheet_row": "ask",
+      "fulfillment_operator.read_sheet_columns": "allow",
+      "fulfillment_operator.add_sheet_row": "ask",
     });
   });
 
@@ -767,7 +767,7 @@ const scenarioAgent = (): AgentConfig =>
       "discount.create",
       "order.cancel",
       "order.update_shipping_address",
-      "supplier.escalate",
+      "fulfillment_operator.escalate",
     ],
   });
 
@@ -776,7 +776,7 @@ const scenario = (overrides: Partial<ScenarioPolicy> = {}): ScenarioPolicy => ({
   label: "Delivery problem",
   builtin: true,
   enabledActions: [{ tool: "refund.create", permission: "ask" }],
-  supplierMode: "escalate_and_wait",
+  fulfillmentOperatorMode: "escalate_and_wait",
   notes: "Check tracking before offering anything.",
   ...overrides,
 });
@@ -804,22 +804,22 @@ describe("applyScenarioEnvelope", () => {
     }
   });
 
-  it("presents supplier.escalate only when supplierMode is not none", () => {
+  it("presents fulfillment_operator.escalate only when fulfillmentOperatorMode is not none", () => {
     const wait = applyScenarioEnvelope(
       scenarioAgent(),
-      scenario({ supplierMode: "escalate_and_wait" }),
+      scenario({ fulfillmentOperatorMode: "escalate_and_wait" }),
     );
-    expect(wait.tools).toContain("supplier.escalate");
+    expect(wait.tools).toContain("fulfillment_operator.escalate");
 
     const none = applyScenarioEnvelope(
       scenarioAgent(),
-      scenario({ supplierMode: "none" }),
+      scenario({ fulfillmentOperatorMode: "none" }),
     );
-    expect(none.tools).not.toContain("supplier.escalate");
-    expect(none.permissionOverrides["supplier.escalate"]).toBe("deny");
+    expect(none.tools).not.toContain("fulfillment_operator.escalate");
+    expect(none.permissionOverrides["fulfillment_operator.escalate"]).toBe("deny");
   });
 
-  it("injects the playbook header (label + notes + supplier guidance) into the prompt", () => {
+  it("injects the playbook header (label + notes + fulfillmentOperator guidance) into the prompt", () => {
     const out = applyScenarioEnvelope(scenarioAgent(), scenario());
     expect(out.promptTemplate).toContain("Scenario playbook");
     expect(out.promptTemplate).toContain("Delivery problem");
@@ -850,7 +850,7 @@ describe("applyScenarioEnvelope", () => {
         key: "order_cancellation",
         label: "Cancel my order",
         enabledActions: [{ tool: "order.cancel", permission: "ask" }],
-        supplierMode: "none",
+        fulfillmentOperatorMode: "none",
       }),
     );
     expect(out.tools).toContain("order.cancel");
@@ -883,7 +883,7 @@ describe("applyScenarioEnvelope", () => {
         enabledActions: [
           { tool: "order.update_shipping_address", permission: "ask" },
         ],
-        supplierMode: "escalate_and_wait",
+        fulfillmentOperatorMode: "escalate_and_wait",
       }),
     );
     expect(out.tools).toContain("order.update_shipping_address");
@@ -894,11 +894,11 @@ describe("applyScenarioEnvelope", () => {
 });
 
 describe("buildScenarioPlaybookHeader", () => {
-  it("states that supplierMode none overrides contradictory notes", () => {
+  it("states that fulfillmentOperatorMode none overrides contradictory notes", () => {
     const header = buildScenarioPlaybookHeader(
       scenario({
-        supplierMode: "none",
-        notes: "Escalate every late shipment to the supplier.",
+        fulfillmentOperatorMode: "none",
+        notes: "Escalate every late shipment to the fulfillmentOperator.",
       }),
     );
 

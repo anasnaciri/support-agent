@@ -343,6 +343,7 @@ export const renameRole = async (
 ): Promise<RoleMutationResult> => {
   const role = await roleInTenant(db, tenantId, roleId);
   if (!role) return { ok: false, reason: "not_found" };
+  if (role.isOwner) return { ok: false, reason: "owner_immutable" };
   const dup = await db
     .select({ id: roles.id })
     .from(roles)

@@ -3,8 +3,8 @@ import type { DrizzleDb } from "./client.js";
 import { replyDeliveries } from "./schema.js";
 
 // Plain DrizzleDb access for the customer-reply DELIVERY outbox — the durable
-// store behind "a drafted reply failed to send". Mirrors the supplier
-// notification outbox (supplier-store.ts): the agent runtime enqueues on a send
+// store behind "a drafted reply failed to send". Mirrors the fulfillmentOperator
+// notification outbox (fulfillment-operator-store.ts): the agent runtime enqueues on a send
 // failure (Tag in services / Live in db), the worker sweep relays due rows, and
 // the `/dashboard/*` HTTP path (manual "Retry sending email") reads/requeues
 // through these functions.

@@ -171,7 +171,7 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
      * Supersede every pending approval for a ticket: a SYSTEM-initiated cancel
      * (status → `cancelled`, `decidedBy` null) used when the agent re-engages a
      * ticket and re-decides — the prior run's still-pending proposals (e.g. a draft
-     * reply queued before a supplier replied) are stale and the new run replaces
+     * reply queued before a fulfillmentOperator replied) are stale and the new run replaces
      * them. Distinct from `cancelPendingForTicket` (a human/manual reject that
      * needs a `decidedBy`). Returns the number of rows changed.
      */

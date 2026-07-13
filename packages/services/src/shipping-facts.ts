@@ -8,7 +8,7 @@
  * knowledge documents rather than inside them because two of its fields are
  * *decisions*, not prose: `deliveryTime` is the window an agent judges lateness
  * against, and `delayedAfterDays` is the exact point past which a shipment gets
- * a supplier check. Retrieval over pasted prose is a poor way to fetch a number
+ * a fulfillmentOperator check. Retrieval over pasted prose is a poor way to fetch a number
  * a policy depends on, so these travel to the agent as a trusted prompt header
  * (and as `@shipping.*` references inside scenario notes).
  *
@@ -38,14 +38,14 @@ export interface ShippingFacts {
   readonly customsDuties: CustomsDutiesPayer | null;
   /**
    * Whole days in transit past which a shipment counts as delayed. The agent
-   * opens a supplier check beyond this point, so it is a merchant decision and
+   * opens a fulfillmentOperator check beyond this point, so it is a merchant decision and
    * never a value we infer.
    */
   readonly delayedAfterDays: number;
   /**
    * Whole days in transit past which the store STOPS waiting on a missing
    * package and makes the customer whole (refund / reship), as opposed to
-   * `delayedAfterDays` which only opens a supplier check. A second, later point
+   * `delayedAfterDays` which only opens a fulfillmentOperator check. A second, later point
    * on the same timeline. Optional — `null` when the merchant hasn't said, so
    * the `delivery_issue` / `missing-package-agent` notes fall back to
    * `knowledge.search` for it rather than to a made-up number.

@@ -100,7 +100,7 @@ export const ProcessedMessageStoreTest = Layer.sync(
 // pg-boss is at-least-once at the JOB level: a worker crash between the
 // handler returning and pg-boss recording completion re-delivers the SAME
 // job (same `eventId`). C3 only covers `message.received`; every other event
-// (approval.*, timer.expired, supplier.updated, customer.replied, …) had no
+// (approval.*, timer.expired, fulfillment_operator.updated, customer.replied, …) had no
 // generic guard. This store claims by the queue `eventId` at the consumer,
 // so a re-delivered job is skipped once its first run committed. The claim is
 // written only AFTER a non-retryable settlement (mirrors C3) so a genuine

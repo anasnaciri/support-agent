@@ -229,24 +229,24 @@ export const getWorkspaces = async (
   okBody("/workspaces", ctx) as Promise<WorkspacesResponse>;
 
 /**
- * Every merchant workspace the signed-in SUPPLIER is bound to, across all orgs
+ * Every merchant workspace the signed-in FULFILLMENT_OPERATOR is bound to, across all orgs
  * (identity-only; sends no x-workspace-id). Also completes the cross-tenant
- * bootstrap server-side. Feeds the unified switcher's supplier entries.
+ * bootstrap server-side. Feeds the unified switcher's fulfillment partner entries.
  */
-export const getSupplierWorkspaces = async (
+export const getFulfillmentOperatorWorkspaces = async (
   ctx: CallCtx = {},
 ): Promise<WorkspacesResponse> =>
-  okBody("/supplier/workspaces", ctx) as Promise<WorkspacesResponse>;
+  okBody("/fulfillment-operator/workspaces", ctx) as Promise<WorkspacesResponse>;
 
 /**
- * Binding-anchored supplier permissions for the ACTIVE workspace (needs
+ * Binding-anchored fulfillmentOperator permissions for the ACTIVE workspace (needs
  * x-workspace-id). Used instead of POST /me/session when the active workspace is
- * a supplier one — that endpoint resolves via org and would 404 across orgs.
+ * a fulfillment partner one — that endpoint resolves via org and would 404 across orgs.
  */
-export const getSupplierSession = async (
+export const getFulfillmentOperatorSession = async (
   ctx: CallCtx,
 ): Promise<MePermissionsResponse> =>
-  okBody("/supplier/session", ctx) as Promise<MePermissionsResponse>;
+  okBody("/fulfillment-operator/session", ctx) as Promise<MePermissionsResponse>;
 
 /**
  * Reconcile any pending invite + load the member's effective permissions for
@@ -291,7 +291,7 @@ export interface SetTicketStatusOutcomeView {
 export interface ResolveTicketOutcomeView {
   readonly kind: string;
 }
-export interface EscalateSupplierOutcomeView {
+export interface EscalateFulfillmentOperatorOutcomeView {
   readonly kind: string;
   readonly escalationId?: string;
   readonly fromStatus?: string;
@@ -369,10 +369,10 @@ export interface TicketShopifyPanels {
   readonly shopDomain: string | null;
 }
 
-// Supplier portal — the minimal privacy projection the api returns (no customer
-// PII). Mirrors the db's SupplierEscalation{ListItem,Detail} shapes; redefined
+// FulfillmentOperator portal — the minimal privacy projection the api returns (no customer
+// PII). Mirrors the db's FulfillmentOperatorEscalation{ListItem,Detail} shapes; redefined
 // here because the dashboard (Path B) imports only agent-core + contracts.
-export interface SupplierEscalationListItemView {
+export interface FulfillmentOperatorEscalationListItemView {
   readonly id: string;
   readonly ticketId: string;
   readonly problem: string;
@@ -383,19 +383,19 @@ export interface SupplierEscalationListItemView {
   readonly status: string;
   readonly createdAt: string;
 }
-export interface SupplierEscalationAttachmentView {
+export interface FulfillmentOperatorEscalationAttachmentView {
   readonly id: string;
   readonly filename: string;
   readonly contentType: string;
   readonly sizeBytes: number;
 }
 
-export interface SupplierEscalationDetailView
-  extends SupplierEscalationListItemView {
+export interface FulfillmentOperatorEscalationDetailView
+  extends FulfillmentOperatorEscalationListItemView {
   readonly note: string | null;
   readonly proposedResolution: string | null;
-  /** Files the supplier sent with their update. */
-  readonly attachments: ReadonlyArray<SupplierEscalationAttachmentView>;
+  /** Files the fulfillment partner sent with their update. */
+  readonly attachments: ReadonlyArray<FulfillmentOperatorEscalationAttachmentView>;
 }
 
 // ============================================================
@@ -906,7 +906,7 @@ export const api = {
       ctx,
     }),
 
-  setSupplierSheet: (
+  setFulfillmentOperatorSheet: (
     ctx: CallCtx,
     input: {
       readonly spreadsheetId: string;
@@ -914,10 +914,10 @@ export const api = {
       readonly description: string | null;
     },
   ): Promise<CallResult> =>
-    call("/supplier-sheet", { method: "POST", body: input, ctx }),
+    call("/fulfillment-operator-sheet", { method: "POST", body: input, ctx }),
 
-  clearSupplierSheet: (ctx: CallCtx): Promise<CallResult> =>
-    call("/supplier-sheet/clear", { method: "POST", ctx }),
+  clearFulfillmentOperatorSheet: (ctx: CallCtx): Promise<CallResult> =>
+    call("/fulfillment-operator-sheet/clear", { method: "POST", ctx }),
 
   disconnect: (ctx: CallCtx, provider: string): Promise<CallResult> =>
     call(`/connections/${encodeURIComponent(provider)}/disconnect`, {
@@ -1129,20 +1129,20 @@ export const api = {
     return (body as ResolveTicketOutcomeView | null) ?? { kind: "error" };
   },
 
-  // Escalate a ticket to the workspace's supplier by hand. The problem statement
-  // is what the supplier sees (portal + email); the ticket parks waiting on them.
+  // Escalate a ticket to the workspace's fulfillmentOperator by hand. The problem statement
+  // is what the fulfillment partner sees (portal + email); the ticket parks waiting on them.
   // Returns the discriminated outcome (escalated | already_escalated |
-  // no_supplier | transition_not_allowed | ticket_not_found).
-  escalateSupplier: async (
+  // no_fulfillment_operator | transition_not_allowed | ticket_not_found).
+  escalateFulfillmentOperator: async (
     ctx: CallCtx,
     ticketId: string,
     problem: string,
-  ): Promise<EscalateSupplierOutcomeView> => {
+  ): Promise<EscalateFulfillmentOperatorOutcomeView> => {
     const { body } = await call(
-      `/tickets/${encodeURIComponent(ticketId)}/escalate-supplier`,
+      `/tickets/${encodeURIComponent(ticketId)}/escalate-fulfillment-operator`,
       { method: "POST", body: { problem }, ctx },
     );
-    return (body as EscalateSupplierOutcomeView | null) ?? { kind: "error" };
+    return (body as EscalateFulfillmentOperatorOutcomeView | null) ?? { kind: "error" };
   },
 
   // Issue an agent-recommended refund directly on a ticket. The agent only
@@ -1395,7 +1395,7 @@ export const api = {
       readonly contentType: string;
     }>,
 
-  // The ticket's attachment index (uploads + supplier files) for the
+  // The ticket's attachment index (uploads + fulfillment partner files) for the
   // composer's picker.
   ticketAttachments: async (
     ctx: CallCtx,
@@ -1511,51 +1511,51 @@ export const api = {
       ctx,
     }),
 
-  // ---- Supplier portal ----
-  supplierTickets: async (
+  // ---- FulfillmentOperator portal ----
+  fulfillmentOperatorTickets: async (
     ctx: CallCtx,
-  ): Promise<ReadonlyArray<SupplierEscalationListItemView>> =>
+  ): Promise<ReadonlyArray<FulfillmentOperatorEscalationListItemView>> =>
     (
-      (await okBody("/supplier/tickets", ctx)) as {
-        tickets: ReadonlyArray<SupplierEscalationListItemView>;
+      (await okBody("/fulfillment-operator/tickets", ctx)) as {
+        tickets: ReadonlyArray<FulfillmentOperatorEscalationListItemView>;
       }
     ).tickets,
 
-  supplierTicket: async (
+  fulfillmentOperatorTicket: async (
     ctx: CallCtx,
     id: string,
-  ): Promise<SupplierEscalationDetailView | null> => {
+  ): Promise<FulfillmentOperatorEscalationDetailView | null> => {
     const { status, body } = await call(
-      `/supplier/tickets/${encodeURIComponent(id)}`,
+      `/fulfillment-operator/tickets/${encodeURIComponent(id)}`,
       { ctx },
     );
     if (status === 404) return null;
     if (status !== 200) {
-      throw new Error(`dashboard api ${status} on /supplier/tickets/:id`);
+      throw new Error(`dashboard api ${status} on /fulfillment-operator/tickets/:id`);
     }
-    return body as SupplierEscalationDetailView;
+    return body as FulfillmentOperatorEscalationDetailView;
   },
 
-  supplierUpdate: (
+  fulfillmentOperatorUpdate: (
     ctx: CallCtx,
     id: string,
     input: {
       readonly note: string;
       readonly proposedResolution?: string | null;
-      /** Ids from uploadSupplierAttachment, sent along with the update. */
+      /** Ids from uploadFulfillmentOperatorAttachment, sent along with the update. */
       readonly attachmentIds?: ReadonlyArray<string>;
     },
   ): Promise<CallResult> =>
-    call(`/supplier/tickets/${encodeURIComponent(id)}/update`, {
+    call(`/fulfillment-operator/tickets/${encodeURIComponent(id)}/update`, {
       method: "POST",
       body: input,
       ctx,
       on403: "return",
     }),
 
-  // Upload a file (raw bytes) for a supplier update — scoped to the supplier's
+  // Upload a file (raw bytes) for a fulfillment partner update — scoped to the fulfillment partner's
   // own open escalation. Mirrors uploadTicketAttachment.
-  uploadSupplierAttachment: async (
+  uploadFulfillmentOperatorAttachment: async (
     ctx: CallCtx,
     escalationId: string,
     file: File,
@@ -1565,7 +1565,7 @@ export const api = {
   > => {
     const doUpload = () =>
       fetch(
-        `${apiBase()}/dashboard/supplier/tickets/${encodeURIComponent(escalationId)}/attachments?filename=${encodeURIComponent(file.name)}`,
+        `${apiBase()}/dashboard/fulfillment-operator/tickets/${encodeURIComponent(escalationId)}/attachments?filename=${encodeURIComponent(file.name)}`,
         {
           method: "POST",
           credentials: "include",
@@ -1591,7 +1591,7 @@ export const api = {
     return { kind: "rejected", error: body?.error ?? `status_${res.status}` };
   },
 
-  supplierUpdateTracking: (
+  fulfillmentOperatorUpdateTracking: (
     ctx: CallCtx,
     id: string,
     input: {
@@ -1599,14 +1599,14 @@ export const api = {
       readonly trackingCompany?: string | null;
     },
   ): Promise<CallResult> =>
-    call(`/supplier/tickets/${encodeURIComponent(id)}/tracking`, {
+    call(`/fulfillment-operator/tickets/${encodeURIComponent(id)}/tracking`, {
       method: "POST",
       body: input,
       ctx,
       on403: "return",
     }),
 
-  inviteSupplier: (
+  inviteFulfillmentOperator: (
     ctx: CallCtx,
     input: {
       readonly email: string;
@@ -1614,5 +1614,5 @@ export const api = {
       readonly workosInvitationId?: string;
     },
   ): Promise<CallResult> =>
-    call("/supplier/invite", { method: "POST", body: input, ctx }),
+    call("/fulfillment-operator/invite", { method: "POST", body: input, ctx }),
 };

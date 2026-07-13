@@ -246,7 +246,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
         denyAboveMinorUnits: number;
         mode: string;
       };
-      supplierEscalationSheet: unknown;
+      fulfillmentOperatorEscalationSheet: unknown;
       notificationEmail: unknown;
       legalAcceptance: unknown;
     };
@@ -254,7 +254,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(body.refundPolicy.denyAboveMinorUnits).toBe(50000);
     expect(body.refundPolicy.mode).toBe("thresholds");
     expect(body).not.toHaveProperty("retentionDays");
-    expect(body.supplierEscalationSheet).toBeNull();
+    expect(body.fulfillmentOperatorEscalationSheet).toBeNull();
     expect(body.legalAcceptance).toBeNull();
   });
 
@@ -1014,11 +1014,11 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     ).toBe(400);
   });
 
-  // ---- Supplier-escalation sheet ----
+  // ---- FulfillmentOperator-escalation sheet ----
 
-  it("POST /dashboard/supplier-sheet sets then clears the sheet", async () => {
+  it("POST /dashboard/fulfillment-operator-sheet sets then clears the sheet", async () => {
     if (!raw) return;
-    const set = await post("/dashboard/supplier-sheet", {
+    const set = await post("/dashboard/fulfillment-operator-sheet", {
       spreadsheetId: "1AbCdEfG",
       range: "Escalations!A:F",
       description: "warehouse log",
@@ -1031,12 +1031,12 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
       .limit(1);
     const sheet = (
       row?.settings as {
-        supplierEscalationSheet?: { spreadsheetId?: string } | null;
+        fulfillmentOperatorEscalationSheet?: { spreadsheetId?: string } | null;
       }
-    )?.supplierEscalationSheet;
+    )?.fulfillmentOperatorEscalationSheet;
     expect(sheet?.spreadsheetId).toBe("1AbCdEfG");
 
-    const clear = await post("/dashboard/supplier-sheet/clear");
+    const clear = await post("/dashboard/fulfillment-operator-sheet/clear");
     expect(clear.status).toBe(200);
     const [after] = await raw.db
       .select({ settings: tenants.settings })
@@ -1044,15 +1044,15 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
       .where(eq(tenants.id, tenantId))
       .limit(1);
     expect(
-      (after?.settings as { supplierEscalationSheet?: unknown })
-        ?.supplierEscalationSheet ?? null,
+      (after?.settings as { fulfillmentOperatorEscalationSheet?: unknown })
+        ?.fulfillmentOperatorEscalationSheet ?? null,
     ).toBeNull();
   });
 
-  it("POST /dashboard/supplier-sheet 400s on a bad range / missing id", async () => {
+  it("POST /dashboard/fulfillment-operator-sheet 400s on a bad range / missing id", async () => {
     expect(
       (
-        await post("/dashboard/supplier-sheet", {
+        await post("/dashboard/fulfillment-operator-sheet", {
           spreadsheetId: "1AbCdEfG",
           range: "A:F",
         })
@@ -1060,7 +1060,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     ).toBe(400);
     expect(
       (
-        await post("/dashboard/supplier-sheet", {
+        await post("/dashboard/fulfillment-operator-sheet", {
           spreadsheetId: "",
           range: "Sheet1!A:F",
         })

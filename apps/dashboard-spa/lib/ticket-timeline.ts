@@ -165,7 +165,7 @@ const ESCALATION_REASON_COPY: Readonly<Record<string, string>> = {
   approved_tool_unavailable: "The approved action is no longer available.",
   approval_not_runnable:
     "The approval was no longer runnable when the workflow resumed.",
-  supplier_unreachable: "The supplier could not be reached.",
+  fulfillment_operator_unreachable: "The fulfillment partner could not be reached.",
   "approval rejected": "A draft was rejected, so the ticket moved to you.",
   llm_credential_missing: "The AI provider key is missing.",
   llm_credential_revoked: "The AI provider key was revoked.",

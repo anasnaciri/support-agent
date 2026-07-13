@@ -52,7 +52,7 @@ const invalidateFacts = (
 // The store's structured shipping facts. These are not prose the agent reads —
 // they're numbers it acts on. The delivery time is the window lateness is judged
 // against, and the delay threshold is the exact point past which the agent opens
-// a supplier check, so both travel to the agent directly rather than through
+// a fulfillment partner check, so both travel to the agent directly rather than through
 // search.
 function ShippingFactsForm({
   profile,
@@ -251,7 +251,7 @@ function ShippingFactsForm({
             onChange={(e) => setDelayedAfterDays(e.currentTarget.value)}
           />
           <p id="delay-hint" className={hint}>
-            Days in transit. Past this point your agents open a supplier check
+            Days in transit. Past this point your agents open a fulfillment partner check
             instead of telling the customer the order is on schedule.
           </p>
         </div>

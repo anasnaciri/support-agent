@@ -33,7 +33,7 @@ describe("ticketStatusLabel", () => {
       "triaging",
       "in_progress",
       "waiting_for_customer",
-      "waiting_for_supplier",
+      "waiting_for_fulfillment_operator",
       "waiting_for_approval",
       "approved_action_running",
       "resolved",
@@ -103,8 +103,8 @@ describe("toolActionLabel", () => {
   it("names the approval-gated actions the way the catalog does", () => {
     expect(toolActionLabel("conversation.reply")).toBe("Send customer reply");
     expect(toolActionLabel("refund.create")).toBe("Issue a refund");
-    expect(toolActionLabel("supplier.add_sheet_row")).toBe(
-      "Escalate to supplier",
+    expect(toolActionLabel("fulfillment_operator.add_sheet_row")).toBe(
+      "Escalate to fulfillment partner",
     );
   });
 
