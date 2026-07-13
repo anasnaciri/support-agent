@@ -55,18 +55,6 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       one effective-scenario-policy helper. This precedence/model/UI work is not
       required to repair the existing same-run permission refresh bug.
 
-- [ ] **THIRD: resolve the supplier handling workflow mismatch.**
-      `supplierMode` is a scenario workflow policy, not the tool's `allow`/`ask`
-      permission. `none` has a dedicated
-      fresh-context execution and approval-resume denial, while either enabled
-      value merely exposes `supplier.escalate`; its approval behavior still
-      comes from the agent override or the tool default (`ask`). Moreover,
-      `escalate_and_wait` and `notify_and_proceed` currently differ only in prompt
-      guidance: every successful `supplier.escalate` parks the ticket in
-      `waiting_for_supplier` and ends the tick. Decide and implement the intended
-      runtime distinction separately from scenario-permission refresh; do not
-      accidentally treat supplierMode as an allow/ask setting.
-
 - [x] **Dashboard scenario label read stale `tickets.category` after a
       same-run reroute** (confirmed 2026-07-13 on prod ticket
       `115f43d5-429d-44bb-b338-3be53a0107be`). The live row has
