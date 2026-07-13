@@ -17,6 +17,56 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Restored and refreshed the existing per-scenario action envelope at
+      runtime** (2026-07-13). The
+      Scenarios UI and `ResolutionPolicy.enabledActions` again describe the
+      action checklist + allow/ask choice as authoritative, but the wired
+      runtime still calls steering-only `applyScenarioSteering` (the temporary
+      2026-06-28 behavior), leaving every resolution-agent remedy available
+      under its agent-level permission after both initial selection and a
+      same-run reroute. Fixed TDD by deriving a fresh effective agent from the
+      clean agent binding plus the ticket's current scenario at every model
+      boundary using the already-defined `applyScenarioEnvelope`; it now
+      refreshes the playbook, filters schemas, and installs defense-in-depth
+      denies for disabled actions. It re-resolves the same
+      envelope immediately before every scenario-gated tool execution and on
+      approval resume, using fresh ticket context + tenant settings, so a
+      stale model turn or approval cannot bypass a reroute/settings change.
+      Coverage proves scenario A -> scenario B changes for ask -> allow,
+      allow -> ask, allow -> disabled,
+      schema replacement, execution denial, and approval resume. Keep the
+      supplier-mode execution backstop as a specialized second wall. This task
+      uses only the permission semantics already stored in `enabledActions`;
+      the generic precedence model remains separate below. The old
+      steering-only helper/tests and contradictory comments were removed.
+      Verified with 102 focused runtime/helper tests, 1,555 package + worker
+      tests, 15 socket-binding provider tests rerun outside the sandbox, and
+      `pnpm build`.
+
+- [ ] **SECOND: generalize scenario-over-agent permission precedence.** After
+      the refresh defect above is fixed, define a generic scenario permission
+      overlay for any tool the resolved agent already owns (a scenario cannot
+      add capabilities absent from the agent tool list). The selected scenario
+      is the more specific merchant policy and may override the agent/default in
+      either direction, including `ask` -> `allow`; independent runtime safety
+      backstops, connector scopes, and tenant conditional/hard-cap policy apply
+      afterward and may only make the result stricter. Keep optional remedy
+      availability (`enabledActions`) separate, and normalize both inputs behind
+      one effective-scenario-policy helper. This precedence/model/UI work is not
+      required to repair the existing same-run permission refresh bug.
+
+- [ ] **THIRD: resolve the supplier handling workflow mismatch.**
+      `supplierMode` is a scenario workflow policy, not the tool's `allow`/`ask`
+      permission. `none` has a dedicated
+      fresh-context execution and approval-resume denial, while either enabled
+      value merely exposes `supplier.escalate`; its approval behavior still
+      comes from the agent override or the tool default (`ask`). Moreover,
+      `escalate_and_wait` and `notify_and_proceed` currently differ only in prompt
+      guidance: every successful `supplier.escalate` parks the ticket in
+      `waiting_for_supplier` and ends the tick. Decide and implement the intended
+      runtime distinction separately from scenario-permission refresh; do not
+      accidentally treat supplierMode as an allow/ask setting.
+
 - [x] **PROD BUG (FIXED 2026-07-13): same-run scenario reroute did not
       refresh the active scenario playbook** (ticket
       `115f43d5-429d-44bb-b338-3be53a0107be`, tenant `4f685543`). The scenario
@@ -60,7 +110,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       older queued escalation cannot execute after the scenario disables
       suppliers. Covered in `scenario-resolution-loop.test.ts` (same-run and
       approval-resume regressions) and `agent-runtime.test.ts` (prompt
-      precedence).
+      precedence). Same-run scenario resteering now replaces the full Scenario
+      Action Policy (playbook, tool list, and permissions). The dedicated
+      supplier denial remains a separate execution-time second wall resolved
+      from the ticket's current `scenarioKey`.
 
 - [x] **PROD BUG (FIXED 2026-07-12): tracking-destination gate false-positives
       on ISO code vs country name and suppressed a supplier escalation** (found
