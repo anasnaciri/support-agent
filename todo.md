@@ -17,6 +17,30 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Cancelled Shopify fulfillments no longer read as live shipments**
+      (2026-07-13). A merchant flipping an order back to unfulfilled in the
+      Shopify admin runs `fulfillmentCancel`; the order's
+      `displayFulfillmentStatus` becomes UNFULFILLED, but Shopify keeps the
+      cancelled fulfillment in `order.fulfillments` with its tracking info
+      intact (`displayStatus: CANCELED` / `status: CANCELLED`).
+      `mapFulfillment`'s unknown-status fallback mapped it to `"fulfilled"`,
+      so the dashboard Order card's shipment row, the Tracking card's source
+      picker, the agent's `get_order` projection, and the
+      `trackingSnapshotSupersededByOrder` heal all kept presenting the undone
+      shipment as current. Fixed TDD at the provider boundary:
+      `liveFulfillments` filters cancelled fulfillments (both enum spellings,
+      both fields) out of `mapOrder` and `getFulfillment`, so every consumer
+      of `ShopifyOrder.fulfillments` sees only live shipments and the existing
+      numberless-order supersession heal drops the stale tracking stamp on the
+      next order read. The `fulfillmentTrackingInfoUpdate` payload mapping is
+      deliberately unfiltered (it returns the fulfillment just written).
+      Deliberately unchanged: the `?? "fulfilled"` fallback for OTHER unknown
+      per-fulfillment statuses (CONFIRMED, DELAYED, LABEL_PRINTED, ...) —
+      those are all live-shipment states, so the approximation stays safe once
+      cancelled ones are excluded. Verified red -> green with three provider
+      regression tests, the full non-socket suite (2,717 passed / 470
+      environment-gated skips), and `pnpm build`.
+
 - [x] **Scenario-resolution escalations forward the triggering customer's
       images to the Fulfillment Operator** (2026-07-13). When
       `fulfillment_operator.escalate` is proposed, the runtime replaces any

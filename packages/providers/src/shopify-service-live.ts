@@ -313,6 +313,29 @@ type GqlFulfillment = {
   readonly updatedAt: string;
 };
 
+/**
+ * A merchant marking an order "unfulfilled" in the Shopify admin CANCELS the
+ * fulfillment, but Shopify keeps it in `order.fulfillments` with its tracking
+ * info intact (`displayStatus: CANCELED` / `status: CANCELLED`). A cancelled
+ * fulfillment is not a live shipment — surfacing it kept the dashboard
+ * tracking card, the agent's get_order projection, and the stale-stamp heal
+ * describing a shipment the merchant undid. Filtered out at this boundary so
+ * every consumer of `ShopifyOrder.fulfillments` sees only live shipments.
+ * Both spellings are checked on both fields (the two enums disagree).
+ */
+const isCancelledFulfillment = (f: GqlFulfillment): boolean => {
+  const cancelled = (v: string | null | undefined): boolean => {
+    const lower = (v ?? "").toLowerCase();
+    return lower === "canceled" || lower === "cancelled";
+  };
+  return cancelled(f.displayStatus) || cancelled(f.status);
+};
+
+const liveFulfillments = (
+  fulfillments: ReadonlyArray<GqlFulfillment>,
+): ReadonlyArray<ShopifyFulfillment> =>
+  fulfillments.filter((f) => !isCancelledFulfillment(f)).map(mapFulfillment);
+
 const mapFulfillment = (f: GqlFulfillment): ShopifyFulfillment => {
   const status =
     mapFulfillmentStatus(f.displayStatus ?? f.status) ?? "fulfilled";
@@ -392,7 +415,7 @@ const mapOrder = (o: GqlOrder): ShopifyOrder => ({
       imageUrl: n.image?.url ?? null,
     }),
   ),
-  fulfillments: o.fulfillments.map(mapFulfillment),
+  fulfillments: liveFulfillments(o.fulfillments),
   createdAt: new Date(o.createdAt),
   updatedAt: new Date(o.updatedAt),
 });
@@ -1610,7 +1633,7 @@ export const ShopifyServiceLive = Layer.effect(
           }).pipe(
             Effect.flatMap((data) =>
               data.order
-                ? Effect.succeed(data.order.fulfillments.map(mapFulfillment))
+                ? Effect.succeed(liveFulfillments(data.order.fulfillments))
                 : Effect.fail(new OrderNotFound({ orderId })),
             ),
           ),

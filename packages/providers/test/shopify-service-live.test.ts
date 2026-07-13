@@ -274,6 +274,91 @@ describe("ShopifyServiceLive — getOrder", () => {
     expect(body.variables.id).toBe("gid://shopify/Order/12345");
   });
 
+  // A merchant marking an order "unfulfilled" in the Shopify admin CANCELS the
+  // fulfillment — but Shopify keeps it in `order.fulfillments` (with its
+  // tracking info intact). A cancelled fulfillment is not a live shipment:
+  // surfacing it made the dashboard tracking card, the agent's get_order
+  // output, and the stamp-heal keep describing a shipment the merchant undid.
+  it("excludes cancelled fulfillments from the order's fulfillments", async () => {
+    reset();
+    const payload = {
+      data: {
+        order: {
+          ...ORDER_PAYLOAD.data.order,
+          displayFulfillmentStatus: "UNFULFILLED",
+          fulfillments: [
+            {
+              id: "gid://shopify/Fulfillment/1",
+              displayStatus: "CANCELED",
+              status: "CANCELLED",
+              trackingInfo: [{ company: "UPS", number: "1Z999", url: null }],
+              estimatedDeliveryAt: null,
+              deliveredAt: null,
+              createdAt: "2026-05-14T00:00:00.000Z",
+              updatedAt: "2026-05-16T00:00:00.000Z",
+            },
+          ],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, payload)]));
+    const order = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getOrder(tenantId, OrderId("12345")),
+        ),
+        layer,
+      ),
+    );
+    expect(order.fulfillmentStatus).toBe("unfulfilled");
+    expect(order.fulfillments).toEqual([]);
+  });
+
+  it("keeps live fulfillments while dropping a cancelled sibling (reship)", async () => {
+    reset();
+    const cancelled = {
+      id: "gid://shopify/Fulfillment/1",
+      // Older API payloads may omit displayStatus — status alone must match.
+      displayStatus: null,
+      status: "CANCELLED",
+      trackingInfo: [{ company: "UPS", number: "1Z999", url: null }],
+      estimatedDeliveryAt: null,
+      deliveredAt: null,
+      createdAt: "2026-05-14T00:00:00.000Z",
+      updatedAt: "2026-05-16T00:00:00.000Z",
+    };
+    const live = {
+      id: "gid://shopify/Fulfillment/2",
+      displayStatus: "IN_TRANSIT",
+      status: "SUCCESS",
+      trackingInfo: [{ company: "DHL", number: "DHL-777", url: null }],
+      estimatedDeliveryAt: null,
+      deliveredAt: null,
+      createdAt: "2026-05-17T00:00:00.000Z",
+      updatedAt: "2026-05-17T00:00:00.000Z",
+    };
+    const payload = {
+      data: {
+        order: {
+          ...ORDER_PAYLOAD.data.order,
+          fulfillments: [cancelled, live],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, payload)]));
+    const order = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getOrder(tenantId, OrderId("12345")),
+        ),
+        layer,
+      ),
+    );
+    expect(order.fulfillments).toHaveLength(1);
+    expect(order.fulfillments[0]!.id).toBe("gid://shopify/Fulfillment/2");
+    expect(order.fulfillments[0]!.trackingNumbers).toEqual(["DHL-777"]);
+  });
+
   it("fails OrderNotFound when the response order is null", async () => {
     reset();
     const layer = buildLayer(
@@ -896,6 +981,37 @@ describe("ShopifyServiceLive — getCustomer + searchByEmail + getFulfillment", 
     expect(fulfillments).toHaveLength(1);
     expect(fulfillments[0]!.status).toBe("in_transit");
     expect(fulfillments[0]!.trackingNumbers).toEqual(["1Z999"]);
+  });
+
+  it("getFulfillment excludes cancelled fulfillments", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              order: {
+                fulfillments: [
+                  {
+                    ...ORDER_PAYLOAD.data.order.fulfillments[0]!,
+                    displayStatus: "CANCELED",
+                    status: "CANCELLED",
+                  },
+                ],
+              },
+            },
+          }),
+      ]),
+    );
+    const fulfillments = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getFulfillment(tenantId, OrderId("12345")),
+        ),
+        layer,
+      ),
+    );
+    expect(fulfillments).toEqual([]);
   });
 
   // Backs `shopify.find_customer_order` — list a customer's orders by the
