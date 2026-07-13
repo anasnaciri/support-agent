@@ -918,6 +918,19 @@ describe("applyScenarioSteering", () => {
 });
 
 describe("buildScenarioPlaybookHeader", () => {
+  it("states that supplierMode none overrides contradictory notes", () => {
+    const header = buildScenarioPlaybookHeader(
+      scenario({
+        supplierMode: "none",
+        notes: "Escalate every late shipment to the supplier.",
+      }),
+    );
+
+    expect(header).toContain(
+      "This structured setting overrides any contradictory playbook note",
+    );
+  });
+
   it("omits the notes line when notes are empty", () => {
     const header = buildScenarioPlaybookHeader(
       scenario({ notes: "   " }),

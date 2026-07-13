@@ -53,6 +53,7 @@ import { AgentResolver } from "./agent-resolver.js";
 import {
   TenantRepository,
   defaultResolutionPolicy,
+  type ResolutionPolicy,
   type TenantSettings,
 } from "./tenant-repository.js";
 import {
@@ -144,6 +145,17 @@ export class AgentRuntime extends Context.Tag("AgentRuntime")<
  * detection and the order-scoped reconcile that runs once the order is known.
  */
 const DUPLICATE_PHOTO_FLAG_PREFIX = "duplicate_photo_seen_in_ticket_";
+
+const supplierDisabledForSelectedScenario = (
+  policy: ResolutionPolicy,
+  context: Readonly<Record<string, unknown>>,
+): boolean => {
+  const key = context["scenarioKey"];
+  if (typeof key !== "string") return false;
+  return policy.scenarios.some(
+    (scenario) => scenario.key === key && scenario.supplierMode === "none",
+  );
+};
 
 const AgentRuntimeLayer = Layer.effect(
   AgentRuntime,
@@ -628,6 +640,27 @@ const AgentRuntimeLayer = Layer.effect(
               return {
                 type: "HumanTakeoverRequired",
                 reason: "approval_input_invalid",
+              } as const;
+            }
+            if (
+              toolToRun.name === "supplier.escalate" &&
+              supplierDisabledForSelectedScenario(
+                (
+                  yield* tenantRepo
+                    .getSettings(working.tenantId)
+                    .pipe(Effect.catchAll(() => Effect.succeed(null)))
+                )?.resolutionPolicy ?? defaultResolutionPolicy,
+                working.context,
+              )
+            ) {
+              yield* escalateToHuman(
+                working.id,
+                "scenario_supplier_disabled",
+                { approvalId: approval.id, tool: approval.tool },
+              );
+              return {
+                type: "HumanTakeoverRequired",
+                reason: "scenario_supplier_disabled",
               } as const;
             }
             // Policy re-check (audit L8): the approval can be acted on days
@@ -2047,6 +2080,35 @@ const AgentRuntimeLayer = Layer.effect(
                 return { agent, current, done: null };
               }
               const callInput = decodedCall.right;
+
+              if (tool.name === "supplier.escalate") {
+                // `ticket.update_context` may have selected the scenario earlier
+                // in THIS tool loop. Refresh before enforcing the structured
+                // supplier setting so stale in-memory context cannot bypass it.
+                current = yield* tickets
+                  .getById(current.id)
+                  .pipe(Effect.catchAll(() => Effect.succeed(current)));
+                const currentResolutionPolicy =
+                  (
+                    yield* tenantRepo
+                      .getSettings(current.tenantId)
+                      .pipe(Effect.catchAll(() => Effect.succeed(null)))
+                  )?.resolutionPolicy ?? resolutionPolicy;
+                if (
+                  supplierDisabledForSelectedScenario(
+                    currentResolutionPolicy,
+                    current.context,
+                  )
+                ) {
+                  messages.push({
+                    role: "tool",
+                    toolCallId: decision.callId,
+                    toolName: tool.name,
+                    content: { error: "scenario_supplier_disabled" },
+                  });
+                  return { agent, current, done: null };
+                }
+              }
 
               // C2 (in-loop): a redelivered job replays the whole tick from
               // turn 0 — side-effecting tools whose semantic action already

@@ -1627,7 +1627,7 @@ const supplierGuidanceLine = (mode: SupplierMode): string => {
     case "notify_and_proceed":
       return "If a supplier needs to act, escalate to them with supplier.escalate AND proceed to help the customer (e.g. set expectations in your reply) without waiting for the supplier.";
     case "none":
-      return "Do NOT involve a supplier for this scenario.";
+      return "Supplier involvement is disabled for this scenario. Do NOT call supplier.escalate. This structured setting overrides any contradictory playbook note.";
   }
 };
 

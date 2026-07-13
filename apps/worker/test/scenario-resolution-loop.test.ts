@@ -670,6 +670,56 @@ const driveTriage = (script: ReadonlyArray<LLMDecision>) =>
   );
 
 describe("resolution-agent-direct entry (every tenant, no flag)", () => {
+  it("denies supplier escalation after selecting a supplier-disabled scenario in the same run", async () => {
+    const settings = new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: defaultRefundPolicy,
+      discountPolicy: defaultDiscountPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: null,
+      legalAcceptance: null,
+      resolutionPolicy: {
+        scenarios: [
+          {
+            key: "late_shipment",
+            label: "Late shipment",
+            recognition: "Shipment is past the delivery window.",
+            builtin: true,
+            enabledActions: [],
+            supplierMode: "none",
+            notes: "Escalate every late shipment to the supplier.",
+          },
+        ],
+      },
+    });
+
+    const out = await driveWithSettings(settings, [
+      {
+        type: "tool_call",
+        callId: "pick-supplier-disabled",
+        tool: "ticket.update_context",
+        input: { scenarioKey: "late_shipment" },
+      },
+      {
+        type: "tool_call",
+        callId: "forbidden-supplier-call",
+        tool: "supplier.escalate",
+        input: {
+          problem: "Shipment is late; please check with the carrier.",
+          orderRef: "#1001",
+          shipCity: null,
+          shipCountry: null,
+          trackingNumber: "TRACK1001",
+        },
+      },
+      { type: "final_message", text: "Supplier escalation was unavailable." },
+    ]);
+
+    expect(out.fetched.context["scenarioKey"]).toBe("late_shipment");
+    expect(out.pending).toHaveLength(0);
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+  });
+
   it("runs the resolution agent directly (no triage), persisting the binding", async () => {
     const out = await driveTriage([
       // No triage hop: the resolution agent runs from turn 0 and picks the
@@ -952,6 +1002,7 @@ const MGR = UserId("manager-1");
 const partialLayer = (
   convo: ReturnType<typeof makeConversationServiceTest>,
   extra: ReadonlyArray<Layer.Layer<never, never, never>> = [],
+  settings: TenantSettings = defaultTenantSettings,
 ) => {
   const env = Layer.mergeAll(
     TicketRepositoryTest,
@@ -967,7 +1018,9 @@ const partialLayer = (
     approvalLinkLayer,
     platformMailNoop,
     tenantOverridesEmpty,
-    tenantRepoDefault,
+    TenantRepositoryTest({
+      settingsByTenant: new Map([[TenantId(TENANT), settings]]),
+    }),
     ...extra,
   );
   return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
@@ -995,6 +1048,83 @@ const seedParkedTicket = (repo: typeof TicketRepository.Service, threadId = "thr
   });
 
 describe("per-action approval — no ticket with pending actions resolves", () => {
+  it("does not execute an approved supplier escalation after its scenario disables suppliers", async () => {
+    const convo = makeConversationServiceTest({});
+    const supplierDisabledSettings = new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: defaultRefundPolicy,
+      discountPolicy: defaultDiscountPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: null,
+      legalAcceptance: null,
+      resolutionPolicy: {
+        scenarios: [
+          {
+            key: "late_shipment",
+            label: "Late shipment",
+            builtin: true,
+            enabledActions: [],
+            supplierMode: "none",
+            notes: "Escalate late shipments.",
+          },
+        ],
+      },
+    });
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const approvals = yield* ApprovalService;
+          const created = yield* seedParkedTicket(repo);
+          yield* repo.update(created.id, {
+            context: { scenarioKey: "late_shipment" } as never,
+          });
+          const approval = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            ticketId: created.id,
+            agentId: AGENT_ID,
+            tool: "supplier.escalate",
+            proposedInput: {
+              problem: "Shipment is late; please check with the carrier.",
+              orderRef: "#1001",
+              shipCity: null,
+              shipCountry: null,
+              trackingNumber: "TRACK1001",
+            },
+            reasoning: "",
+            riskLevel: "medium",
+            expiresAt: EXPIRES,
+          });
+          yield* approvals.approve({
+            id: approval.id,
+            decidedBy: MGR,
+            tenantId: TenantId(TENANT),
+          });
+          const result = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: approval.id as never,
+            ticketId: created.id,
+            managerId: MGR,
+          });
+          const final = yield* repo.getById(created.id);
+          return { result, final };
+        }),
+        partialLayer(
+          convo,
+          [SupplierEscalationServiceTest({})],
+          supplierDisabledSettings,
+        ),
+      ),
+    );
+
+    expect(out.result).toEqual({
+      type: "HumanTakeoverRequired",
+      reason: "scenario_supplier_disabled",
+    });
+    expect(out.final.status).toBe("human_takeover");
+  });
+
   it("executes an approved action but keeps the ticket parked while another is pending, then resolves once the last is approved", async () => {
     const convo = makeConversationServiceTest({});
     const out = await Effect.runPromise(

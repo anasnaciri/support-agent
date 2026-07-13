@@ -17,6 +17,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **`supplierMode: none` now overrides contradictory scenario notes**
+      (2026-07-13). The trusted playbook header explicitly states that the
+      structured setting wins over free-text notes. More importantly, the
+      runtime denies `supplier.escalate` at execution time by resolving the
+      ticket's selected `scenarioKey` against the current tenant policy. The
+      guard refreshes ticket context and settings at the call boundary, so an
+      agent cannot select a supplier-disabled scenario and escalate later in
+      the same tool loop. Approval resume re-checks the same constraint, so an
+      older queued escalation cannot execute after the scenario disables
+      suppliers. Covered in `scenario-resolution-loop.test.ts` (same-run and
+      approval-resume regressions) and `agent-runtime.test.ts` (prompt
+      precedence).
+
 - [x] **PROD BUG (FIXED 2026-07-12): tracking-destination gate false-positives
       on ISO code vs country name and suppressed a supplier escalation** (found
       2026-07-12, prod ticket `03649e6f-640d-44dc-b805-e770da635069`, tenant
