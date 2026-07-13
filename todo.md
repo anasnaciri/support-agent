@@ -2208,7 +2208,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Shopify, Refunds, Orders, And Tracking
 
-- [ ] Migrate `orderCancel` from deprecated `refund` argument to `refundMethod`.
+- [x] Migrate `orderCancel` from deprecated `refund` argument to `refundMethod`
+      (2026-07-13). The Live mutation now passes
+      `refundMethod: { originalPaymentMethodsRefund: <domain refund boolean> }`;
+      the domain `CancelOrderInput.refund` boolean is unchanged. Verified: the
+      `refund: Boolean` argument is deprecated in Admin API 2026-04 (our pinned
+      version) and 2026-07; `orderCancel` itself is current. Unit tests assert
+      the wire variables; `pnpm build` green.
 - [ ] Add per-keystroke `suggestedRefund` re-quote for exact tax on partial
       refund selections.
 - [ ] Expand discount policy for products, collections, and minimum
@@ -2299,6 +2305,20 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       being invisible (it was filtered out of `CARD_KEYS` and would have
       JSON-dumped via the fallback). Internal `fulfillmentOperatorId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
+- [x] Order card hides "Cancel order" for already-cancelled orders
+      (2026-07-13): `orderIsCancelled` in `lib/order-panel-data.ts` (handles
+      the JSON-wire ISO string as well as a Date) gates `CancelOrderDialog`
+      in `TicketDetailPage`. The server already rejected the second cancel
+      (`already_cancelled`), so the button was a dead end. Refund/address
+      actions still render for cancelled orders — revisit if that's wrong.
+- [ ] Make partially-decided approval bundles visible. Prod ticket
+      `4015769d` (2026-07-08, test tenant): a 2-item bundle (`order.cancel` +
+      `conversation.reply`) had the cancel approved+executed within a minute,
+      but the reply approval sat pending for 5 days — the merchant plausibly
+      thought approving the cancel finished the bundle, and the customer never
+      got the confirmation. Consider: bundle UI/emails should show remaining
+      undecided items after a partial decision, and/or the reminder pass
+      should call out "1 of 2 still pending" instead of a generic reminder.
 - [x] Attachment previews in the ticket thread (2026-07-09, `f662d2b` +
       `c61e2ea`). Three legs, as designed:
       1. INBOUND indexing (`f662d2b`): the runtime writes `source='inbound'`
