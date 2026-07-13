@@ -10,6 +10,7 @@ import {
   trackingDestinationMismatchFlag,
   hasTrackingDestinationMismatch,
   trackingDestinationDirective,
+  trackingSnapshotSupersededByOrder,
 } from "../src/agent-runtime.js";
 
 describe("ticketFactsHeader (act on all info — trusted established facts)", () => {
@@ -410,6 +411,77 @@ describe("trackingDestinationMismatchFlag", () => {
     expect(trackingDestinationMismatchFlag("ZZ", "United States")).toBe(
       "tracking_destination_mismatch",
     );
+  });
+});
+
+// A freshly-resolved order (get_order / find_customer_order) is the canonical
+// record of the tracking number. When the ticket's liveTrackingStatus snapshot
+// names a number the order no longer tracks under (a reship, a re-label, or a
+// merchant editing the fulfillment in the Shopify admin — which sends no
+// webhook), the snapshot is superseded and the runtime drops it so the facts
+// header stops describing the old shipment. Conservative: only a definite
+// disagreement (both sides known) counts.
+describe("trackingSnapshotSupersededByOrder", () => {
+  const orderWith = (
+    ...numberLists: ReadonlyArray<ReadonlyArray<string>>
+  ): Record<string, unknown> => ({
+    id: "gid://shopify/Order/1",
+    fulfillments: numberLists.map((numbers, i) => ({
+      id: `gid://shopify/Fulfillment/${i}`,
+      status: "in_transit",
+      tracking: { company: "USPS", numbers, urls: [] },
+    })),
+  });
+  const stamped = (trackingNumber: string | null) => ({
+    liveTrackingStatus: {
+      kind: "live",
+      trackingNumber,
+      status: "exception",
+    },
+  });
+
+  it("detects a snapshot naming a number the order no longer tracks under", () => {
+    expect(
+      trackingSnapshotSupersededByOrder(stamped("OLD123"), orderWith(["NEW456"])),
+    ).toBe(true);
+  });
+
+  it("keeps a snapshot whose number is still on one of the fulfillments", () => {
+    expect(
+      trackingSnapshotSupersededByOrder(
+        stamped("OLD123"),
+        orderWith(["NEW456"], ["OLD123"]),
+      ),
+    ).toBe(false);
+  });
+
+  it("fails open when the order carries no tracking numbers", () => {
+    expect(
+      trackingSnapshotSupersededByOrder(stamped("OLD123"), orderWith([])),
+    ).toBe(false);
+    expect(
+      trackingSnapshotSupersededByOrder(stamped("OLD123"), orderWith()),
+    ).toBe(false);
+    expect(
+      trackingSnapshotSupersededByOrder(stamped("OLD123"), {
+        id: "gid://shopify/Order/1",
+      }),
+    ).toBe(false);
+  });
+
+  it("fails open when the snapshot is absent or names no number", () => {
+    expect(trackingSnapshotSupersededByOrder({}, orderWith(["NEW456"]))).toBe(
+      false,
+    );
+    expect(
+      trackingSnapshotSupersededByOrder(stamped(null), orderWith(["NEW456"])),
+    ).toBe(false);
+    expect(
+      trackingSnapshotSupersededByOrder(
+        { liveTrackingStatus: "garbage" },
+        orderWith(["NEW456"]),
+      ),
+    ).toBe(false);
   });
 });
 

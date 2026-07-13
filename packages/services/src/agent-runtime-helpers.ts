@@ -1248,6 +1248,47 @@ export const trackingDestinationMismatchFlag = (
   return dest === ship ? null : "tracking_destination_mismatch";
 };
 
+/**
+ * True when the ticket's `liveTrackingStatus` snapshot names a tracking
+ * number a freshly-resolved order no longer tracks under. The order tool's
+ * output (`fulfillments[].tracking.numbers`) is the canonical live record —
+ * it reflects the agent's own `order.update_tracking`, the supplier portal's
+ * pencil edit, AND a merchant editing the fulfillment directly in the Shopify
+ * admin (which sends no webhook). A superseded snapshot must be dropped so
+ * the facts header stops describing the old shipment even in a run that never
+ * calls `tracking.lookup`. Conservative fail-open: no snapshot, a numberless
+ * snapshot, or an order without tracking numbers is never a disagreement.
+ * Pure + exported so the decision is unit-tested without the runtime.
+ */
+export const trackingSnapshotSupersededByOrder = (
+  context: Record<string, unknown>,
+  resolvedOrder: Record<string, unknown>,
+): boolean => {
+  const snapshot = context["liveTrackingStatus"];
+  const snapshotNumber =
+    snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+      ? (snapshot as Record<string, unknown>)["trackingNumber"]
+      : null;
+  if (typeof snapshotNumber !== "string" || snapshotNumber.length === 0) {
+    return false;
+  }
+  const fulfillments = resolvedOrder["fulfillments"];
+  if (!Array.isArray(fulfillments)) return false;
+  const numbers = fulfillments.flatMap((f): ReadonlyArray<string> => {
+    if (!f || typeof f !== "object") return [];
+    const tracking = (f as Record<string, unknown>)["tracking"];
+    const nums =
+      tracking && typeof tracking === "object" && !Array.isArray(tracking)
+        ? (tracking as Record<string, unknown>)["numbers"]
+        : null;
+    return Array.isArray(nums)
+      ? nums.filter((n): n is string => typeof n === "string" && n.length > 0)
+      : [];
+  });
+  if (numbers.length === 0) return false;
+  return !numbers.includes(snapshotNumber);
+};
+
 /** A canonical Shopify order GID (`gid://shopify/Order/<n>`). */
 const isOrderGid = (v: unknown): v is string =>
   typeof v === "string" && v.startsWith("gid://shopify/Order/");

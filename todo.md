@@ -71,6 +71,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           (`lib/tracking-panel-data.ts`, unit-tested) suppresses the on-ticket
           stamp fallback when the live order tracks under a different number,
           so even the endpoint-unavailable path can't render the old number.
+        - **Runtime heal on order reads (added 2026-07-13, user request):**
+          the agent now heals the stamp too. The get_order /
+          find_customer_order context fold (the same place
+          `identifiedOrderId` + `orderShipCountry` stamp) calls
+          `trackingSnapshotSupersededByOrder` (pure, unit-tested in
+          order-identity.test.ts): when the snapshot names a number absent
+          from the resolved order's `fulfillments[].tracking.numbers` (and
+          the order HAS tracking numbers — conservative fail-open), the
+          runtime drops `liveTrackingStatus` in the same context update, so
+          the facts header stops describing the old shipment even in a run
+          that never calls `tracking.lookup`. Covers the merchant editing
+          tracking in the Shopify admin before an agent run. Runtime test in
+          tracking-lookup-runtime.test.ts.
         - **Endpoint self-heal (added same day, user request):** the tracking
           endpoint now converges the SAVED stamp to Shopify's number instead
           of just out-ranking it. After a successful live lookup,
@@ -83,6 +96,29 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           views). Best-effort: a write failure never fails the GET. Covers
           Shopify-admin edits: the next time anyone opens the ticket, the DB
           stamp is healed. Nothing is surfaced to the merchant (deliberate).
+        - [ ] **Review follow-up: multi-fulfillment tracking source can heal to
+          the wrong shipment.** `order.update_tracking` and the supplier portal
+          correctly pick the fulfillment carrying the old tracking number, but
+          the dashboard tracking endpoint later follows the FIRST fulfillment
+          carrying any tracking number. On an order with multiple fulfillments,
+          a ticket/escalation about fulfillment B can update B in Shopify while
+          the card/self-heal reads fulfillment A and may restamp the ticket to
+          A. Need a stable fulfillment identity or ticket-scoped tracking source
+          before restamping.
+        - [ ] **Review follow-up: app-owned tracking writes clear the DB stamp
+          but do not recreate it.** `order.update_tracking` drops
+          `liveTrackingStatus`; the supplier portal pencil does the same. The
+          endpoint restamp intentionally refuses to invent a stamp when one is
+          absent, so after these successful writes the DB stamp stays absent
+          unless a later agent run calls `tracking.lookup`. Decide whether the
+          invariant is "no stale stamp" or "stamp synced to Shopify", and change
+          the write/restamp path accordingly.
+        - [ ] **Review follow-up: same-number metadata and tracking removal are
+          not treated as supersession.** Same tracking number with corrected
+          carrier/company keeps the old stamp and carrier hint on the agent
+          path; if Shopify admin removes all tracking numbers, the helpers fail
+          open and the SPA/API can still fall back to the old stamp. Decide
+          whether these should clear or restamp.
       - [ ] **Follow-up: a stale `tracking_destination_mismatch` flag is
         unclearable** (observed on the same prod ticket after 4 dashboard
         retries, 2026-07-12 21:10–21:17). `stampTrackingLookup` only APPENDS

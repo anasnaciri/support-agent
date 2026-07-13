@@ -109,6 +109,7 @@ import {
   hasUnverifiedOrderMismatch,
   hasTrackingDestinationMismatch,
   trackingDestinationMismatchFlag,
+  trackingSnapshotSupersededByOrder,
   orderContextRef,
   orderCustomerMismatchFlag,
   orderIdentityVerificationPatch,
@@ -2439,11 +2440,23 @@ const AgentRuntimeLayer = Layer.effect(
                   if (typeof shipCountry === "string" && shipCountry.trim() !== "") {
                     patch["orderShipCountry"] = shipCountry;
                   }
-                  if (Object.keys(patch).length > 0) {
+                  // The order's fulfillments are the canonical tracking
+                  // record. A liveTrackingStatus snapshot naming a number the
+                  // order no longer tracks under (reship, re-label, or a
+                  // Shopify-admin edit — no webhook exists) is superseded:
+                  // drop it so the facts header stops describing the old
+                  // shipment; the next tracking.lookup re-stamps.
+                  const dropSnapshot = trackingSnapshotSupersededByOrder(
+                    current.context,
+                    resolvedOrder,
+                  );
+                  if (Object.keys(patch).length > 0 || dropSnapshot) {
+                    const { liveTrackingStatus: _superseded, ...healed } =
+                      current.context;
                     current = yield* tickets
                       .update(current.id, {
                         context: {
-                          ...current.context,
+                          ...(dropSnapshot ? healed : current.context),
                           ...patch,
                         } as never,
                       })

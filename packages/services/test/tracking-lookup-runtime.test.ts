@@ -760,4 +760,127 @@ describe("AgentRuntime tracking.lookup side effects", () => {
       trackingNumber: "SAME789",
     });
   });
+
+  // Out-of-band edit (e.g. the merchant changes the fulfillment's tracking
+  // number in the Shopify admin — no webhook exists): the next agent run that
+  // reads the order must notice its liveTrackingStatus snapshot names a
+  // number the order no longer tracks under and drop it, so the facts header
+  // stops describing the superseded shipment even when the agent never calls
+  // tracking.lookup in that run.
+  it("clears a superseded liveTrackingStatus when shopify.get_order shows the order tracks under a new number", async () => {
+    const orderId = OrderId("gid://shopify/Order/7003");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#7003",
+      confirmationNumber: null,
+      email: "cust@example.com",
+      customerId: CustomerId("gid://shopify/Customer/1"),
+      fulfillmentStatus: "in_transit",
+      financialStatus: "paid",
+      totalPrice: { amount: "10.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [],
+      fulfillments: [
+        {
+          id: "gid://shopify/Fulfillment/1",
+          status: "in_transit",
+          trackingCompany: "USPS",
+          trackingNumbers: ["NEW456"],
+          trackingUrls: [],
+          estimatedDeliveryAt: null,
+          deliveredAt: null,
+          createdAt: new Date("2026-07-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+        },
+      ],
+      createdAt: new Date("2026-07-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "o1",
+        tool: "shopify.get_order",
+        input: { orderId: "gid://shopify/Order/7003" },
+      },
+      { type: "final_message", text: "Checked." },
+    ];
+    const getOrderAgent: AgentConfig = {
+      ...trackingAgent,
+      id: AgentId("get-order-heal-agent"),
+      tools: ["shopify.get_order"],
+    };
+    const env = Layer.mergeAll(
+      TicketRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([getOrderAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({ orders: new Map([[orderId, fixtureOrder]]) }),
+      ConversationServiceTest({}),
+      PlatformMailServiceTest({}),
+      TenantAgentOverridesServiceTest(),
+      TenantRepositoryTest({
+        settingsByTenant: new Map([[TENANT, settingsFixture()]]),
+      }),
+      Layer.succeed(ApprovalLinkConfig, {
+        baseUrl: "https://api.test.example",
+        signingKey: "test-signing-key",
+        ttlMs: 60_000,
+      }),
+      liveTracking(null),
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(
+        Layer.provide(Layer.merge(env, TicketAttachmentStoreTest())),
+      ),
+      env,
+    );
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const created = yield* repo.create({
+            tenantId: TENANT,
+            channel: "email",
+            currentAgentId: getOrderAgent.id,
+            subject: "Where is my order?",
+            context: {
+              identifiedOrderId: "gid://shopify/Order/7003",
+              liveTrackingStatus: {
+                kind: "live",
+                trackingNumber: "OLD123",
+                carrier: "191997",
+                status: "exception",
+              },
+            },
+          });
+          yield* runtime.handleEvent({
+            type: "customer.replied",
+            ticketId: created.id,
+            payload: {
+              threadId: "thread-x" as never,
+              messageId: "msg-1",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Where is my order?",
+              bodyText: "Any update?",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          return yield* repo.getById(created.id);
+        }),
+        layer,
+      ),
+    );
+    expect(out.context["liveTrackingStatus"]).toBeUndefined();
+    // The order binding itself is untouched.
+    expect(out.context["identifiedOrderId"]).toBe("gid://shopify/Order/7003");
+  });
 });
