@@ -219,7 +219,7 @@ export const buildShippingFactsHeader = (
   );
   if (profile.lostPackageInvestigationDays != null) {
     lines.push(
-      `- Once a shipment has been in transit for ${profile.lostPackageInvestigationDays} days or more, treat the package as lost: stop waiting and make the customer whole with a refund or a reshipment, rather than only checking with the fulfillment operator again. Judge the days in transit from the carrier's own tracking, not from the order date.`,
+      `- Once a shipment has been in transit for ${profile.lostPackageInvestigationDays} days or more, treat the package as lost: stop waiting and make the customer whole the way the matching scenario's playbook describes, rather than only checking on the shipment again. Judge the days in transit from the carrier's own tracking, not from the order date.`,
     );
   }
   lines.push("]");

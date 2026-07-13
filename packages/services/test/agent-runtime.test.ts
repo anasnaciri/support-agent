@@ -417,7 +417,11 @@ describe("buildSystemPrompt", () => {
     // The merchant's "make the customer whole" threshold must be stated, not
     // left to retrieval — and distinguishable from the delay threshold (14).
     expect(withLost).toContain("30");
-    expect(withLost).toMatch(/lost[\s\S]{0,160}(refund|reship|whole)/i);
+    // Fact + guardrail only (treat as lost, stop waiting): the remedy is the
+    // matching scenario playbook's call — the header must not prescribe a
+    // refund/reship the active envelope may not allow.
+    expect(withLost).toMatch(/lost[\s\S]{0,250}scenario/i);
+    expect(withLost).not.toMatch(/lost[\s\S]{0,250}(refund|reship)/i);
 
     const withoutLost = buildSystemPrompt(
       agent,

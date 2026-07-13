@@ -2528,10 +2528,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       tenant with a stored policy whose `delivery_issue` note was CUSTOMIZED to
       drop the doctrine now gets it from nowhere — the base prompt no longer
       restates it.
-- [ ] The shipping-facts header's lost-package line still prescribes remedies
-      ("a refund or a reshipment, rather than only checking with the
-      fulfillment operator again") — same base-prompt-dictating-scenario smell
-      fixed for the delayed-after line on 2026-07-13; defer it to the playbook.
+- [x] The shipping-facts header's lost-package line prescribed remedies ("a
+      refund or a reshipment, rather than only checking with the fulfillment
+      operator again") — same base-prompt-dictating-scenario smell as the
+      delayed-after line. Fixed 2026-07-13: it now states the fact + guardrail
+      (treat as lost, stop waiting) and defers the remedy to "the matching
+      scenario's playbook", which also removes its disagreement with
+      `delivery_issue`'s stated preference order (reship first, refund as
+      fallback). Ships in code — no stored-policy caveat.
 - [x] The late/stuck doctrine had two homes — the base prompt (JUDGING LATE OR
       STUCK) and the `delivery_issue` note, nearly sentence for sentence with
       drifting vocabulary (STUCK vs STALLED). Collapsed 2026-07-13: the
