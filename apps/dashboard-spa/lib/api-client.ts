@@ -1140,14 +1140,23 @@ export const api = {
     return (body as TakeOverOutcomeView | null) ?? { kind: "error" };
   },
 
+  // Hand a taken-over ticket back to the agent. This never ticks the agent
+  // (use `retry` for that); with `waitForCustomer` the ticket parks in
+  // waiting_for_customer instead of in_progress, so a hand-back-and-wait
+  // doesn't read as if the agent were processing.
   resume: async (
     ctx: CallCtx,
     ticketId: string,
-    reason?: string,
+    opts: { readonly reason?: string; readonly waitForCustomer?: boolean } = {},
   ): Promise<ResumeOutcomeView> => {
     const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/resume`, {
       method: "POST",
-      body: reason !== undefined ? { reason } : {},
+      body: {
+        ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+        ...(opts.waitForCustomer !== undefined
+          ? { waitForCustomer: opts.waitForCustomer }
+          : {}),
+      },
       ctx,
     });
     return (body as ResumeOutcomeView | null) ?? { kind: "error" };

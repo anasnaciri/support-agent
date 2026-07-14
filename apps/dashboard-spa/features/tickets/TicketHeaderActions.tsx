@@ -18,6 +18,7 @@ import { ticketStatusLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { EscalateFulfillmentOperatorDialog } from "./EscalateFulfillmentOperatorDialog";
+import { HandBackDialog } from "./HandBackDialog";
 
 // Merchant-facing copy for the hand-settable status targets; unknown targets
 // fall back to a humanized "Mark as <status>". Mirrors the Next page.
@@ -223,6 +224,7 @@ export function TicketHeaderActions({
   const [retryOpen, setRetryOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [escalateOpen, setEscalateOpen] = useState(false);
+  const [handBackOpen, setHandBackOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
 
   const base = { workspaceId, ticketId } as const;
@@ -235,11 +237,6 @@ export function TicketHeaderActions({
     ...base,
     action: "takeover",
     mutationFn: () => api.takeover(ctx, ticketId),
-  });
-  const resumeM = useTicketMutation({
-    ...base,
-    action: "resume",
-    mutationFn: () => api.resume(ctx, ticketId),
   });
   const retrySendM = useTicketMutation({
     ...base,
@@ -387,9 +384,12 @@ export function TicketHeaderActions({
               <RefreshCw aria-hidden />
             </IconActionButton>
           ) : null}
+          {/* Opens a choice dialog: handing back never runs the agent by
+              itself, so the merchant picks "wait for the customer" or
+              "retry last step" instead of getting a silent in_progress. */}
           <IconActionButton
-            onClick={() => resumeM.mutate()}
-            pending={resumeM.isPending}
+            onClick={() => setHandBackOpen(true)}
+            pending={false}
             title="Hand back to the agent"
           >
             <Bot aria-hidden />
@@ -424,6 +424,12 @@ export function TicketHeaderActions({
         ticketId={ticketId}
         open={escalateOpen}
         onOpenChange={setEscalateOpen}
+      />
+      <HandBackDialog
+        workspaceId={workspaceId}
+        ticketId={ticketId}
+        open={handBackOpen}
+        onOpenChange={setHandBackOpen}
       />
     </div>
   );
