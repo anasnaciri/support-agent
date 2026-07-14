@@ -14,37 +14,17 @@ import {
 import { api } from "@/lib/api-client";
 import { useTicketMutation } from "@/lib/use-ticket-mutation";
 import { ticketActionMenuItems } from "@/lib/ticket-actions-menu";
-import { ticketStatusLabel } from "@/lib/labels";
+import { statusMenuLabel } from "@/lib/status-menu-labels";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { EscalateFulfillmentOperatorDialog } from "./EscalateFulfillmentOperatorDialog";
 import { HandBackDialog } from "./HandBackDialog";
 
-// Merchant-facing copy for the hand-settable status targets; unknown targets
-// fall back to a humanized "Mark as <status>". Mirrors the Next page.
-const STATUS_MENU_LABEL: Record<
-  string,
-  { readonly label: string; readonly title: string }
-> = {
-  in_progress: {
-    label: "Reopen (in progress)",
-    title: "Move this ticket back to in progress",
-  },
-  waiting_for_customer: {
-    label: "Mark waiting on customer",
-    title: "Park this ticket waiting on the customer",
-  },
-  archived: {
-    label: "Archive now",
-    title:
-      "Archive this ticket without waiting 30 days; it is deleted 12 months after archiving",
-  },
-  failed: { label: "Mark as failed", title: "Close this ticket as failed" },
-};
-
 interface Props {
   readonly workspaceId: string;
   readonly ticketId: string;
+  /** Current status — picks reopen-vs-park copy for the status menu. */
+  readonly ticketStatus: string;
   readonly canResolve: boolean;
   readonly canTakeOver: boolean;
   readonly canResume: boolean;
@@ -211,6 +191,7 @@ const HeaderMenu = ({
 export function TicketHeaderActions({
   workspaceId,
   ticketId,
+  ticketStatus,
   canResolve,
   canTakeOver,
   canResume,
@@ -307,16 +288,19 @@ export function TicketHeaderActions({
   });
   const statusItems = statusTargets
     .filter((s) => s !== "resolved")
-    .map((s) => ({
-      key: `status-${s}`,
-      label: STATUS_MENU_LABEL[s]?.label ?? `Mark as ${ticketStatusLabel(s)}`,
-      title: STATUS_MENU_LABEL[s]?.title ?? `Set status to ${ticketStatusLabel(s)}`,
-      pending: setStatusM.isPending && pendingStatus === s,
-      run: () => {
-        setPendingStatus(s);
-        setStatusM.mutate(s);
-      },
-    }));
+    .map((s) => {
+      const copy = statusMenuLabel(s, ticketStatus);
+      return {
+        key: `status-${s}`,
+        label: copy.label,
+        title: copy.title,
+        pending: setStatusM.isPending && pendingStatus === s,
+        run: () => {
+          setPendingStatus(s);
+          setStatusM.mutate(s);
+        },
+      };
+    });
   const menuItems = [
     ...statusItems,
     ...(canEscalateFulfillmentOperator

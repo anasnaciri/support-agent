@@ -823,6 +823,7 @@ export function TicketDetailPage() {
           <TicketHeaderActions
             workspaceId={ctx.workspaceId}
             ticketId={id}
+            ticketStatus={ticketRow.status}
             canResolve={canResolve}
             canTakeOver={canTakeOver}
             canResume={canResume}
