@@ -11,6 +11,7 @@ import {
   ShopifyAuthMissing,
   TenantId,
   ToolOutputInvalid,
+  ToolPreconditionFailed,
   type ShopifyCustomer,
   type ShopifyError,
   type ShopifyFulfillment,
@@ -1601,12 +1602,64 @@ describe("order.update_shipping_address tool", () => {
     expect(capture.input).toBeUndefined();
     if (Exit.isFailure(exit)) {
       const err = (exit.cause as { error?: unknown }).error;
-      expect(err).toBeInstanceOf(ToolOutputInvalid);
-      if (err instanceof ToolOutputInvalid) {
+      // A guard refusal, not an unexpected failure: the runtime treats it as
+      // an observation for the agent (redraft), never a human_takeover park.
+      expect(err).toBeInstanceOf(ToolPreconditionFailed);
+      if (err instanceof ToolPreconditionFailed) {
         expect(err.tool).toBe("order.update_shipping_address");
-        expect(err.issues).toEqual(["OrderAlreadyFulfilled"]);
+        expect(err.issue).toBe("OrderAlreadyFulfilled");
       }
     }
+  });
+
+  it("updates a fulfilled order when the tenant declares the capability", async () => {
+    // The merchant stated (Facts page) that the store can update a shipping
+    // address after fulfillment — the fulfilled-order guard steps aside.
+    const orderId = OrderId("gid://shopify/Order/76");
+    const capture: { input?: UpdateOrderShippingAddressInput } = {};
+    const env = Layer.merge(
+      envWith(buildOrder(orderId), capture),
+      TenantRepositoryTest({
+        settingsByTenant: new Map([
+          [
+            tenantId,
+            new TenantSettings({
+              notificationEmail: null,
+              refundPolicy: defaultRefundPolicy,
+              discountPolicy: defaultDiscountPolicy,
+              addressUpdateAfterFulfillment: true,
+            }),
+          ],
+        ]),
+      }),
+    );
+    const exit = await run({ orderId, address1: "500 New St" }, env);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(capture.input?.address.address1).toBe("500 New St");
+  });
+
+  it("still refuses a fulfilled order when the capability is declared false", async () => {
+    const orderId = OrderId("gid://shopify/Order/77");
+    const capture: { input?: UpdateOrderShippingAddressInput } = {};
+    const env = Layer.merge(
+      envWith(buildOrder(orderId), capture),
+      TenantRepositoryTest({
+        settingsByTenant: new Map([
+          [
+            tenantId,
+            new TenantSettings({
+              notificationEmail: null,
+              refundPolicy: defaultRefundPolicy,
+              discountPolicy: defaultDiscountPolicy,
+              addressUpdateAfterFulfillment: false,
+            }),
+          ],
+        ]),
+      }),
+    );
+    const exit = await run({ orderId, address1: "500 New St" }, env);
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(capture.input).toBeUndefined();
   });
 
   it("refuses a cancelled order", async () => {
@@ -1624,9 +1677,9 @@ describe("order.update_shipping_address tool", () => {
     expect(capture.input).toBeUndefined();
     if (Exit.isFailure(exit)) {
       const err = (exit.cause as { error?: unknown }).error;
-      expect(err).toBeInstanceOf(ToolOutputInvalid);
-      if (err instanceof ToolOutputInvalid) {
-        expect(err.issues).toEqual(["OrderCancelled"]);
+      expect(err).toBeInstanceOf(ToolPreconditionFailed);
+      if (err instanceof ToolPreconditionFailed) {
+        expect(err.issue).toBe("OrderCancelled");
       }
     }
   });
@@ -1639,9 +1692,9 @@ describe("order.update_shipping_address tool", () => {
     expect(capture.input).toBeUndefined();
     if (Exit.isFailure(exit)) {
       const err = (exit.cause as { error?: unknown }).error;
-      expect(err).toBeInstanceOf(ToolOutputInvalid);
-      if (err instanceof ToolOutputInvalid) {
-        expect(err.issues).toEqual(["NothingToUpdate"]);
+      expect(err).toBeInstanceOf(ToolPreconditionFailed);
+      if (err instanceof ToolPreconditionFailed) {
+        expect(err.issue).toBe("NothingToUpdate");
       }
     }
   });

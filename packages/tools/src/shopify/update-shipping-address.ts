@@ -1,11 +1,12 @@
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import {
   OrderId,
   defineTool,
   ToolOutputInvalid,
+  ToolPreconditionFailed,
   type ShopifyAddress,
 } from "@support-agent/agent-core";
-import { ShopifyService } from "@support-agent/services";
+import { ShopifyService, TenantRepository } from "@support-agent/services";
 
 // Each address field is three-state, mirroring the dashboard's Ship-to pencil
 // (ticket-shipping-address.ts): absent = keep the order's current value,
@@ -73,7 +74,7 @@ const ADDRESS_FIELDS = [
 export const shopifyUpdateShippingAddress = defineTool({
   name: "order.update_shipping_address",
   description:
-    "Change the shipping address on a Shopify order that has NOT shipped yet. The tool refuses an order with any fulfillment (`OrderAlreadyFulfilled`) or a cancelled order (`OrderCancelled`), once a parcel is on its way the destination cannot be changed here; follow the scenario guidance instead (e.g. escalate to the fulfillment operator). The `orderId` must be a Shopify GID (`gid://shopify/Order/...`); order names like `#1001` are NOT accepted, call `shopify.get_order` first. Address fields are per-field edits merged over the order's current address: omit a field to keep its current value, pass null to clear it, pass a string to replace it (so correcting the street never wipes the city). Only pass values the CUSTOMER explicitly gave, never invent or autocomplete parts of an address; if the customer has not provided the complete new address, ask them for it with `conversation.ask_customer` before calling this. Returns the full address as the store saved it. This redirects where a real parcel will be delivered: never call it twice for the same request, if the result is unclear, re-check via `shopify.get_order` instead of retrying.",
+    "Change the shipping address on a Shopify order that has NOT shipped yet. The tool refuses an order with any fulfillment (`OrderAlreadyFulfilled`) or a cancelled order (`OrderCancelled`), once a parcel is on its way the destination cannot be changed here; follow the scenario guidance instead (e.g. escalate to the fulfillment operator). Exception: when the store has declared it can update a shipping address after fulfillment (see the store facts), the fulfilled-order refusal does not apply. The `orderId` must be a Shopify GID (`gid://shopify/Order/...`); order names like `#1001` are NOT accepted, call `shopify.get_order` first. Address fields are per-field edits merged over the order's current address: omit a field to keep its current value, pass null to clear it, pass a string to replace it (so correcting the street never wipes the city). Only pass values the CUSTOMER explicitly gave, never invent or autocomplete parts of an address; if the customer has not provided the complete new address, ask them for it with `conversation.ask_customer` before calling this. Returns the full address as the store saved it. This redirects where a real parcel will be delivered: never call it twice for the same request, if the result is unclear, re-check via `shopify.get_order` instead of retrying.",
   displayDescription:
     "The agent corrects the shipping address on an order that hasn't shipped yet, when the customer asks.",
   tenantControl: "permission-toggle",
@@ -93,16 +94,20 @@ export const shopifyUpdateShippingAddress = defineTool({
   idempotencyKey: (input) => `ship:${input.orderId}`,
   execute: (input, ctx) =>
     Effect.gen(function* () {
-      const fail = (issue: string) =>
+      // Guard refusals are ToolPreconditionFailed: deterministic, pre-write,
+      // side-effect-free. The runtime hands them back to the agent as an
+      // observation (redraft, tell the customer) instead of parking the
+      // ticket the way an unexpected failure (ToolOutputInvalid) does.
+      const refuse = (issue: string) =>
         Effect.fail(
-          new ToolOutputInvalid({
+          new ToolPreconditionFailed({
             tool: "order.update_shipping_address",
-            issues: [issue],
+            issue,
           }),
         );
 
       if (ADDRESS_FIELDS.every((f) => input[f] === undefined)) {
-        return yield* fail("NothingToUpdate");
+        return yield* refuse("NothingToUpdate");
       }
 
       const shopify = yield* ShopifyService;
@@ -121,9 +126,24 @@ export const shopifyUpdateShippingAddress = defineTool({
               }),
           ),
         );
-      if (order.cancelledAt) return yield* fail("OrderCancelled");
+      if (order.cancelledAt) return yield* refuse("OrderCancelled");
       if (order.fulfillments.length > 0) {
-        return yield* fail("OrderAlreadyFulfilled");
+        // Merchant-declared capability (Facts page): the store can update a
+        // shipping address after fulfillment, stated literally. Optional
+        // service + fail-safe read: no repository in context or a failed
+        // settings read means the capability is absent and the guard holds.
+        const tenantRepo = yield* Effect.serviceOption(TenantRepository);
+        const allowAfterFulfillment = Option.isSome(tenantRepo)
+          ? yield* tenantRepo.value.getSettings(ctx.tenantId).pipe(
+              Effect.map(
+                (s) => s.addressUpdateAfterFulfillment === true,
+              ),
+              Effect.catchAll(() => Effect.succeed(false)),
+            )
+          : false;
+        if (!allowAfterFulfillment) {
+          return yield* refuse("OrderAlreadyFulfilled");
+        }
       }
 
       const base = order.shippingAddress ?? EMPTY_ADDRESS;

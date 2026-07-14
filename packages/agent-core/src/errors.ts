@@ -163,6 +163,24 @@ export class ToolOutputInvalid extends Data.TaggedError("ToolOutputInvalid")<{
   readonly issues: ReadonlyArray<string>;
 }> {}
 
+/**
+ * A tool's own pre-write guard refused to act because the world no longer
+ * matches the action's premise (e.g. `order.update_shipping_address` on an
+ * order that was fulfilled after the action was proposed). Deterministic and
+ * side-effect-free: the guard ran BEFORE any write, so re-running is safe and
+ * nothing external changed. Distinguished from `ToolOutputInvalid` (unexpected
+ * provider/platform failures) so the runtime can treat a refusal as an
+ * observation for the agent to adapt to — redraft, tell the customer —
+ * instead of parking the ticket for a human (`approved_tool_failed`).
+ */
+export class ToolPreconditionFailed extends Data.TaggedError(
+  "ToolPreconditionFailed",
+)<{
+  readonly tool: string;
+  /** Stable machine-readable refusal key, e.g. "OrderAlreadyFulfilled". */
+  readonly issue: string;
+}> {}
+
 export class ConnectorNotFound extends Data.TaggedError("ConnectorNotFound")<{
   readonly tenantId: TenantId;
   readonly provider: string;
@@ -331,6 +349,7 @@ export type BlobStorageError = BlobNotFound | BlobStorageFailed;
 export type ToolError =
   | PermissionDenied
   | ToolOutputInvalid
+  | ToolPreconditionFailed
   | NetworkError
   | LLMError
   | ShopifyError
