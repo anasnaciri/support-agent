@@ -1687,6 +1687,26 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       runtime, dashboard, worker recovery, and manual ticket actions.
 - [x] Dashboard manual status changes, take-over, resume, retry last step, and
       restart-from-triage.
+- [x] Approved-action guard refusals re-enter the agent loop (2026-07-14,
+      from prod ticket `9d3d968d`): a deterministic pre-write refusal
+      (`ToolPreconditionFailed`, e.g. `OrderAlreadyFulfilled` after the
+      merchant fulfilled mid-approval) no longer parks `approved_tool_failed`
+      or stops the bundle — the row is audited + retired (NO execution
+      marker: nothing ran, and a failed marker under the `ship:` idempotency
+      key would block a legitimate re-proposal), remaining rows still run,
+      and once every row is decided the ticket moves back `in_progress` and
+      the loop re-enters with the refusal note
+      (`context.approvedActionRefusals`, consumed after the loop) so the
+      agent redrafts and tells the customer. Unexpected failures (provider
+      errors, network) still park for the merchant.
+- [x] Merchant-declared capability "can update the shipping address after
+      fulfillment" (2026-07-14): stored at
+      `settings.addressUpdateAfterFulfillment` (independent of the
+      all-or-nothing `shippingFacts` block), edited on the Facts page
+      (own endpoint `POST /dashboard/address-update-after-fulfillment`,
+      `knowledge.manage`), rendered as a facts header for agents holding
+      `order.update_shipping_address`, and consulted by that tool's
+      fulfilled-order guard (optional-service read, fail-safe to refusal).
 - [x] Manual escalate-to-fulfillment-operator from the ticket page (⋮ menu → dialog):
       `POST /dashboard/tickets/:id/escalate-fulfillment-operator` writes the escalation row
       (the notify outbox) and parks via `parkWaitingForFulfillmentOperatorManually` —
@@ -2193,6 +2213,20 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Runtime And Reliability
 
+- [ ] Shopify tool errors discard the provider's human-readable message: the
+      order/refund/discount tools map provider failures to
+      `ToolOutputInvalid({ issues: [e._tag] })`, so the audit row for a failed
+      approved action records only the tag (e.g. `OrderUpdateFailed`) and
+      Shopify's `userErrors[0].message` is lost (stdout only; Fly buffer is
+      minutes). Made the 2026-07-12 18:21 UTC incident (ticket `0ab7a2e3`,
+      approved `order.update_shipping_address` failed, escalated
+      `approved_tool_failed`) undiagnosable after the fact: the exact payload
+      replays cleanly against the same order and against a fresh
+      draft-completed order, so the true cause (one-off Shopify refusal vs
+      app/API-version-specific validation on the tenant app's pinned 2026-04)
+      is unrecoverable without the message. Fix: carry a sanitized
+      `message` into the issues (mind `toolFailureAuditDetail`'s
+      truncate-at-`:` PII rule) and surface it in the takeover notification.
 - [x] Add replay/resume behavior for held `fulfillment_operator.updated` events after
       approval decisions. (Redraft: a fulfillment operator update on a
       waiting-for-approval ticket supersedes the pending approvals and resumes;
