@@ -17,6 +17,93 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Post-sign-up setup wizard** (2026-07-14). A merchant who signed up
+      landed on an empty dashboard and had to discover eleven settings pages on
+      their own. `/welcome` now sequences them: connect store (+ confirm the
+      brand name) → review imported docs → shipping/returns facts → refund +
+      discount limits → review scenarios → AI provider → agent model +
+      permissions → inbox → Telegram → invite a member → invite a fulfillment
+      partner → finish. Every step saves through the SAME permission-gated
+      endpoint its settings page uses; the wizard sequences the existing
+      features and does not fork them.
+      - **State lives in `tenants.settings.onboarding`** (`onboarding-state.ts`:
+        `decodeOnboardingState`, `onboardingPending`, `advanceOnboardingState`),
+        NOT in a WorkOS post-sign-up trigger — the wizard configures a WORKSPACE
+        (a tenant row), which is not an identity concept the auth provider knows
+        about, and this keeps the gate alive across an auth-provider swap.
+      - **Absence of the key means "not in onboarding".** Only rows created from
+        now on are stamped (in `createTenantForOrg` / `createWorkspaceForOrg`),
+        so every pre-wizard workspace is left alone with NO migration. Preserve
+        this: a decoder that defaulted a missing block to "pending" would drag
+        every existing merchant into the wizard.
+      - Endpoints: `GET /dashboard/onboarding/state` + `advance` / `dismiss` /
+        `complete`, membership-gated only (they move a bookmark; they configure
+        nothing). `WorkspaceSummary.onboardingPending` rides the workspace list
+        the session already fetches, so the shell gate costs no extra request.
+      - **OAuth round-trips need no new machinery.** Shopify/Google still
+        redirect to `/settings/integrations`; the shell gate bounces a pending
+        merchant to `/welcome`, forwarding `?connected` / `?shop` / `?error`.
+        The wizard writes `currentStep` BEFORE handing off to the provider, so
+        the return lands on the step they left. `/welcome` renders under a
+        separate `AuthedBareLayout` (session, no AppShell) — nesting it under the
+        shell would make its own gate redirect it to itself forever.
+      - **Deviation from the plan:** the wizard's Facts / Policies / LLM steps
+        are purpose-built compact forms against the existing endpoints, NOT
+        extractions of the settings-page form cores. Extracting from the
+        645-line FactsPage and friends was the plan's flagged refactor risk, and
+        onboarding wants a shorter form anyway (only the fields the decoders
+        treat as required, plus the two the agent quotes most). The settings
+        pages remain the full editors and are untouched. `llm-providers.ts` WAS
+        extracted (shared by LlmPage and the wizard's LLM step) — provider
+        metadata is a list that must not drift.
+      - Scenarios and agent permissions are shown read-only: those are judgments
+        a merchant cannot make in their first four minutes, the defaults are
+        good, and the copy says where to change them.
+      - Verified with 3,309 tests, `pnpm build`, the SPA production build
+        (strict tsc), and a jsdom render of the wizard driving all eight shell
+        flows (resume point, done/skip persistence, no-skip on the required
+        step, finish, dismiss, rail jump).
+
+- [x] **The default model follows the connected LLM provider** (2026-07-14).
+      Every agent config pinned `google/gemini-3.5-flash`, an OpenRouter id.
+      A merchant who brought an ANTHROPIC or OPENAI key and never opened the
+      Agent page therefore had every ticket fail at the provider (that id is a
+      404 there) and park in human takeover. `DEFAULT_MODEL_BY_PROVIDER`
+      (`llm-credential-resolver.ts`) maps openrouter → `google/gemini-flash-latest`,
+      anthropic → `claude-sonnet-5`, openai → `gpt-5.6-luna`; `applyOverride`
+      resolves **explicit tenant pick > provider default > in-code model** (the
+      last reached only when no provider is connected, where nothing runs
+      anyway). The runtime resolves the provider once per tick via an OPTIONAL
+      `LLMCredentialResolver` (same `Effect.serviceOption` pattern as
+      KnowledgeBaseService, so the lean test layers are unaffected). The
+      "Rephrase with AI" default had the same bug and now resolves the same way.
+      `GET /dashboard/catalog` carries `defaultModel`; the Agent page and the
+      wizard render "Unavailable" when it is null rather than naming a model the
+      merchant cannot use.
+      - [ ] **Verify the three default model ids against each provider's live
+        catalog** before this reaches a real tenant. They were specified by the
+        user, not read from `fetchModelCatalog`. A wrong id fails at the
+        provider and parks the ticket — the same failure mode this fixed.
+      - Agent configs keep their `google/gemini-3.5-flash` literal as the
+        last-resort fallback (and the repo's cheap-model-in-fixtures rule keeps
+        it in tests).
+
+- [x] **Store brand name + an `@`-reference tokenizer fix** (2026-07-14).
+      `tenants.settings.brandName` — what the store calls itself to customers,
+      read from Shopify at connect time and CONFIRMED by the merchant (a store's
+      legal name is often not the one its customers know). Injected into every
+      agent's system prompt as `[Store identity: …]`, deliberately NOT gated on
+      `knowledge.search` like the facts headers: this is identity, not grounding,
+      and an agent that writes a word to a customer needs it. Editable later on
+      the Facts page; referenceable in a playbook as `@store.brand_name`.
+      - **Latent bug found + fixed:** the `@`-reference `TOKEN` regex was
+        UNANCHORED, so it read the domain of `help@store.com` as a `store` ref.
+        This was harmless only while no namespace resembled an email domain;
+        `store` does. It now anchors to start-of-text or a space/bracket —
+        exactly what `ACTION_TOKEN` already did, for exactly this reason. This
+        also fixes a merchant at `help@returns.com`, who would have been broken
+        before. Regression tests pin both.
+
 - [x] **Cancelled Shopify fulfillments no longer read as live shipments**
       (2026-07-13). A merchant flipping an order back to unfulfilled in the
       Shopify admin runs `fulfillmentCancel`; the order's
@@ -2652,7 +2739,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [ ] Add chaos tests for provider failure, DB failover, and queue lag.
 - [ ] Polish SOC 2 audit-trail reporting.
 - [ ] Write incident playbooks and on-call runbook.
-- [ ] Build tenant onboarding checklist and setup wizard.
+- [x] Build tenant onboarding checklist and setup wizard. (2026-07-14 — see
+      "Post-sign-up setup wizard" under Current Focus.)
 
 ### Plugins
 
