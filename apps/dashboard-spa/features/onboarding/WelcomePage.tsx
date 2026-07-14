@@ -37,6 +37,18 @@ export function WelcomePage() {
 
   const [step, setStep] = useState<OnboardingStepKeyView | null>(null);
 
+  // This workspace is not in onboarding — it predates the wizard, or the
+  // merchant already finished or dismissed it. The shell's gate only pushes
+  // people INTO the wizard, so without this a typed URL would render one whose
+  // progress can never persist: `advance` and `complete` are no-ops for a
+  // workspace with no onboarding state (deliberately, so a stray call can't drag
+  // an established merchant into setup), leaving a stepper that never ticks and
+  // a reload that restarts at step 1.
+  const notPending = stateQuery.data !== undefined && !stateQuery.data.pending;
+  useEffect(() => {
+    if (notPending) nav.replace("/");
+  }, [notPending, nav]);
+
   // Open on the persisted resume point, once, when the state first lands. After
   // that the merchant's own navigation owns the current step.
   useEffect(() => {
@@ -78,7 +90,10 @@ export function WelcomePage() {
   const current = step;
   const def = useMemo(() => (current ? stepDefFor(current) : null), [current]);
 
-  if (stateQuery.isLoading || !state || !current || !def) {
+  // `notPending` holds the render too, not just the effect: the redirect lands on
+  // the next tick, and flashing a wizard the merchant is being sent away from is
+  // worse than a moment of nothing.
+  if (stateQuery.isLoading || notPending || !state || !current || !def) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="size-5 animate-spin text-muted-foreground" />

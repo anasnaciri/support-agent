@@ -148,6 +148,34 @@ describe("the setup wizard", () => {
     expect(container.textContent).toContain("Step 1 of 11");
   });
 
+  it("turns away a workspace that predates the wizard", async () => {
+    // An old tenant has no onboarding state at all. The shell gate never sends
+    // them here, but typing the URL used to render a wizard whose progress could
+    // never persist (advance/complete are no-ops without a stamped state), so
+    // the stepper stayed blank and a reload restarted them at step 1.
+    state.mockResolvedValue(onboarding({ pending: false }));
+    await mount();
+
+    expect(navReplace).toHaveBeenCalledWith("/");
+    expect(container.textContent).not.toContain("Connect your store");
+  });
+
+  it("turns away a merchant who already finished setup", async () => {
+    state.mockResolvedValue(
+      onboarding({ pending: false, completedAt: "2026-07-14T10:00:00.000Z" }),
+    );
+    await mount();
+    expect(navReplace).toHaveBeenCalledWith("/");
+  });
+
+  it("turns away a merchant who chose 'Set up later'", async () => {
+    state.mockResolvedValue(
+      onboarding({ pending: false, dismissedAt: "2026-07-14T10:00:00.000Z" }),
+    );
+    await mount();
+    expect(navReplace).toHaveBeenCalledWith("/");
+  });
+
   it("resumes where the merchant left off", async () => {
     // The whole point of persisting a pointer: a merchant who comes back after
     // an OAuth round-trip, or the next morning, does not start over.
