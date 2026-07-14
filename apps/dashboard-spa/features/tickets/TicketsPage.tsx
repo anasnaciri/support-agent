@@ -112,7 +112,6 @@ export function TicketsPage() {
               <TableHead>Subject</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Category</TableHead>
-              <TableHead>Agent</TableHead>
               <TableHead>Updated</TableHead>
             </TableRow>
           </TableHeader>
@@ -120,7 +119,7 @@ export function TicketsPage() {
             {isLoading ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={4}
                   className="py-8 text-center text-sm text-muted-foreground"
                 >
                   Loading…
@@ -129,7 +128,7 @@ export function TicketsPage() {
             ) : isError ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={4}
                   className="py-8 text-center text-sm text-destructive"
                 >
                   Couldn’t load tickets.
@@ -138,7 +137,7 @@ export function TicketsPage() {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={4}
                   className="py-8 text-center text-sm italic text-muted-foreground"
                 >
                   {isReset ? "No tickets yet." : "No tickets match these filters."}
@@ -181,9 +180,6 @@ export function TicketsPage() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {r.scenarioKey ? humanizeSlug(r.scenarioKey) : "—"}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {r.currentAgentId}
                   </TableCell>
                   <TableCell className="tabular-nums text-muted-foreground">
                     {r.updatedAt.slice(0, 16).replace("T", " ")}

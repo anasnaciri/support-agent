@@ -17,6 +17,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Tickets list no longer shows the assigned agent** (2026-07-14).
+      Removed the Agent header and per-ticket agent id from the dashboard table,
+      and adjusted loading, error, and empty-state spans to the remaining four
+      columns. Verified red -> green with a `TicketsPage` render regression,
+      the dashboard production build, the full suite (2,841 passed / 492
+      environment-gated skips), `git diff --check`, and `pnpm build`.
+
 - [x] **Late-approved cancellations recover like shipping-address changes**
       (2026-07-14). `order.cancel` now re-reads the order immediately before
       its write. If the order was fulfilled while approval sat pending, the
