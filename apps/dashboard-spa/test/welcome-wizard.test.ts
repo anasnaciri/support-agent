@@ -130,6 +130,7 @@ const click = async (text: string) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState({}, "", "/welcome");
   advance.mockResolvedValue({ status: 200, body: {} });
   complete.mockResolvedValue({ status: 200, body: {} });
   dismiss.mockResolvedValue({ status: 200, body: {} });
@@ -158,6 +159,16 @@ describe("the setup wizard", () => {
 
     expect(navReplace).toHaveBeenCalledWith("/");
     expect(container.textContent).not.toContain("Connect your store");
+  });
+
+  it("lets a legacy workspace preview the wizard from an explicit production-safe URL", async () => {
+    window.history.replaceState({}, "", "/welcome?preview=1");
+    state.mockResolvedValue(onboarding({ pending: false }));
+    await mount();
+
+    expect(navReplace).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Connect your store");
+    expect(container.textContent).toContain("Step 1 of 11");
   });
 
   it("turns away a merchant who already finished setup", async () => {

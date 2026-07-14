@@ -37,6 +37,13 @@ export function WelcomePage() {
 
   const [step, setStep] = useState<OnboardingStepKeyView | null>(null);
 
+  // An authenticated merchant can inspect the production wizard against their
+  // existing workspace with `/welcome?preview=1`. Keep this URL-scoped: the
+  // normal legacy-tenant contract (no onboarding state means no wizard) must
+  // remain unchanged for every other visit.
+  const preview =
+    new URLSearchParams(window.location.search).get("preview") === "1";
+
   // This workspace is not in onboarding — it predates the wizard, or the
   // merchant already finished or dismissed it. The shell's gate only pushes
   // people INTO the wizard, so without this a typed URL would render one whose
@@ -44,7 +51,8 @@ export function WelcomePage() {
   // workspace with no onboarding state (deliberately, so a stray call can't drag
   // an established merchant into setup), leaving a stepper that never ticks and
   // a reload that restarts at step 1.
-  const notPending = stateQuery.data !== undefined && !stateQuery.data.pending;
+  const notPending =
+    stateQuery.data !== undefined && !stateQuery.data.pending && !preview;
   useEffect(() => {
     if (notPending) nav.replace("/");
   }, [notPending, nav]);

@@ -17,6 +17,17 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Legacy tenants can preview the setup wizard in production**
+      (2026-07-14). Opening `/welcome?preview=1` suppresses the wizard's
+      legacy-tenant redirect and renders the flow from step one against the
+      authenticated workspace. The exception is URL-scoped: plain `/welcome`
+      still redirects tenants whose settings have no pending onboarding state,
+      and no tenant state is stamped or migrated. The wizard's underlying
+      settings forms remain the real permission-gated forms, while onboarding
+      progress writes remain no-ops for an unstamped legacy tenant. Verified
+      red -> green with the wizard render regression (12 tests), the dashboard
+      SPA production build, `git diff --check`, and `pnpm build`.
+
 - [x] **Tickets list no longer shows the assigned agent** (2026-07-14).
       Removed the Agent header and per-ticket agent id from the dashboard table,
       and adjusted loading, error, and empty-state spans to the remaining four
