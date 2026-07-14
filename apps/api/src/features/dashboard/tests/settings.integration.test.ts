@@ -443,6 +443,43 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(body.refundPolicy).toBeTruthy();
   });
 
+  it("POST /dashboard/address-update-after-fulfillment round-trips through settings", async () => {
+    if (!raw) return;
+    const saved = await post("/dashboard/address-update-after-fulfillment", {
+      enabled: true,
+    });
+    expect(saved.status).toBe(200);
+
+    // Read back through the settings endpoint (defaults-on-read decode).
+    const res = await get("/dashboard/settings");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      readonly addressUpdateAfterFulfillment: boolean;
+      readonly refundPolicy: unknown;
+    };
+    expect(body.addressUpdateAfterFulfillment).toBe(true);
+    // The shallow merge must not have clobbered a sibling settings block.
+    expect(body.refundPolicy).toBeTruthy();
+
+    // And back off again — the safe default.
+    const cleared = await post("/dashboard/address-update-after-fulfillment", {
+      enabled: false,
+    });
+    expect(cleared.status).toBe(200);
+    const after = (await (await get("/dashboard/settings")).json()) as {
+      readonly addressUpdateAfterFulfillment: boolean;
+    };
+    expect(after.addressUpdateAfterFulfillment).toBe(false);
+  });
+
+  it("POST /dashboard/address-update-after-fulfillment 400s on a non-boolean body", async () => {
+    if (!raw) return;
+    const bad = await post("/dashboard/address-update-after-fulfillment", {
+      enabled: "yes",
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it("POST /dashboard/returns-facts round-trips through settings", async () => {
     if (!raw) return;
     const saved = await post("/dashboard/returns-facts", {

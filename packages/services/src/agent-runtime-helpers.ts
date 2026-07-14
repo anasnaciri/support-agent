@@ -335,6 +335,24 @@ export const buildSystemPrompt = (
     headers.push(buildReturnsFactsHeader(returnsFacts));
   }
 
+  // After-fulfillment address updates: a merchant-declared capability the
+  // `order.update_shipping_address` guard consults, restated here so the
+  // agent's conversation matches what the tool will actually allow (without
+  // it, the agent refuses "already shipped" requests the store accepts).
+  // Gated on the TOOL, not knowledge.search: it only matters to an agent
+  // that can perform the update.
+  const holdsAddressUpdateTool = agent.tools.some(
+    (t) => (t as string) === "order.update_shipping_address",
+  );
+  if (
+    holdsAddressUpdateTool &&
+    tenantSettings?.addressUpdateAfterFulfillment === true
+  ) {
+    headers.push(
+      "[This store can update an order's shipping address after the order is fulfilled. When a customer asks to change the address of an order that has already shipped, you may still call order.update_shipping_address rather than refusing for that reason alone.]",
+    );
+  }
+
   // Merchant-defined specialists that opted to be callable from THIS agent
   // (Phase C inbound routing). Listed as a trusted bracketed header — same
   // out-of-fence discipline as the fulfillment operator/knowledge headers — so the model

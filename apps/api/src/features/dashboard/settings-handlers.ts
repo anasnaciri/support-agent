@@ -384,6 +384,7 @@ export const handleDashboardSettings = async (
             legalAcceptance: null,
             cancellationRestock: true,
             shippingFacts: null,
+            addressUpdateAfterFulfillment: false,
             returnsFacts: null,
           } as const),
         ),
@@ -402,6 +403,10 @@ export const handleDashboardSettings = async (
     cancellationRestock: settings.cancellationRestock !== false,
     // Null until the merchant fills the Knowledge base page's shipping form.
     shippingFacts: settings.shippingFacts ?? null,
+    // Merchant-declared capability (Facts page): the store can update an
+    // order's shipping address after fulfillment. Defaults-on-read ⇒ false.
+    addressUpdateAfterFulfillment:
+      settings.addressUpdateAfterFulfillment === true,
     // Null until the merchant fills the Knowledge base page's returns form.
     returnsFacts: settings.returnsFacts ?? null,
   });
@@ -837,6 +842,43 @@ export const handleDashboardShippingFactsSet = async (
     ),
   );
   return sendJson(res, 200, { ok: true, shippingFacts: parsed.facts });
+};
+
+// POST /dashboard/address-update-after-fulfillment — set the merchant-declared
+// capability: the store can update an order's shipping address after the order
+// is fulfilled (stated literally; we do not infer what the store does with
+// it). When enabled, the `order.update_shipping_address` tool skips its
+// fulfilled-order refusal and the agent's facts header carries the line.
+// Edited on the Knowledge base page next to the shipping facts, but its own
+// endpoint + settings key: it must work for tenants who never filled the
+// all-or-nothing shippingFacts block. Read back via /dashboard/settings.
+export const handleDashboardAddressUpdateAfterFulfillmentSet = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const enabled = parseJsonBody(req)["enabled"];
+  // Only a literal boolean: the flag softens a write-tool guard, so a truthy
+  // string must not enable it by accident.
+  if (typeof enabled !== "boolean") {
+    return sendJson(res, 400, { error: "invalid_enabled" });
+  }
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setAddressUpdateAfterFulfillment(
+          TenantId(auth.tenantId),
+          enabled,
+        );
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true, addressUpdateAfterFulfillment: enabled });
 };
 
 // ---- Returns facts ----

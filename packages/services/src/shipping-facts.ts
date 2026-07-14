@@ -86,6 +86,29 @@ const optionalDays = (raw: unknown): number | null =>
     : null;
 
 /**
+ * Decode the tenant's "can update the shipping address after fulfillment"
+ * capability from the RAW `tenants.settings` object (not the shippingFacts
+ * block). It states literally that the store can update an order's shipping
+ * address after the order is fulfilled — nothing more. When `true`, the
+ * `order.update_shipping_address` tool skips its fulfilled-order refusal and
+ * the agent's facts header carries the line. Edited on the dashboard's
+ * Knowledge base page next to the shipping facts, but deliberately NOT inside
+ * the all-or-nothing `shippingFacts` block: a merchant who never filled
+ * delivery times can still declare the capability. Only a literal `true`
+ * counts — anything else (absent, malformed, truthy junk) is `false`, since
+ * the default must stay the safe refusal.
+ */
+export const decodeAddressUpdateAfterFulfillment = (
+  rawSettings: unknown,
+): boolean =>
+  typeof rawSettings === "object" &&
+  rawSettings !== null &&
+  !Array.isArray(rawSettings) &&
+  (rawSettings as Record<string, unknown>)[
+    "addressUpdateAfterFulfillment"
+  ] === true;
+
+/**
  * Decode the `shippingFacts` block of `tenants.settings`.
  *
  * Returns `null` for anything short of a usable block: not an object, or any of

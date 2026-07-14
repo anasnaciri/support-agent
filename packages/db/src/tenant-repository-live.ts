@@ -1,6 +1,7 @@
 import { Effect, FiberRef, Layer } from "effect";
 import { eq, sql } from "drizzle-orm";
 import {
+  decodeAddressUpdateAfterFulfillment,
   decodeBlockedSenders,
   decodeShippingFacts,
   decodeReturnsFacts,
@@ -267,6 +268,10 @@ export const TenantRepositoryLive = Layer.effect(
           // Null for an unconfigured or half-written block — agents then fall
           // back to knowledge.search for the delivery window.
           const shippingFacts = decodeShippingFacts(settings?.shippingFacts);
+          // Independent of the shippingFacts block: a merchant who never
+          // filled delivery times can still declare the capability.
+          const addressUpdateAfterFulfillment =
+            decodeAddressUpdateAfterFulfillment(settings);
           // Null for an unconfigured or half-written block — agents then fall
           // back to knowledge.search for the return policy.
           const returnsFacts = decodeReturnsFacts(settings?.returnsFacts);
@@ -282,6 +287,7 @@ export const TenantRepositoryLive = Layer.effect(
             resolutionPolicy,
             blockedSenders,
             shippingFacts,
+            addressUpdateAfterFulfillment,
             returnsFacts,
           });
         }),
@@ -519,6 +525,34 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setShippingFacts",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setAddressUpdateAfterFulfillment: (tenantId, enabled: boolean) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          // Same shallow `||` JSONB merge as setRefundPolicy — replaces the
+          // one settings-level key, leaves every sibling setting untouched.
+          const json = JSON.stringify({
+            addressUpdateAfterFulfillment: enabled,
+          });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${json}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setAddressUpdateAfterFulfillment",
                 cause,
               }),
           });

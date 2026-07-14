@@ -931,6 +931,13 @@ export interface TenantSettingsView {
   readonly cancellationRestock: boolean;
   /** The store's shipping facts; `null` until the merchant configures one. */
   readonly shippingFacts: ShippingFactsView | null;
+  /**
+   * The store can update an order's shipping address after the order is
+   * fulfilled — a merchant-declared capability, stated literally. When true,
+   * the agent's fulfilled-order refusal for address updates steps aside.
+   * Defaults-on-read to false.
+   */
+  readonly addressUpdateAfterFulfillment: boolean;
   /** The store's returns facts; `null` until the merchant configures one. */
   readonly returnsFacts: ReturnsFactsView | null;
 }

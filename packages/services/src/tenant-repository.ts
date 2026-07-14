@@ -847,6 +847,19 @@ export class TenantSettings extends Data.Class<{
    */
   readonly shippingFacts?: ShippingFacts | null;
   /**
+   * The store can update an order's shipping address after the order is
+   * fulfilled — a merchant-declared capability, stated literally (we do not
+   * infer what the store does with it). When `true`, the
+   * `order.update_shipping_address` tool skips its fulfilled-order refusal.
+   * Edited on the dashboard Knowledge base page next to the shipping facts,
+   * but decoded independently of the all-or-nothing `shippingFacts` block
+   * (`decodeAddressUpdateAfterFulfillment`) so it works for tenants who never
+   * filled delivery times. Optional on the class (existing construction sites
+   * don't ripple); the Live `getSettings` always populates it, defaulting to
+   * `false` — the safe refusal.
+   */
+  readonly addressUpdateAfterFulfillment?: boolean;
+  /**
    * The store's structured returns/refund facts — return window, who pays
    * return shipping, refund method, and the processing time to quote. Edited on
    * the dashboard Knowledge base page. Optional on the class (existing
@@ -960,6 +973,16 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setShippingFacts: (
       tenantId: TenantId,
       profile: ShippingFacts | null,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+
+    /**
+     * Set the "can update the shipping address after fulfillment" capability.
+     * Same shallow JSONB merge as `setRefundPolicy` — unrelated settings are
+     * preserved.
+     */
+    readonly setAddressUpdateAfterFulfillment: (
+      tenantId: TenantId,
+      enabled: boolean,
     ) => Effect.Effect<void, TenantRepositoryError>;
 
     /**
@@ -1093,6 +1116,20 @@ export const TenantRepositoryTest = (
         store.set(
           tenantId,
           new TenantSettings({ ...prev, shippingFacts: profile }),
+        );
+        return Effect.void;
+      },
+      setAddressUpdateAfterFulfillment: (tenantId, enabled) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({
+            ...prev,
+            addressUpdateAfterFulfillment: enabled,
+          }),
         );
         return Effect.void;
       },

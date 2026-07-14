@@ -49,6 +49,73 @@ const invalidateFacts = (
   void qc.invalidateQueries({ queryKey: qk.factReferences(workspaceId) });
 };
 
+/**
+ * "The store can update the shipping address after fulfillment" — a
+ * merchant-declared capability, stated literally. When on, the agent's
+ * fulfilled-order refusal for address updates steps aside. Mutates on change
+ * (no Save button) and invalidates settings in place — same pattern as the
+ * restock toggle on the refund-policy page. Saves through its own endpoint,
+ * independent of the shipping form: it must work even when the delivery
+ * times above were never filled in.
+ */
+function AddressUpdateAfterFulfillmentToggle({
+  enabled,
+  ctx,
+}: {
+  readonly enabled: boolean;
+  readonly ctx: Ctx;
+}) {
+  const qc = useQueryClient();
+  const [checked, setChecked] = useState(enabled);
+
+  const toggle = useMutation({
+    mutationFn: (next: boolean) =>
+      api.setAddressUpdateAfterFulfillment(ctx, next),
+    onSuccess: (res) => {
+      if (res.status !== 200) {
+        setChecked((prev) => !prev);
+        toast.warning("Something went wrong. Please try again.");
+        return;
+      }
+      invalidateFacts(qc, ctx.workspaceId);
+    },
+    onError: () => {
+      // Revert the optimistic flip so the checkbox reflects the stored value.
+      setChecked((prev) => !prev);
+      toast.warning("Something went wrong. Please try again.");
+    },
+  });
+
+  return (
+    <div className="border-t pt-4">
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          name="addressUpdateAfterFulfillment"
+          checked={checked}
+          onChange={(e) => {
+            const next = e.currentTarget.checked;
+            setChecked(next);
+            toggle.mutate(next);
+          }}
+          className="mt-0.5 size-4 rounded border-input accent-primary"
+        />
+        <span className="grid gap-1">
+          <span className="text-sm font-medium">
+            This store can update an order&rsquo;s shipping address after
+            fulfillment
+          </span>
+          <span className={hint}>
+            When off, the agent refuses address changes once an order has
+            shipped. When on, it may still update the address on a fulfilled
+            order; the agent asks for approval as usual.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 // The store's structured shipping facts. These are not prose the agent reads —
 // they're numbers it acts on. The delivery time is the window lateness is judged
 // against, and the delay threshold is the exact point past which the agent opens
@@ -523,14 +590,26 @@ export function FactsPage() {
           {settingsQuery.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
-            <ShippingFactsForm
-              // Remount when the saved profile arrives so the inputs pick up
-              // their stored values instead of keeping their initial "".
-              key={settingsQuery.data?.shippingFacts ? "loaded" : "empty"}
-              profile={settingsQuery.data?.shippingFacts ?? null}
-              ctx={ctx}
-              reportDirty={reportDirty}
-            />
+            <>
+              <ShippingFactsForm
+                // Remount when the saved profile arrives so the inputs pick up
+                // their stored values instead of keeping their initial "".
+                key={settingsQuery.data?.shippingFacts ? "loaded" : "empty"}
+                profile={settingsQuery.data?.shippingFacts ?? null}
+                ctx={ctx}
+                reportDirty={reportDirty}
+              />
+              <AddressUpdateAfterFulfillmentToggle
+                // Remount when the saved value arrives, same as the form.
+                key={`capability-${String(
+                  settingsQuery.data?.addressUpdateAfterFulfillment ?? false,
+                )}`}
+                enabled={
+                  settingsQuery.data?.addressUpdateAfterFulfillment ?? false
+                }
+                ctx={ctx}
+              />
+            </>
           )}
         </CardContent>
       </Card>

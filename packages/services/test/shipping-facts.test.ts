@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SHIPPING_FACTS_MAX_DELAY_DAYS,
   SHIPPING_FACTS_TEXT_MAX,
+  decodeAddressUpdateAfterFulfillment,
   decodeShippingFacts,
   type ShippingFacts,
 } from "../src/shipping-facts.js";
@@ -124,5 +125,42 @@ describe("decodeShippingFacts", () => {
       decodeShippingFacts({ ...full, lostPackageInvestigationDays: 100_000 })
         ?.lostPackageInvestigationDays,
     ).toBe(SHIPPING_FACTS_MAX_DELAY_DAYS);
+  });
+});
+
+describe("decodeAddressUpdateAfterFulfillment", () => {
+  // The capability is a merchant decision the tool's fulfilled-order guard
+  // consults, so it must decode independently of the shippingFacts block —
+  // a merchant who never filled delivery times can still declare it.
+  it("reads a literal true from the settings level", () => {
+    expect(
+      decodeAddressUpdateAfterFulfillment({
+        addressUpdateAfterFulfillment: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("defaults to false when unset, malformed, or truthy-but-not-true", () => {
+    expect(decodeAddressUpdateAfterFulfillment(undefined)).toBe(false);
+    expect(decodeAddressUpdateAfterFulfillment(null)).toBe(false);
+    expect(decodeAddressUpdateAfterFulfillment({})).toBe(false);
+    expect(decodeAddressUpdateAfterFulfillment([])).toBe(false);
+    for (const bad of ["true", 1, {}, false, null]) {
+      expect(
+        decodeAddressUpdateAfterFulfillment({
+          addressUpdateAfterFulfillment: bad,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("does not depend on a valid shippingFacts block", () => {
+    // No shippingFacts at all — the flag still reads.
+    expect(
+      decodeAddressUpdateAfterFulfillment({
+        addressUpdateAfterFulfillment: true,
+        shippingFacts: { processingTime: "" },
+      }),
+    ).toBe(true);
   });
 });

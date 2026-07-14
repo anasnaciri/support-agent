@@ -46,6 +46,7 @@ import {
   handleDashboardBlockedSendersAdd,
   handleDashboardShippingFactsSet,
   handleDashboardReturnsFactsSet,
+  handleDashboardAddressUpdateAfterFulfillmentSet,
   handleDashboardFactReferences,
   handleDashboardFactReferencesResolve,
   handleDashboardBlockedSendersRemove,
@@ -561,6 +562,12 @@ export const registerDashboardRoutes = (
     "/dashboard/returns-facts",
     "Save the store's returns facts",
     handleDashboardReturnsFactsSet,
+    "knowledge.manage",
+  );
+  dashboardPost(
+    "/dashboard/address-update-after-fulfillment",
+    "Declare whether the store can update a shipping address after fulfillment",
+    handleDashboardAddressUpdateAfterFulfillmentSet,
     "knowledge.manage",
   );
   dashboardGet(

@@ -387,6 +387,32 @@ describe("buildSystemPrompt", () => {
     expect(got).toMatch(/instead of searching the knowledge base/i);
   });
 
+  it("states the after-fulfillment address-update capability only for agents holding the tool", () => {
+    // The capability is a merchant-declared fact ("the store can update the
+    // shipping address after fulfillment") consumed by the tool's guard; the
+    // header keeps the agent's conversation consistent with what the tool
+    // will actually allow, so it gates on the TOOL, not knowledge.search.
+    const holder = baseAgent({
+      tools: ["order.update_shipping_address", "conversation.reply"],
+    });
+    const enabled = new TenantSettings({
+      ...makeSettings(null),
+      addressUpdateAfterFulfillment: true,
+    });
+    const got = buildSystemPrompt(holder, enabled);
+    expect(got).toMatch(/update[\s\S]{0,80}shipping address[\s\S]{0,120}after[\s\S]{0,40}fulfill/i);
+
+    // Flag unset → bare prompt (safe default: the guard refuses).
+    expect(buildSystemPrompt(holder, makeSettings(null))).toBe(
+      withPreamble("Base prompt for testing."),
+    );
+    // Agent without the tool → no header even when the flag is set.
+    const bystander = baseAgent({ tools: ["conversation.reply"] });
+    expect(buildSystemPrompt(bystander, enabled)).toBe(
+      withPreamble("Base prompt for testing."),
+    );
+  });
+
   it("renders each customs payer as a merchant-facing sentence, and omits it when unset", () => {
     const agent = baseAgent({ tools: ["knowledge.search"] });
     const render = (customsDuties: ShippingFacts["customsDuties"]) =>
