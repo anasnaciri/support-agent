@@ -219,6 +219,18 @@ export interface ResumeTicketInput {
    * after the ticket has been sent back through triage.
    */
   readonly restartFromTriage?: boolean;
+  /**
+   * "Hand back and wait": the merchant returns the ticket to automation but
+   * nothing ticks until the customer's next message, so the ticket must not
+   * sit in `in_progress` looking like the agent is working. When set, the
+   * resume continues past `in_progress` to `waiting_for_customer` in the same
+   * tx — a §10-legal bridge (human_takeover → in_progress →
+   * waiting_for_customer), mirroring the manual-resolve bridge. Everything
+   * else about the resume (epoch bump, approvals kept) is unchanged. Mutually
+   * exclusive with `restartFromTriage` in practice: an immediate retry stays
+   * `in_progress` because the agent genuinely is about to run.
+   */
+  readonly waitForCustomer?: boolean;
 }
 
 export type SetMerchantStatusOutcome =
@@ -1068,6 +1080,20 @@ export const TicketLifecycleWriterLive = Layer.effect(
                 ticket_.tenantId,
               );
             }
+            // "Hand back and wait": continue the bridge to
+            // waiting_for_customer so the ticket doesn't sit in in_progress
+            // looking like the agent is working when nothing will tick until
+            // the customer's next message.
+            const toStatus = input.waitForCustomer
+              ? ("waiting_for_customer" satisfies TicketStatus)
+              : RESUME_TO_STATUS;
+            if (input.waitForCustomer) {
+              yield* tickets.transitionStatus(ticket_.id, toStatus, {
+                tenantId: ticket_.tenantId,
+                expectedFromStatus: RESUME_TO_STATUS,
+                reason: input.reason,
+              });
+            }
             yield* audit.record({
               tenantId: updated.tenantId,
               ticketId: updated.id,
@@ -1077,11 +1103,12 @@ export const TicketLifecycleWriterLive = Layer.effect(
                 reason: input.reason,
                 fromStatus: ticket_.status,
                 restartFromTriage: input.restartFromTriage === true,
+                waitForCustomer: input.waitForCustomer === true,
               },
             });
             return {
               kind: "resumed",
-              toStatus: RESUME_TO_STATUS,
+              toStatus,
               canceledApprovals,
             };
           }),

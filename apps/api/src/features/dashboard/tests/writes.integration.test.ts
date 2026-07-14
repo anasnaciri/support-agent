@@ -37,6 +37,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
   const ticketReject = randomUUID();
   const ticketTakeover = randomUUID();
   const ticketResume = randomUUID();
+  const ticketResumeWait = randomUUID();
   const ticketRetry = randomUUID();
   const ticketSetStatus = randomUUID();
   const ticketHt = randomUUID();
@@ -140,6 +141,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       mkTicket(ticketReject, tenantId, "waiting_for_approval"),
       mkTicket(ticketTakeover, tenantId, "waiting_for_approval"),
       mkTicket(ticketResume, tenantId, "human_takeover"),
+      mkTicket(ticketResumeWait, tenantId, "human_takeover"),
       mkTicket(ticketRetry, tenantId, "human_takeover"),
       mkTicket(ticketSetStatus, tenantId, "waiting_for_approval"),
       mkTicket(ticketHt, tenantId, "human_takeover"),
@@ -249,6 +251,28 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(body.kind).toBe("resumed");
     expect(body.toStatus).toBe("in_progress");
     expect(await ticketStatus(ticketResume)).toBe("in_progress");
+  });
+
+  it("resume with waitForCustomer parks the ticket in waiting_for_customer (no tick)", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/tickets/${ticketResumeWait}/resume`, {
+      reason: "hand back and wait for the customer",
+      waitForCustomer: true,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { kind: string; toStatus?: string };
+    expect(body.kind).toBe("resumed");
+    expect(body.toStatus).toBe("waiting_for_customer");
+    expect(await ticketStatus(ticketResumeWait)).toBe("waiting_for_customer");
+    // Unlike /retry, no workflow event is enqueued — the agent stays quiet
+    // until the customer's next message.
+    const jobs = await raw.db.execute(
+      sql`select count(*)::int as n from pgboss.job
+          where name = 'workflow.events'
+            and data->'event'->>'type' = 'ticket.resumed'
+            and data->'event'->>'ticketId' = ${ticketResumeWait}`,
+    );
+    expect((jobs as unknown as Array<{ n: number }>)[0]?.n).toBe(0);
   });
 
   it("resuming a ticket that isn't in human_takeover is a no-op", async () => {

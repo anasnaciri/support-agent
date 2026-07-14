@@ -61,6 +61,12 @@ export interface ResumeInput {
    * re-classifies + re-routes (default = re-run the bound specialist).
    */
   readonly restartFromTriage?: boolean | undefined;
+  /**
+   * "Hand back and wait": continue past `in_progress` to
+   * `waiting_for_customer` in the same tx, so the ticket doesn't read as if
+   * the agent were working when nothing ticks until the customer replies.
+   */
+  readonly waitForCustomer?: boolean | undefined;
 }
 
 const ticketLifecycleLayer = (db: DrizzleDb) => {
@@ -110,10 +116,11 @@ export const takeOverTicket = async (
 /**
  * Hand a `human_takeover` ticket back to the agent: transition it to
  * `in_progress` and write the transition + audit rows in one tx. The ticket
- * re-enters automation on its next inbound event — the runtime's takeover
- * guard only holds events while the status is `human_takeover`, so flipping
- * the status is all that's needed (the runtime has no message-history replay,
- * so we deliberately don't re-trigger the agent on the already-seen reply).
+ * re-enters automation on its next inbound event — this is a pure DB flip
+ * that never ticks the agent (the merchant uses "Retry last step" / `/retry`
+ * for an immediate run). With `waitForCustomer`, the resume continues to
+ * `waiting_for_customer` in the same tx so the parked ticket doesn't read as
+ * "in progress" while nothing is actually running.
  * With `restartFromTriage`, it ALSO rebinds the ticket to triage and cancels
  * every pending approval (the old route's proposals are stale once the ticket
  * re-classifies from scratch — mirrors `takeOverTicket`); a plain hand-back
@@ -137,6 +144,7 @@ export const resumeTicket = async (
         decidedBy: UserId(input.managerId),
         reason,
         restartFromTriage: input.restartFromTriage === true,
+        waitForCustomer: input.waitForCustomer === true,
       });
     }),
   );

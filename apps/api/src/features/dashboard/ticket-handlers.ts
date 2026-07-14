@@ -842,7 +842,10 @@ export const handleDashboardTakeover = async (
 // POST /dashboard/tickets/:id/resume — manager hands a taken-over ticket back
 // to the agent. The status flips out of `human_takeover` so the runtime's
 // takeover guard stops holding events and the agent resumes on the next
-// inbound message.
+// inbound message — this endpoint never ticks the agent (that's /retry).
+// `waitForCustomer: true` parks the ticket in `waiting_for_customer` instead
+// of `in_progress`, so the dashboard doesn't show a hand-back-and-wait ticket
+// as if the agent were processing it.
 export const handleDashboardResume = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -856,6 +859,7 @@ export const handleDashboardResume = async (
   const body = parseJsonBody(req);
   const reason =
     typeof body["reason"] === "string" ? (body["reason"] as string) : undefined;
+  const waitForCustomer = body["waitForCustomer"] === true;
   const managerId = auth.userId;
   const outcome = await runWithDb(layer, (db) =>
     resumeTicket(db, {
@@ -863,6 +867,7 @@ export const handleDashboardResume = async (
       tenantId: auth.tenantId,
       managerId,
       reason,
+      waitForCustomer,
     }),
   );
   return sendJson(res, outcome.kind === "ticket_not_found" ? 404 : 200, outcome);

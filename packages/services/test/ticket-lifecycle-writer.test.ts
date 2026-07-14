@@ -839,6 +839,58 @@ describe("TicketLifecycleWriter", () => {
     });
   });
 
+  it("resume with waitForCustomer parks the ticket in waiting_for_customer", async () => {
+    // "Hand back and wait": the merchant hands the ticket back but nothing
+    // ticks until the customer's next message — the status must say so
+    // (waiting_for_customer), not pretend the agent is working (in_progress).
+    // Bridged human_takeover → in_progress → waiting_for_customer so the §10
+    // matrix stays untouched (mirrors the manual-resolve bridge).
+    const out = await run(
+      Effect.gen(function* () {
+        const tickets = yield* TicketRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* TicketLifecycleWriter;
+        const tenant = TenantId("tenant-a");
+        const takeover = yield* tickets.create({
+          tenantId: tenant,
+          channel: "email",
+          currentAgentId: AgentId("support-triage"),
+          status: "human_takeover",
+        });
+        const resumed = yield* lifecycle.resume({
+          ticketId: takeover.id,
+          tenantId: tenant,
+          actor: { type: "user", id: "manager-1" },
+          decidedBy: UserId("manager-1"),
+          reason: "hand back and wait",
+          waitForCustomer: true,
+        });
+        return {
+          resumed,
+          ticket: yield* tickets.getById(takeover.id, tenant),
+          entries: yield* audit.forTicket(takeover.id, { tenantId: tenant }),
+        };
+      }),
+    );
+
+    expect(out.resumed).toEqual({
+      kind: "resumed",
+      toStatus: "waiting_for_customer",
+      canceledApprovals: 0,
+    });
+    expect(out.ticket.status).toBe("waiting_for_customer");
+    // The new round still fences out the prior attempt's leftovers.
+    expect(out.ticket.epoch ?? 0).toBe(1);
+    expect(out.entries[0]).toMatchObject({
+      action: "ticket.resumed",
+      details: {
+        reason: "hand back and wait",
+        fromStatus: "human_takeover",
+        waitForCustomer: true,
+      },
+    });
+  });
+
   it("resume bumps the ticket round (epoch) on both hand-back and restart-from-triage", async () => {
     // Recovery hardening: every new attempt owns a fresh round so leftovers of
     // the prior attempt (approvals/events at a lower epoch) are fenced out.
