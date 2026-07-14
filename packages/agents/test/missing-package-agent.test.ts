@@ -94,6 +94,14 @@ describe("missing-package-agent config", () => {
     expect(p).toContain("liveTrackingStatus");
   });
 
+  it("reads tracking data from the nested shopify order output", () => {
+    const p = missingPackageAgent.promptTemplate;
+    expect(p).toContain("tracking.numbers");
+    expect(p).toContain("tracking.company");
+    expect(p).not.toContain("trackingNumbers");
+    expect(p).not.toContain("trackingCompany");
+  });
+
   it("compares the tracking destination country against the order's shipping country", () => {
     const p = missingPackageAgent.promptTemplate;
     // A `destinationCountry` that disagrees with the order's shippingAddress

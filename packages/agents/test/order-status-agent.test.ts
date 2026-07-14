@@ -61,6 +61,14 @@ describe("order-status-agent config", () => {
     expect(p).toMatch(/destinationcountry[\s\S]{0,400}(differ|does not match|mismatch|different)/);
   });
 
+  it("reads tracking data from the nested shopify order output", () => {
+    const p = orderStatusAgent.promptTemplate;
+    expect(p).toContain("tracking.numbers");
+    expect(p).toContain("tracking.company");
+    expect(p).not.toContain("trackingNumbers");
+    expect(p).not.toContain("trackingCompany");
+  });
+
   it("is registrable + resolvable through AgentRegistry", async () => {
     const layer = AgentRegistryWith([orderStatusAgent]);
     const resolved = await Effect.runPromise(

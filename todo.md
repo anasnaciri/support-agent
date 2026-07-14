@@ -17,6 +17,18 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Order agents read the real nested tracking fields and retain the
+      17TRACK URL fallback** (2026-07-14). The order-status and missing-package
+      prompts now read `fulfillments[].tracking.numbers[]` and
+      `tracking.company`, matching the public `shopify.get_order` result rather
+      than the stale flat `trackingNumbers` / `trackingCompany` names. This
+      makes their permitted `tracking.lookup` call reliable; it always returns
+      a public `https://t.17track.net/en#nums=...` `trackingUrl` when a tracking
+      number exists, including when Shopify has no linked tracking URL or no
+      live 17TRACK provider result is available. Verified red -> green with
+      prompt contract regressions for both agents, the full suite, and
+      `pnpm build`.
+
 - [x] **Manual reopen lands on `waiting_for_customer`; `in_progress` is no
       longer merchant-settable** (2026-07-14, follow-up to the hand-back
       dialog below). "Reopen (in progress)" left the ticket showing the
