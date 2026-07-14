@@ -291,9 +291,23 @@ export const ApprovalServiceLive = Layer.effect(
       readonly ticketId: TicketId;
       readonly reason: string;
       readonly tools?: ReadonlyArray<string>;
+      readonly includeApprovedUnresumed?: boolean;
     }): Effect.Effect<number, ApprovalServiceError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
+        // `includeApprovedUnresumed` widens the cancel to approved rows that
+        // were never acted on (resumedAt null) — the guard-refusal path where
+        // the rest of an approved bundle is stale. Executed rows are never
+        // touched.
+        const statusMatch = input.includeApprovedUnresumed
+          ? or(
+              eq(approvals.status, "pending"),
+              and(
+                eq(approvals.status, "approved"),
+                isNull(approvals.resumedAt),
+              ),
+            )
+          : eq(approvals.status, "pending");
         const rows = yield* wrap(
           "supersedePendingForTicket",
           db
@@ -308,7 +322,7 @@ export const ApprovalServiceLive = Layer.effect(
               and(
                 eq(approvals.tenantId, input.tenantId),
                 eq(approvals.ticketId, input.ticketId),
-                eq(approvals.status, "pending"),
+                statusMatch,
                 ...(input.tools && input.tools.length > 0
                   ? [inArray(approvals.tool, [...input.tools])]
                   : []),

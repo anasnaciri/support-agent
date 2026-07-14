@@ -2215,6 +2215,95 @@ describe("approved action refused by its own guard — the agent adapts instead 
     expect(seenUserMessages[0]).toMatch(/fulfil/i);
   });
 
+  it("cancels the rest of the bundle on a refusal instead of sending a stale draft", async () => {
+    // The reply was drafted ASSUMING the address update would apply ("we've
+    // updated your address"). Once the update is refused, sending it would
+    // lie to the customer — the refusal must cancel the remaining unexecuted
+    // rows and let the re-entered agent redraft with the refusal in hand.
+    const convo = makeConversationServiceTest({});
+    const llmLayer = LLMServiceFromFn((_req, ctx) =>
+      Effect.succeed(
+        ctx.callIndex === 0
+          ? ({
+              type: "tool_call",
+              callId: "r2",
+              tool: "conversation.reply",
+              input: replyInput("draft-corrected-2", "cust@example.com"),
+            } as const)
+          : ({
+              type: "final_message",
+              text: "Queued the corrected reply.",
+            } as const),
+      ),
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const approvals = yield* ApprovalService;
+          const { created, approval } = yield* seedApprovedAddressUpdate(
+            repo,
+            approvals,
+          );
+          // The stale optimistic draft, queued right after the action and
+          // approved in the same bundle.
+          const staleReply = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            ticketId: created.id,
+            agentId: AGENT_ID,
+            tool: "conversation.reply",
+            proposedInput: replyInput("draft-stale-1", "cust@example.com"),
+            reasoning: "drafted assuming the update succeeds",
+            riskLevel: "medium",
+            expiresAt: EXPIRES,
+          });
+          yield* approvals.approve({
+            id: staleReply.id,
+            decidedBy: MGR,
+            tenantId: TenantId(TENANT),
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: approval.id as never,
+            ticketId: created.id,
+            managerId: MGR,
+          });
+
+          const final = yield* repo.getById(created.id);
+          const staleAfter = yield* approvals.getById(
+            staleReply.id,
+            TenantId(TENANT),
+          );
+          const pending = yield* approvals.listPending(TenantId(TENANT));
+          return { result, final, staleAfter, pending };
+        }),
+        partialLayer(
+          convo,
+          [
+            llmLayer,
+            ShopifyServiceTest({
+              orders: new Map([[OrderId(SHIP_ORDER), shipOrder(true)]]),
+            }),
+          ],
+          defaultTenantSettings,
+          addressAgent(),
+        ),
+      ),
+    );
+
+    // The stale draft never reached the customer, and its row shows WHY.
+    expect(convo.handle.sent).toHaveLength(0);
+    expect(out.staleAfter.status).toBe("cancelled");
+    expect(out.staleAfter.decisionReason ?? "").toMatch(/could not be performed/i);
+    // The re-entered agent queued a fresh draft; the ticket waits on it.
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.final.status).toBe("waiting_for_approval");
+    expect(out.pending.map((a) => a.tool)).toEqual(["conversation.reply"]);
+  });
+
   it("still parks approved_tool_failed on an unexpected tool failure", async () => {
     const convo = makeConversationServiceTest({});
     const out = await Effect.runPromise(

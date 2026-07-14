@@ -100,6 +100,16 @@ export interface SupersedePendingForTicketInput {
    * supersede every pending row for the ticket.
    */
   readonly tools?: ReadonlyArray<string>;
+  /**
+   * Also supersede APPROVED rows that have not been acted on yet
+   * (`resumedAt` null). Used when a guard refusal invalidates the rest of an
+   * approved bundle: the manager's yes was given against a world that no
+   * longer exists (e.g. a reply drafted assuming an address update that was
+   * then refused), so the unexecuted remainder must be cancelled — never run
+   * — and the re-entered agent re-decides. Rows already executed (resumedAt
+   * set) are never touched.
+   */
+  readonly includeApprovedUnresumed?: boolean;
 }
 
 // ============================================================
@@ -432,7 +442,12 @@ export const ApprovalServiceTest = Layer.effect(
           for (const [id, approval] of store.entries()) {
             if (approval.tenantId !== input.tenantId) continue;
             if (approval.ticketId !== input.ticketId) continue;
-            if (approval.status !== "pending") continue;
+            const supersedable =
+              approval.status === "pending" ||
+              (input.includeApprovedUnresumed === true &&
+                approval.status === "approved" &&
+                (approval.resumedAt ?? null) === null);
+            if (!supersedable) continue;
             if (toolFilter && !toolFilter.has(approval.tool)) continue;
             store.set(id, {
               ...approval,

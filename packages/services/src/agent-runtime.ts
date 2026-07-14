@@ -1068,24 +1068,41 @@ const AgentRuntimeLayer = Layer.effect(
             const refused: ApprovedActionRefusal[] = [];
             for (const approval of bundle) {
               const outcome = yield* executeOneApproval(approval, event);
-              // A guard refusal doesn't stop the bundle: the row is audited +
-              // retired, the rest still run (prod 9d3d968d: stopping stranded
-              // the approved "already fulfilled" reply behind the failed
-              // address update). Collected; the agent re-enters below.
+              // A guard refusal invalidates the REST of the round: the later
+              // rows (typically the customer reply) were proposed assuming
+              // this action would apply, so running them would act on a
+              // premise that just failed — a stale "we've updated your
+              // address" draft must not send. Stop; the unexecuted remainder
+              // is cancelled below and the re-entered agent re-decides with
+              // the refusal in hand.
               if ("refused" in outcome) {
                 refused.push(outcome.refused);
-                continue;
+                break;
               }
               // A WorkflowResult (no `ok`) means this action failed / couldn't
               // run; the ticket is already parked. Stop — don't run later actions.
               if (!("ok" in outcome)) return outcome;
               ran.push({ tool: outcome.tool, result: outcome.result });
             }
-            // Persist the refusal note BEFORE any status decision: it must
-            // survive a partially-decided bundle (rows still pending) so the
-            // FINAL decision round still re-enters the agent with it, and a
-            // crash-redelivery can't lose it. Deduped by approvalId.
             if (refused.length > 0) {
+              // Cancel everything not yet acted on — the approved-but-unrun
+              // remainder of this bundle AND any still-pending rows. Their
+              // decisionReason tells the timeline why they never ran; rows
+              // already executed (resumedAt set) are untouched. Best-effort:
+              // a failed cancel still re-enters, and the epoch/resumedAt
+              // fencing keeps an uncancelled leftover from executing later.
+              const superseded = yield* approvals
+                .supersedePendingForTicket({
+                  tenantId: working.tenantId,
+                  ticketId: working.id,
+                  reason: "superseded: a queued action could not be performed",
+                  includeApprovedUnresumed: true,
+                })
+                .pipe(Effect.catchAll(() => Effect.succeed(0)));
+              // Persist the refusal note BEFORE the status move so a
+              // crash-redelivery can't lose it; the approval.approved branch
+              // of buildInitialMessages renders it and the dispatch consumes
+              // it after the re-entered loop. Deduped by approvalId.
               const prior = readApprovedActionRefusals(working.context);
               const seen = new Set(prior.map((r) => r.approvalId));
               const merged = [
@@ -1100,6 +1117,34 @@ const AgentRuntimeLayer = Layer.effect(
                   } as never,
                 })
                 .pipe(Effect.catchAll(() => Effect.succeed(working)));
+              yield* tx.run(
+                audit.record({
+                  tenantId: working.tenantId,
+                  ticketId: working.id,
+                  actor: { type: "system", id: "agent-runtime" },
+                  action: "approval.bundle_superseded_by_refusal",
+                  details: {
+                    refused: refused.map((r) => ({
+                      approvalId: r.approvalId,
+                      tool: r.tool,
+                      issue: r.issue,
+                    })),
+                    cancelled: superseded,
+                  },
+                }),
+              );
+              // Nothing is left to wait on (everything undecided was just
+              // cancelled — the pre-loop `all` snapshot is stale here, so the
+              // pending gate below must not run): hand the ticket back to the
+              // agent and let the caller re-enter the loop with the refusal
+              // note as its turn-1 observation.
+              working = yield* tickets
+                .transitionStatus(working.id, "in_progress", {
+                  tenantId: working.tenantId,
+                  reason: "approved_action_refused",
+                })
+                .pipe(Effect.catchAll(() => Effect.succeed(working)));
+              return { type: "ApprovedActionRefused" } as const;
             }
             // Per-action approval: NEVER resolve a ticket that still has actions
             // awaiting a decision. The operator may approve some now and decide
