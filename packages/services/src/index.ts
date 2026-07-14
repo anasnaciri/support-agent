@@ -9,6 +9,7 @@ export * from "./superseded-builtin-notes.js";
 export * from "./blocked-senders.js";
 export * from "./shipping-facts.js";
 export * from "./returns-facts.js";
+export * from "./onboarding-state.js";
 export * from "./fact-references.js";
 export * from "./permission-service-live.js";
 export * from "./audit-log.js";

@@ -6,6 +6,7 @@ import { SUPERSEDED_BUILTIN_NOTES } from "./superseded-builtin-notes.js";
 import type { BlockedSenders } from "./blocked-senders.js";
 import type { ShippingFacts } from "./shipping-facts.js";
 import type { ReturnsFacts } from "./returns-facts.js";
+import type { OnboardingState } from "./onboarding-state.js";
 
 // ============================================================
 // TenantRepository
@@ -870,6 +871,13 @@ export class TenantSettings extends Data.Class<{
    * return policy, as they did before this existed.
    */
   readonly returnsFacts?: ReturnsFacts | null;
+  /**
+   * Setup-wizard progress for this workspace. `null` (or absent) means the
+   * tenant is NOT in onboarding — which is exactly how every tenant created
+   * before the wizard shipped stays out of it, with no migration. Only rows
+   * stamped at creation can be pending; see `onboarding-state.ts`.
+   */
+  readonly onboarding?: OnboardingState | null;
 }> {}
 
 export class TenantNotFound extends Data.TaggedError("TenantNotFound")<{
@@ -993,6 +1001,17 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setReturnsFacts: (
       tenantId: TenantId,
       facts: ReturnsFacts | null,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+
+    /**
+     * Replace the workspace's setup-wizard state. The wizard is the only
+     * writer, and it always writes the whole (small) block, so there is no
+     * per-field setter. Same shallow JSONB merge as `setRefundPolicy` —
+     * unrelated settings are preserved.
+     */
+    readonly setOnboardingState: (
+      tenantId: TenantId,
+      state: OnboardingState,
     ) => Effect.Effect<void, TenantRepositoryError>;
   }
 >() {}
@@ -1142,6 +1161,14 @@ export const TenantRepositoryTest = (
           tenantId,
           new TenantSettings({ ...prev, returnsFacts: facts }),
         );
+        return Effect.void;
+      },
+      setOnboardingState: (tenantId, state) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(tenantId, new TenantSettings({ ...prev, onboarding: state }));
         return Effect.void;
       },
     }),

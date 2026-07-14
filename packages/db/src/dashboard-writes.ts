@@ -14,6 +14,7 @@ import {
 import {
   TicketLifecycleWriter,
   TicketLifecycleWriterLive,
+  freshOnboardingState,
   type LegalAcceptance,
   type ResumeTicketOutcome,
   type SetMerchantStatusOutcome,
@@ -438,6 +439,10 @@ export const createTenantForOrg = async (
     settings: {
       notificationEmail: input.notificationEmail,
       legalAcceptance: input.legalAcceptance,
+      // Stamp the setup wizard as pending. Only rows created from here on carry
+      // the key, which is what keeps every pre-wizard workspace out of the
+      // wizard without a migration (see onboarding-state.ts).
+      onboarding: freshOnboardingState(),
     },
   });
   // Seed the all-access Owner role so the creator has a role to assign from
@@ -469,6 +474,10 @@ export const createWorkspaceForOrg = async (
     settings: {
       notificationEmail: input.notificationEmail,
       legalAcceptance: input.legalAcceptance,
+      // Stamp the setup wizard as pending. Only rows created from here on carry
+      // the key, which is what keeps every pre-wizard workspace out of the
+      // wizard without a migration (see onboarding-state.ts).
+      onboarding: freshOnboardingState(),
     },
   });
   await ensureOwnerRole(db, id);

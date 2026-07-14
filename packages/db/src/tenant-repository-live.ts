@@ -5,6 +5,7 @@ import {
   decodeBlockedSenders,
   decodeShippingFacts,
   decodeReturnsFacts,
+  decodeOnboardingState,
   decodeResolutionPolicy,
   defaultRefundPolicy,
   defaultDiscountPolicy,
@@ -16,6 +17,7 @@ import {
   type BlockedSenders,
   type ShippingFacts,
   type ReturnsFacts,
+  type OnboardingState,
   type DiscountPolicy,
   type DiscountPolicyMode,
   type LegalAcceptance,
@@ -226,6 +228,7 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly blockedSenders?: unknown;
                 readonly shippingFacts?: unknown;
                 readonly returnsFacts?: unknown;
+                readonly onboarding?: unknown;
               }
             | null;
           const notificationEmail =
@@ -275,6 +278,9 @@ export const TenantRepositoryLive = Layer.effect(
           // Null for an unconfigured or half-written block — agents then fall
           // back to knowledge.search for the return policy.
           const returnsFacts = decodeReturnsFacts(settings?.returnsFacts);
+          // Null for a tenant that predates the setup wizard — such a row is
+          // never gated into it.
+          const onboarding = decodeOnboardingState(settings?.onboarding);
           return new TenantSettings({
             notificationEmail,
             refundPolicy,
@@ -289,6 +295,7 @@ export const TenantRepositoryLive = Layer.effect(
             shippingFacts,
             addressUpdateAfterFulfillment,
             returnsFacts,
+            onboarding,
           });
         }),
 
@@ -580,6 +587,32 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setReturnsFacts",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setOnboardingState: (tenantId, state: OnboardingState) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          // Same shallow `||` JSONB merge as setRefundPolicy. The wizard owns
+          // the whole block, so a full replace is correct here.
+          const json = JSON.stringify({ onboarding: state });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${json}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setOnboardingState",
                 cause,
               }),
           });
