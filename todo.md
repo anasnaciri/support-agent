@@ -17,6 +17,27 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Manual reopen lands on `waiting_for_customer`; `in_progress` is no
+      longer merchant-settable** (2026-07-14, follow-up to the hand-back
+      dialog below). "Reopen (in progress)" left the ticket showing the
+      "processing" shimmer while nothing would run until the customer's next
+      email — same lie as the old hand-back. `in_progress` is now agent-owned:
+      removed from `MERCHANT_SETTABLE_STATUSES` (manual set → 400
+      `invalid_status`), and the §10 matrix gained `failed →
+      waiting_for_customer` so a failed ticket can reopen-to-waiting directly
+      (resolved/archived already could). The status menu's copy is contextual
+      via the pure `lib/status-menu-labels.ts` (`statusMenuLabel(target,
+      currentStatus)`): "Reopen (wait for customer)" on closed tickets, "Mark
+      waiting on customer" on live ones; `TicketHeaderActions` now takes
+      `ticketStatus`. Consequences: a `human_takeover` ticket's status menu
+      offers only "Mark as failed" (hand-back has its own dialog), and a
+      `failed` ticket's only manual move is reopen-to-waiting. "Processing"
+      UI (chip shimmer + composer beam via `isTicketProcessing`) now appears
+      only when the agent genuinely has a tick queued/running. Verified red →
+      green (agent-core matrix/settable tests, api set-status integration
+      tests, SPA label tests), full suite 3,347 passed, build + SPA typecheck
+      green.
+
 - [x] **Hand-back sets honest expectations: wait-for-customer or retry, never
       a fake "processing"** (2026-07-14). Handing a taken-over ticket back to
       the agent is a pure status flip — no tick runs until the customer's next
