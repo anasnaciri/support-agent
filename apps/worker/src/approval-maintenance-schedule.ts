@@ -266,6 +266,7 @@ const makeReminderNotifier =
             tool: approval.tool,
             proposedInput: approval.proposedInput,
             linkConfig,
+            reminder: true,
           });
           yield* mail.sendApprovalLink(notification.mail).pipe(Effect.ignore);
           if (Option.isSome(maybeNotifications)) {

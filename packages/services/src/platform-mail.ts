@@ -41,6 +41,8 @@ export interface SendApprovalLinkInput {
   readonly draftPreview: string;
   /** What tool is being approved — surfaced in the email subject + body. */
   readonly toolName: string;
+  /** True when this is a maintenance re-notification rather than the first send. */
+  readonly reminder?: boolean;
   /** Fully-qualified one-click approve URL (already signed). */
   readonly approveUrl: string;
   /** Fully-qualified one-click reject URL (already signed). */

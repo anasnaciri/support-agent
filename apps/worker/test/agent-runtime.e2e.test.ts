@@ -5339,7 +5339,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const mailRecord = mailTest.handle.sent[0]!;
     expect(mailRecord.kind).toBe("approval-link");
     expect(mailRecord.input.approvalId).toBe(out.approvalId);
-    expect(mailRecord.input.toolName).toBe("conversation.reply");
+    expect(mailRecord.input.toolName).toBe("Reply to the customer");
     expect(mailRecord.input.approveUrl).toContain(
       `/approvals/${out.approvalId}/approve?token=`,
     );
@@ -6450,7 +6450,7 @@ describe("AgentRuntime — merchant notifications", () => {
     expect(sent.notification.ticketId).toBe(out.ticketId);
     expect(sent.notification.body).toContain("/approve?token=");
     expect(sent.notification.body).toContain("/reject?token=");
-    expect(sent.notification.body).toContain("conversation.reply");
+    expect(sent.notification.body).toContain("Reply to the customer");
   });
 
   it("pings the merchant when the runtime escalates to human_takeover", async () => {

@@ -146,6 +146,38 @@ describe("PlatformMailServiceLive — Resend", () => {
     expect(body.html).toContain(sendInput.rejectUrl);
   });
 
+  it("puts the reminder label at the top of approval emails", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(okResponse());
+    const layer = PlatformMailServiceLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          tenantRepoWith("ops@merchant.com"),
+          resendConfigWith(fetchImpl),
+        ),
+      ),
+    );
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const mail = yield* PlatformMailService;
+          yield* mail.sendApprovalLink({ ...sendInput, reminder: true });
+        }),
+        layer,
+      ),
+    );
+
+    const [, init] = fetchImpl.mock.calls[0]!;
+    const body = JSON.parse(init!.body as string) as {
+      subject: string;
+      text: string;
+      html: string;
+    };
+    expect(body.subject).toMatch(/^\[REMINDER\]/u);
+    expect(body.text).toMatch(/^\[REMINDER\]/u);
+    expect(body.html).toContain("<strong>[REMINDER]</strong>");
+  });
+
   it("fails with PlatformMailUnconfigured when notificationEmail is null", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()

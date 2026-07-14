@@ -98,15 +98,18 @@ export interface ApprovalRequestedNotificationInput {
   readonly draftPreview: string;
   readonly approveUrl: string;
   readonly rejectUrl: string;
+  readonly reminder?: boolean;
 }
 
 export const approvalRequestedNotification = (
   input: ApprovalRequestedNotificationInput,
 ): MerchantNotification => ({
   kind: "approval_requested",
-  title: input.draftSubject
-    ? `Approval needed: ${input.draftSubject}`
-    : `Approval needed (${input.toolName})`,
+  title: `${input.reminder ? "[REMINDER] " : ""}${
+    input.draftSubject
+      ? `Approval needed: ${input.draftSubject}`
+      : `Approval needed (${input.toolName})`
+  }`,
   body: [
     `The agent prepared a "${input.toolName}" action that needs your approval.`,
     ``,

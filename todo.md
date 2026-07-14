@@ -17,6 +17,17 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Merchant approval reminders are visibly labeled and use friendly tool
+      names** (2026-07-14). The approval-maintenance re-notification path now
+      marks rebuilt approval payloads as reminders. Merchant-channel headlines
+      and approval-email subjects start with `[REMINDER]`; email text and HTML
+      also put the label at the top. Both initial approval notifications and
+      reminders resolve the stored tool id through the central
+      `TOOL_DISPLAY_NAMES` registry, so operators see “Reply to the customer”
+      rather than `conversation.reply`. Verified red -> green with notification
+      builder and Resend-rendering regressions, 115 affected tests,
+      `git diff --check`, and `pnpm build`.
+
 - [x] **Post-sign-up setup wizard** (2026-07-14). A merchant who signed up
       landed on an empty dashboard and had to discover eleven settings pages on
       their own. `/welcome` now sequences them: connect store (+ confirm the

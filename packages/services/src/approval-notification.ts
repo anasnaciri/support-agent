@@ -1,4 +1,9 @@
-import type { ApprovalId, TicketId, TenantId } from "@support-agent/agent-core";
+import {
+  toolDisplayName,
+  type ApprovalId,
+  type TicketId,
+  type TenantId,
+} from "@support-agent/agent-core";
 import {
   signApprovalToken,
   signBundleReviewToken,
@@ -41,6 +46,8 @@ export interface BuildApprovalNotificationInput {
   /** The proposed tool input — its bodyText/subject drive the preview. */
   readonly proposedInput: unknown;
   readonly linkConfig: ApprovalLinkParams;
+  /** Mark a maintenance re-notification distinctly from the first send. */
+  readonly reminder?: boolean;
   /** Clock injection for deterministic token signing in tests. */
   readonly nowMs?: number;
 }
@@ -82,19 +89,22 @@ export const buildApprovalNotification = (
   const rejectUrl = `${linkConfig.baseUrl}/approvals/${approvalId}/reject?token=${encodeURIComponent(rejectToken)}`;
   const draftPreview = derivePreview(input.proposedInput);
   const draftSubject = deriveSubject(input.proposedInput);
+  const displayToolName = toolDisplayName(tool);
 
   const mail: SendApprovalLinkInput = {
     tenantId,
     approvalId,
     draftSubject,
     draftPreview,
-    toolName: tool,
+    toolName: displayToolName,
+    ...(input.reminder ? { reminder: true } : {}),
     approveUrl,
     rejectUrl,
   };
   const merchant = approvalRequestedNotification({
     ticketId,
-    toolName: tool,
+    toolName: displayToolName,
+    ...(input.reminder ? { reminder: true } : {}),
     draftSubject,
     draftPreview,
     approveUrl,

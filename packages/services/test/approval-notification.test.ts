@@ -70,12 +70,26 @@ describe("buildApprovalNotification", () => {
     });
     expect(n.draftSubject).toBe("Re: your order");
     expect(n.draftPreview).toBe("We refunded you.");
-    expect(n.mail.toolName).toBe("conversation.reply");
+    expect(n.mail.toolName).toBe("Reply to the customer");
     expect(n.mail.draftSubject).toBe("Re: your order");
     expect(n.mail.approveUrl).toBe(n.approveUrl);
     expect(n.merchant.kind).toBe("approval_requested");
     expect(n.merchant.body).toContain(n.approveUrl);
     expect(n.merchant.body).toContain(n.rejectUrl);
+  });
+
+  it("labels reminders at the top and uses the tool display name", () => {
+    const n = buildApprovalNotification({
+      ...base,
+      proposedInput: { bodyText: "Please review this reply." },
+      reminder: true,
+    });
+
+    expect(n.mail.reminder).toBe(true);
+    expect(n.mail.toolName).toBe("Reply to the customer");
+    expect(n.merchant.title).toMatch(/^\[REMINDER\]/u);
+    expect(n.merchant.body).toContain('"Reply to the customer"');
+    expect(n.merchant.body).not.toContain('"conversation.reply"');
   });
 });
 

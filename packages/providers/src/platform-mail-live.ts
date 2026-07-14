@@ -74,11 +74,15 @@ const renderApprovalEmail = (input: SendApprovalLinkInput): {
   readonly text: string;
   readonly html: string;
 } => {
-  const subject = input.draftSubject
-    ? `Approve reply: ${input.draftSubject}`
-    : `Approve reply (${input.toolName})`;
+  const reminderPrefix = input.reminder ? "[REMINDER] " : "";
+  const subject = `${reminderPrefix}${
+    input.draftSubject
+      ? `Approve reply: ${input.draftSubject}`
+      : `Approve reply (${input.toolName})`
+  }`;
 
   const lines = [
+    ...(input.reminder ? ["[REMINDER]", ``] : []),
     `Your support agent drafted a reply that needs your approval.`,
     ``,
     `Tool: ${input.toolName}`,
@@ -102,6 +106,7 @@ const renderApprovalEmail = (input: SendApprovalLinkInput): {
       .replace(/</gu, "&lt;")
       .replace(/>/gu, "&gt;");
   const html = `<!doctype html><html><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.5;color:#111">
+  ${input.reminder ? "<p><strong>[REMINDER]</strong></p>" : ""}
   <p>Your support agent drafted a reply that needs your approval.</p>
   <p><strong>Tool:</strong> ${escape(input.toolName)}<br>
      <strong>Subject:</strong> ${escape(input.draftSubject ?? "(thread default)")}</p>
