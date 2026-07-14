@@ -233,8 +233,8 @@ export const bindFulfillmentOperatorUserAllTenants = async (
 export const listFulfillmentOperatorWorkspacesForUser = async (
   db: DrizzleDb,
   userDecisionUuid: string,
-): Promise<ReadonlyArray<WorkspaceRow>> =>
-  db
+): Promise<ReadonlyArray<WorkspaceRow>> => {
+  const rows = await db
     .select({
       id: tenants.id,
       name: tenants.name,
@@ -245,6 +245,12 @@ export const listFulfillmentOperatorWorkspacesForUser = async (
     .innerJoin(tenants, eq(tenants.id, fulfillmentOperators.tenantId))
     .where(eq(fulfillmentOperators.userDecisionUuid, userDecisionUuid))
     .orderBy(asc(tenants.createdAt), asc(tenants.id));
+  // Always false: the merchant's setup wizard configures the MERCHANT's
+  // workspace, and a fulfillment partner reaches these rows only through their
+  // walled portal. Whether the merchant still owes onboarding is none of the
+  // partner's business, and must never gate the portal.
+  return rows.map((row) => ({ ...row, onboardingPending: false }));
+};
 
 /**
  * Tenant ids with a still-pending invitation for this email — scopes the

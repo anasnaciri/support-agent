@@ -44,6 +44,8 @@ import type {
   UsageDecisionRow,
   WorkspaceSummary,
   WorkspacesResponse,
+  OnboardingStateView,
+  OnboardingAdvanceInput,
   MePermissionsResponse,
   MembersResponse,
   RolesResponse,
@@ -702,6 +704,28 @@ export const api = {
       method: "POST",
       ctx,
     }),
+
+  // ---- Setup wizard ----
+  onboardingState: (ctx: CallCtx): Promise<OnboardingStateView> =>
+    okBody("/onboarding/state", ctx) as Promise<OnboardingStateView>,
+
+  /**
+   * Record a step outcome and/or move the resume pointer. The pointer-only form
+   * (`{ nextStep }`) is written just before a connector OAuth redirect leaves
+   * the SPA, so the round-trip lands back on the step the merchant left.
+   */
+  onboardingAdvance: (
+    ctx: CallCtx,
+    input: OnboardingAdvanceInput,
+  ): Promise<CallResult> =>
+    call("/onboarding/advance", { method: "POST", body: input, ctx }),
+
+  /** "Set up later" — leave the wizard without finishing it. */
+  onboardingDismiss: (ctx: CallCtx): Promise<CallResult> =>
+    call("/onboarding/dismiss", { method: "POST", ctx }),
+
+  onboardingComplete: (ctx: CallCtx): Promise<CallResult> =>
+    call("/onboarding/complete", { method: "POST", ctx }),
 
   setAgentModel: (ctx: CallCtx, agentId: string, model: string): Promise<CallResult> =>
     call(`/agents/${encodeURIComponent(agentId)}/model`, {

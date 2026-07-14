@@ -15,6 +15,7 @@ export const qk = {
   openRouterPricing: ["openrouter-pricing"] as const, // NOT workspace-scoped
   me: (w: string) => ["me", w] as const,
   fulfillmentOperatorSession: (w: string) => ["fulfillment-operator-session", w] as const,
+  onboarding: (w: string) => ["onboarding", w] as const,
 
   today: (w: string) => ["today", w] as const,
   tickets: (w: string, f: TicketsFilter, page: number, limit: number) =>

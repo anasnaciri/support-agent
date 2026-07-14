@@ -40,6 +40,10 @@ import {
   allowedManualStatusTargets,
   type TicketStatus,
 } from "@support-agent/agent-core";
+import {
+  decodeOnboardingState,
+  onboardingPending,
+} from "@support-agent/services";
 import type { DrizzleDb } from "./client.js";
 import {
   approvals,
@@ -164,6 +168,13 @@ export interface WorkspaceRow {
   readonly name: string;
   readonly createdAt: Date;
   readonly shopifyDomain: string | null;
+  /**
+   * Setup wizard still owed for this workspace. Derived from the row's
+   * `settings.onboarding` block so the dashboard's bootstrap list can gate the
+   * shell without a second round trip. Always false for a workspace created
+   * before the wizard existed (no block).
+   */
+  readonly onboardingPending: boolean;
 }
 
 /**
@@ -173,17 +184,27 @@ export interface WorkspaceRow {
 export const listWorkspacesByWorkosOrg = async (
   db: DrizzleDb,
   organizationId: string,
-): Promise<ReadonlyArray<WorkspaceRow>> =>
-  db
+): Promise<ReadonlyArray<WorkspaceRow>> => {
+  const rows = await db
     .select({
       id: tenants.id,
       name: tenants.name,
       createdAt: tenants.createdAt,
       shopifyDomain: tenants.shopifyDomain,
+      settings: tenants.settings,
     })
     .from(tenants)
     .where(eq(tenants.workosOrganizationId, organizationId))
     .orderBy(...defaultWorkspaceOrder);
+  return rows.map(({ settings, ...row }) => ({
+    ...row,
+    onboardingPending: onboardingPending(
+      decodeOnboardingState(
+        (settings as { readonly onboarding?: unknown } | null)?.onboarding,
+      ),
+    ),
+  }));
+};
 
 /**
  * A single workspace IF the org owns it, else null — the ownership check

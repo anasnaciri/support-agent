@@ -212,6 +212,7 @@ export const handleDashboardWorkspaces = async (
       name: w.name,
       createdAt: w.createdAt.toISOString(),
       shopifyDomain: w.shopifyDomain,
+      onboardingPending: w.onboardingPending,
     })),
     defaultWorkspaceId: workspaces[0]?.id ?? null,
   });

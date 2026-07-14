@@ -755,12 +755,62 @@ export interface WorkspaceSummary {
   readonly createdAt: string;
   /** Connected Shopify shop, or null — the switcher's at-a-glance hint. */
   readonly shopifyDomain: string | null;
+  /**
+   * The workspace was created since the setup wizard shipped and has neither
+   * finished nor dismissed it. The shell reads this to route into `/welcome`,
+   * so it rides on the list the session already fetches (no extra request).
+   * Always `false` for a workspace that predates the wizard.
+   */
+  readonly onboardingPending: boolean;
 }
 
 export interface WorkspacesResponse {
   /** Default first; empty → the org needs onboarding. */
   readonly workspaces: ReadonlyArray<WorkspaceSummary>;
   readonly defaultWorkspaceId: string | null;
+}
+
+// ============================================================
+// Setup wizard — GET /dashboard/onboarding/state, POST advance/dismiss/complete
+// ============================================================
+//
+// Progress through the post-sign-up setup wizard, per workspace. `pending` is
+// the gate the shell reads; `currentStep` is the resume target that survives a
+// connector OAuth round-trip out of the SPA and back.
+
+/** Steps of the wizard, in presentation order (mirrors `ONBOARDING_STEP_KEYS`). */
+export type OnboardingStepKeyView =
+  | "store"
+  | "docs"
+  | "facts"
+  | "policies"
+  | "scenarios"
+  | "llm"
+  | "agent"
+  | "email"
+  | "telegram"
+  | "members"
+  | "fulfillment_partner";
+
+export type OnboardingStepStatusView = "done" | "skipped";
+
+export interface OnboardingStateView {
+  /** Stamped, and neither completed nor dismissed. False for pre-wizard rows. */
+  readonly pending: boolean;
+  /** Per-step outcome; a step absent from the map has not been reached. */
+  readonly steps: Readonly<
+    Partial<Record<OnboardingStepKeyView, OnboardingStepStatusView>>
+  >;
+  readonly currentStep: OnboardingStepKeyView | null;
+  readonly completedAt: string | null;
+  readonly dismissedAt: string | null;
+}
+
+export interface OnboardingAdvanceInput {
+  readonly step?: OnboardingStepKeyView;
+  readonly status?: OnboardingStepStatusView;
+  /** Where the merchant is headed — persisted so a redirect can come back to it. */
+  readonly nextStep?: OnboardingStepKeyView;
 }
 
 // The workspace switcher spans BOTH roles: one person can be a MERCHANT in one

@@ -98,6 +98,12 @@ import {
   handleDashboardFulfillmentOperatorSheet,
   handleDashboardFulfillmentOperatorSheetClear,
 } from "./connect-handlers.js";
+import {
+  handleDashboardOnboardingAdvance,
+  handleDashboardOnboardingComplete,
+  handleDashboardOnboardingDismiss,
+  handleDashboardOnboardingState,
+} from "./onboarding-handlers.js";
 
 export const registerDashboardRoutes = (
   app: FastifyInstance,
@@ -228,6 +234,14 @@ export const registerDashboardRoutes = (
     "The org's workspaces, default first",
     handleDashboardWorkspaces,
   );
+  // Setup wizard. Membership-gated only: these move a bookmark, they configure
+  // nothing — every step's actual save goes through that feature's own
+  // permission-gated endpoint.
+  dashboardGet(
+    "/dashboard/onboarding/state",
+    "Setup wizard progress for this workspace",
+    handleDashboardOnboardingState,
+  );
   // Low-sensitivity resolved settings (refund numbers, currency) consumed by
   // shared UI; the admin pages that EDIT them are redirect-gated and the write
   // endpoints below are permission-gated.
@@ -255,6 +269,21 @@ export const registerDashboardRoutes = (
   );
 
   // ---- Dashboard write API ----
+  dashboardPost(
+    "/dashboard/onboarding/advance",
+    "Record a setup-wizard step outcome / resume pointer",
+    handleDashboardOnboardingAdvance,
+  );
+  dashboardPost(
+    "/dashboard/onboarding/dismiss",
+    "Leave the setup wizard ('Set up later')",
+    handleDashboardOnboardingDismiss,
+  );
+  dashboardPost(
+    "/dashboard/onboarding/complete",
+    "Finish the setup wizard",
+    handleDashboardOnboardingComplete,
+  );
   dashboardPost(
     "/dashboard/approvals/:id/approve",
     "Approve an approval (manager)",
