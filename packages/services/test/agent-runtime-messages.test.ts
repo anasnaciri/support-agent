@@ -368,6 +368,23 @@ describe("buildInitialMessages — untrusted-content framing", () => {
     expect(text).not.toContain("Possible identity mismatch");
   });
 
+  it("asks for the checkout email or phone when the mismatch has a phone basis", () => {
+    const text = textOf(
+      buildInitialMessages(messageReceived("can you check my order?", "Help"), {
+        subject: null,
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          classification: "where_is_order",
+          customerEmail: "asker@somewhere.com",
+          pendingOrderPhone: "14155550123",
+          riskFlags: ["order_customer_mismatch"],
+        },
+      }),
+    );
+    expect(text).toContain("confirm the exact email address or phone number");
+    expect(text).toContain("14155550123");
+  });
+
   it("adds no directive for an ordinary where_is_order ticket (no mismatch flag)", () => {
     const text = textOf(
       buildInitialMessages(messageReceived("where is my order?", "Help"), {

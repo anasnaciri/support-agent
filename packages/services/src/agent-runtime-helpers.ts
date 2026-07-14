@@ -473,7 +473,7 @@ const orderIdentityDirective = (
     .join(", ");
   const wiringNote = wiring ? ` (${wiring})` : "";
   if (context["identityVerified"] === true) {
-    return `[Identity check PASSED${wiringNote}: the customer confirmed the email used to place ${orderRef} and the system verified it. Look up the order and send the status reply now.]`;
+    return `[Identity check PASSED${wiringNote}: the customer confirmed the email address or phone number used to place ${orderRef} and the system verified it. Look up the order and send the status reply now.]`;
   }
   const customerEmail =
     typeof context["customerEmail"] === "string"
@@ -487,7 +487,11 @@ const orderIdentityDirective = (
     customerEmail && orderEmail
       ? `This customer is writing from ${customerEmail}, but ${orderRef} was placed under ${orderEmail}.`
       : `This customer is writing from a different email than the one ${orderRef} was placed under.`;
-  return `[Possible identity mismatch${wiringNote}: ${emailsLine} This is often a harmless typo: a transposed, missing or extra letter usually means the SAME person, but it can also mean someone is asking about another person's order. Use your judgment: if the two addresses are clearly the same person with a small typo, go ahead and share the order status normally. If they look like genuinely different people, do NOT share order details. Instead, ask the customer to confirm the exact email used to place the order via conversation.ask_customer, and only share once it matches. When you are unsure, ask rather than disclose. (Any reply you send on a flagged ticket is reviewed by a human before it goes out, so explain your reasoning.)]`;
+  const phone = normalizePhoneForMatch(context["pendingOrderPhone"]);
+  const phoneLine = phone
+    ? ` The order also has phone number ${phone} on file.`
+    : "";
+  return `[Possible identity mismatch${wiringNote}: ${emailsLine}${phoneLine} This is often a harmless typo: a transposed, missing or extra letter usually means the SAME person, but it can also mean someone is asking about another person's order. Use your judgment: if the two addresses are clearly the same person with a small typo, or the phone number is clearly the same with ordinary formatting differences, go ahead and share the order status normally. If they look like genuinely different people, do NOT share order details. Instead, ask the customer to confirm the exact email address or phone number used to place the order via conversation.ask_customer, and only share once it matches. When you are unsure, ask rather than disclose. (Any reply you send on a flagged ticket is reviewed by a human before it goes out, so explain your reasoning.)]`;
 };
 
 /**
@@ -1337,6 +1341,16 @@ export const normalizeEmailForMatch = (value: unknown): string | null => {
   return v === "" ? null : v;
 };
 
+/** Normalize a phone number for the identity challenge. Keep digits only so
+ * common checkout formatting differences (country-code punctuation, spaces,
+ * and parentheses) do not prevent a match. Invalid/implausibly short or long
+ * values are ignored rather than becoming an identity basis. */
+export const normalizePhoneForMatch = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const digits = value.replace(/\D/g, "");
+  return digits.length >= 7 && digits.length <= 15 ? digits : null;
+};
+
 /**
  * Informal spellings both providers use that neither ISO expansion nor plain
  * normalization reconciles. Keys and values are already normalized (trim /
@@ -1604,6 +1618,7 @@ export const orderCustomerMismatchFlag = (
   orderEmail: unknown,
   orderCustomerId: unknown,
   ticketContext: Record<string, unknown>,
+  orderPhone: unknown = null,
 ): string | null => {
   // The order belongs to the person writing in if EITHER holds:
   //  - CUSTOMER match: it's under the ticket's resolved customer account
@@ -1628,55 +1643,84 @@ export const orderCustomerMismatchFlag = (
   const haveEmailBasis = order !== null && ticketEmail !== null;
   const emailMatch = haveEmailBasis && order === ticketEmail;
 
-  if (customerMatch || emailMatch) return null;
+  const orderPhoneNormalized = normalizePhoneForMatch(orderPhone);
+  const ticketPhone = normalizePhoneForMatch(ticketContext["customerPhone"]);
+  const phoneMatch =
+    orderPhoneNormalized !== null &&
+    ticketPhone !== null &&
+    orderPhoneNormalized === ticketPhone;
+
+  if (customerMatch || emailMatch || phoneMatch) return null;
   // Only flag when we actually had something to compare; otherwise fail OPEN
   // (an unknown order customer / unidentified ticket never raises a false alarm).
-  return haveCustomerBasis || haveEmailBasis ? "order_customer_mismatch" : null;
+  return haveCustomerBasis || haveEmailBasis || orderPhoneNormalized !== null
+    ? "order_customer_mismatch"
+    : null;
 };
 
 /**
  * Deterministic identity check for the order-status verification challenge:
- * does the customer's reply state the email the order was placed under? Pulls
- * email-shaped tokens out of the (untrusted) reply text and matches any against
- * the order email, normalized. Run by the RUNTIME — never the model — so a
- * prompt-injected reply body can't talk its way to a pass. Fails closed (false)
- * on missing inputs.
+ * does the customer's reply state the email address or phone number the order
+ * was placed under? Pulls identifiers out of the (untrusted) reply text and
+ * matches them against the stored order identifier. Run by the RUNTIME — never
+ * the model — so a prompt-injected reply body can't talk its way to a pass.
+ * Fails closed (false) on missing inputs.
  */
 export const replyProvesOrderIdentity = (
   replyText: unknown,
   orderEmail: unknown,
+  orderPhone: unknown = null,
 ): boolean => {
   const target = normalizeEmailForMatch(orderEmail);
-  if (!target || typeof replyText !== "string") return false;
-  const tokens = replyText.toLowerCase().match(/[^\s<>()"']+@[^\s<>()"']+/g);
-  if (!tokens) return false;
-  return tokens.some((t) => t.replace(/[.,;:!?]+$/, "") === target);
+  const phoneTarget = normalizePhoneForMatch(orderPhone);
+  if (typeof replyText !== "string") return false;
+  if (target) {
+    const tokens = replyText
+      .toLowerCase()
+      .match(/[^\s<>()"']+@[^\s<>()"']+/g);
+    if (tokens?.some((t) => t.replace(/[.,;:!?]+$/, "") === target)) {
+      return true;
+    }
+  }
+  if (!phoneTarget) return false;
+  const phoneTokens = replyText.match(/\+?\d[\d\s().-]{5,}\d/g) ?? [];
+  return phoneTokens.some((token) => normalizePhoneForMatch(token) === phoneTarget);
 };
 
 /**
  * Decide, in the runtime (never the model), what to stamp on the ticket when a
  * customer's inbound reply answers the order-status identity challenge. Returns
- * the context patch — `identityVerified` plus the now-confirmed
- * `verifiedCustomerEmail` — when the reply proves the order's email, else null.
+ * the context patch — `identityVerified` plus the now-confirmed trusted email
+ * or phone — when the reply proves the order identifier, else null.
  *
- * The saved `verifiedCustomerEmail` is the TRUSTED order email the runtime
- * stamped at detection (`pendingOrderEmail`, read from the Shopify order), NOT a
- * token lifted out of the (untrusted) reply text — so a prompt-injected body can
- * neither fake a pass ({@link replyProvesOrderIdentity} matches against the order
- * email) nor plant an arbitrary address as the "verified" one. Mirrors the
- * surrounding pure guards so the decision is unit-tested without the runtime;
- * the caller still scopes this to inbound message events and persists the patch.
+ * The saved verified identifier is the TRUSTED order email or phone the runtime
+ * stamped at detection (`pendingOrderEmail` / `pendingOrderPhone`, read from
+ * the Shopify order), NOT a token lifted out of the (untrusted) reply text — so
+ * a prompt-injected body can neither fake a pass nor plant an arbitrary
+ * identifier as the "verified" one. Mirrors the surrounding pure guards so the
+ * decision is unit-tested without the runtime; the caller still scopes this to
+ * inbound message events and persists the patch.
  */
 export const orderIdentityVerificationPatch = (
   replyText: unknown,
   context: Record<string, unknown>,
-): { identityVerified: true; verifiedCustomerEmail: string } | null => {
+):
+  | { identityVerified: true; verifiedCustomerEmail: string }
+  | { identityVerified: true; verifiedCustomerPhone: string }
+  | null => {
   if (context["identityVerified"] === true) return null;
   if (!readRiskFlags(context).includes("order_customer_mismatch")) return null;
   const pending = context["pendingOrderEmail"];
-  if (typeof pending !== "string" || pending.length === 0) return null;
-  if (!replyProvesOrderIdentity(replyText, pending)) return null;
-  return { identityVerified: true, verifiedCustomerEmail: pending };
+  const pendingPhone = normalizePhoneForMatch(context["pendingOrderPhone"]);
+  if (!replyProvesOrderIdentity(replyText, pending, pendingPhone)) return null;
+  if (typeof pending === "string" && pending.length > 0 &&
+      normalizeEmailForMatch(pending)) {
+    return { identityVerified: true, verifiedCustomerEmail: normalizeEmailForMatch(pending)! };
+  }
+  if (pendingPhone) {
+    return { identityVerified: true, verifiedCustomerPhone: pendingPhone };
+  }
+  return null;
 };
 
 /**

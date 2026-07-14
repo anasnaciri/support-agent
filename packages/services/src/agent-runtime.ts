@@ -120,6 +120,7 @@ import {
   orderCustomerMismatchFlag,
   orderIdentityVerificationPatch,
   normalizeEmailForMatch,
+  normalizePhoneForMatch,
   shouldForceReplyApproval,
   riskFor,
   applyOverride,
@@ -1393,18 +1394,18 @@ const AgentRuntimeLayer = Layer.effect(
 
           // 2a-bis. Order-status identity verification — when a customer replies
           // to a ticket we flagged as an order/customer mismatch, check (in the
-          // runtime, never the model) whether their reply states the email the
+          // runtime, never the model) whether their reply states the email or phone
           // order was placed under. A match clears the disclosure gate so the
           // status reply can proceed automatically; a miss leaves the ticket gated
           // (the reply still routes to human approval via the backstop at the
-          // permission check). Keyed off `pendingOrderEmail`, persisted at
+          // permission check). Keyed off `pendingOrderEmail` / `pendingOrderPhone`, persisted at
           // detection time. Best-effort: a write failure simply leaves the gate
-          // up. The model cannot set `identityVerified`/`verifiedCustomerEmail` —
+          // up. The model cannot set identity verification fields —
           // they're stamped here and absent from the ticket.update_context
           // allowlist — so a prompt-injected reply body can't fake a pass. The
-          // saved `verifiedCustomerEmail` is the TRUSTED order email, surfaced on
-          // the ticket (Context panel + Customer card) once the requester confirms
-          // it; see `orderIdentityVerificationPatch`.
+          // saved verified identifier is the TRUSTED order email/phone, surfaced on
+          // the ticket once the requester confirms it; see
+          // `orderIdentityVerificationPatch`.
           if (
             event.type === "message.received" ||
             event.type === "customer.replied"
@@ -2673,7 +2674,7 @@ const AgentRuntimeLayer = Layer.effect(
                   // Order-status identity guard (where_is_order flow only): if the
                   // looked-up order belongs to a different customer than the one
                   // writing in, stamp a risk flag so the reply is gated + the
-                  // dashboard warns, and persist the order's email so the customer's
+                  // dashboard warns, and persist the order's email/phone so the customer's
                   // later confirmation reply can be verified by the runtime (not the
                   // model). Additive + best-effort — a write failure never blocks
                   // the tick, and a fail-open (null) result leaves the ticket alone.
@@ -2682,16 +2683,31 @@ const AgentRuntimeLayer = Layer.effect(
                       typeof o["customerId"] === "string"
                         ? (o["customerId"] as string)
                         : null;
+                    const orderPhone =
+                      o["shippingAddress"] &&
+                      typeof o["shippingAddress"] === "object"
+                        ? (o["shippingAddress"] as Record<string, unknown>)[
+                            "phone"
+                          ]
+                        : null;
                     const mismatchFlag = orderCustomerMismatchFlag(
                       email,
                       orderCustomerId,
                       current.context,
+                      orderPhone,
                     );
                     if (mismatchFlag) {
                       const existingFlags = readRiskFlags(current.context);
                       const patch: Record<string, unknown> = {
                         ...current.context,
                         pendingOrderEmail: normalizeEmailForMatch(email),
+                        pendingOrderPhone:
+                          o["shippingAddress"] &&
+                          typeof o["shippingAddress"] === "object"
+                            ? normalizePhoneForMatch(
+                                (o["shippingAddress"] as Record<string, unknown>)["phone"],
+                              )
+                            : null,
                       };
                       if (!existingFlags.includes(mismatchFlag)) {
                         patch["riskFlags"] = [...existingFlags, mismatchFlag];

@@ -6451,6 +6451,7 @@ describe("AgentRuntime — merchant notifications", () => {
     expect(sent.notification.body).toContain("/approve?token=");
     expect(sent.notification.body).toContain("/reject?token=");
     expect(sent.notification.body).toContain("Reply to the customer");
+    expect(sent.notification.body).not.toContain("conversation.reply");
   });
 
   it("pings the merchant when the runtime escalates to human_takeover", async () => {

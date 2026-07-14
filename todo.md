@@ -17,11 +17,22 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Order identity verification accepts the checkout phone number**
+      (2026-07-14). The deterministic runtime guard now compares normalized
+      phone numbers as well as customer ids and email addresses, persists the
+      trusted checkout phone on a mismatch, and accepts a later customer reply
+      only when it states that exact number. Ordinary spaces, punctuation, and
+      parentheses do not prevent a match; implausibly short or long values are
+      ignored. Agent prompts and mismatch directives ask for either the exact
+      checkout email address or phone number without disclosing private order
+      details. Verified with 159 focused service/worker tests,
+      `git diff --check`, and `pnpm build`.
+
 - [x] **Merchant approval reminders are visibly labeled and use friendly tool
       names** (2026-07-14). The approval-maintenance re-notification path now
-      marks rebuilt approval payloads as reminders. Merchant-channel headlines
-      and approval-email subjects start with `[REMINDER]`; email text and HTML
-      also put the label at the top. Both initial approval notifications and
+      marks rebuilt approval payloads as reminders. Telegram headlines and
+      approval-email subjects start with `[REMINDER]`; email text and HTML also
+      put the label at the top. Both initial Telegram approval messages and
       reminders resolve the stored tool id through the central
       `TOOL_DISPLAY_NAMES` registry, so operators see “Reply to the customer”
       rather than `conversation.reply`. Verified red -> green with notification

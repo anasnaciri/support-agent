@@ -141,6 +141,20 @@ describe("orderCustomerMismatchFlag", () => {
     ).toBeNull();
   });
 
+  it("matches by phone when the order has no usable customer id", () => {
+    expect(
+      orderCustomerMismatchFlag(
+        "other-email@example.com",
+        null,
+        {
+          customerEmail: "asker@somewhere.com",
+          customerPhone: "+1 (415) 555-0123",
+        },
+        "+14155550123",
+      ),
+    ).toBeNull();
+  });
+
   it("still flags when the order belongs to a DIFFERENT customer than the ticket resolved", () => {
     expect(
       orderCustomerMismatchFlag(
@@ -205,6 +219,22 @@ describe("replyProvesOrderIdentity", () => {
   it("fails when the reply contains no email", () => {
     expect(
       replyProvesOrderIdentity("yes that's my order, thanks", orderEmail),
+    ).toBe(false);
+  });
+
+  it("passes when the reply states the order's phone number", () => {
+    expect(
+      replyProvesOrderIdentity(
+        "I placed it using +1 (415) 555-0123.",
+        null,
+        "+14155550123",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not accept a different phone number", () => {
+    expect(
+      replyProvesOrderIdentity("The number was +1 415 555 9999.", null, "+14155550123"),
     ).toBe(false);
   });
 
@@ -280,6 +310,22 @@ describe("orderIdentityVerificationPatch", () => {
         riskFlags: ["order_customer_mismatch"],
       }),
     ).toBeNull();
+  });
+
+  it("verifies a phone-only order and saves the trusted phone", () => {
+    expect(
+      orderIdentityVerificationPatch(
+        "I used +1 (415) 555-0123 at checkout.",
+        {
+          classification: "where_is_order",
+          riskFlags: ["order_customer_mismatch"],
+          pendingOrderPhone: "+14155550123",
+        },
+      ),
+    ).toEqual({
+      identityVerified: true,
+      verifiedCustomerPhone: "14155550123",
+    });
   });
 });
 
