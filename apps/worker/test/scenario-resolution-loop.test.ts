@@ -2,12 +2,16 @@ import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
+  CustomerId,
+  OrderId,
+  OrderUpdateFailed,
   PermissionServiceDefault,
   TenantId,
   ToolRegistryWith,
   UserId,
   type AgentConfig,
   type LLMDecision,
+  type ShopifyOrder,
   type TicketId,
 } from "@support-agent/agent-core";
 import { ALL_TOOLS } from "@support-agent/tools";
@@ -2040,5 +2044,273 @@ describe("re-engagement supersedes stale drafts", () => {
     expect(new Set(out.pending.map((a) => a.tool))).toEqual(
       new Set(["refund.create", "conversation.reply"]),
     );
+  });
+});
+
+// ------------------------------------------------------------
+// Approved-action guard refusals — a deterministic pre-write refusal
+// (ToolPreconditionFailed, e.g. the order was fulfilled while the approval
+// sat pending) is an OBSERVATION for the agent, not a platform failure: the
+// runtime re-enters the loop so the agent redrafts and tells the customer,
+// instead of parking `approved_tool_failed` (prod ticket 9d3d968d: the
+// approved "already fulfilled, can't change it" reply was stranded behind
+// exactly this park). Unexpected failures keep the park.
+// ------------------------------------------------------------
+const SHIP_ORDER = "gid://shopify/Order/9101";
+
+const shipOrder = (fulfilled: boolean): ShopifyOrder => ({
+  id: OrderId(SHIP_ORDER),
+  name: "#1015",
+  confirmationNumber: null,
+  email: "cust@example.com",
+  customerId: CustomerId("gid://shopify/Customer/777"),
+  fulfillmentStatus: fulfilled ? "in_transit" : "unfulfilled",
+  financialStatus: "paid",
+  cancelledAt: null,
+  totalPrice: { amount: "29.99", currencyCode: "USD" },
+  shippingAddress: {
+    name: "Jane Doe",
+    address1: "123 Main",
+    address2: null,
+    city: "Brooklyn",
+    province: "NY",
+    country: "US",
+    zip: "11201",
+    phone: null,
+  },
+  lineItems: [],
+  fulfillments: fulfilled
+    ? [
+        {
+          id: "f-1",
+          status: "in_transit",
+          trackingCompany: "UPS",
+          trackingNumbers: ["1Z999"],
+          trackingUrls: [],
+          estimatedDeliveryAt: null,
+          deliveredAt: null,
+          createdAt: new Date("2026-07-12T00:00:00.000Z"),
+          updatedAt: new Date("2026-07-12T00:00:00.000Z"),
+        },
+      ]
+    : [],
+  createdAt: new Date("2026-07-11T00:00:00.000Z"),
+  updatedAt: new Date("2026-07-12T00:00:00.000Z"),
+});
+
+const addressAgent = () =>
+  loopAgent({
+    tools: [
+      "order.update_shipping_address",
+      "conversation.reply",
+      "ticket.update_context",
+    ],
+    permissionOverrides: {
+      "order.update_shipping_address": "ask",
+      "conversation.reply": "ask",
+    },
+  });
+
+const seedApprovedAddressUpdate = (
+  repo: typeof TicketRepository.Service,
+  approvals: typeof ApprovalService.Service,
+) =>
+  Effect.gen(function* () {
+    const created = yield* seedParkedTicket(repo);
+    const approval = yield* approvals.create({
+      tenantId: TenantId(TENANT),
+      ticketId: created.id,
+      agentId: AGENT_ID,
+      tool: "order.update_shipping_address",
+      proposedInput: { orderId: SHIP_ORDER, address1: "500 New St" },
+      reasoning: "customer moved",
+      riskLevel: "medium",
+      expiresAt: EXPIRES,
+    });
+    yield* approvals.approve({
+      id: approval.id,
+      decidedBy: MGR,
+      tenantId: TenantId(TENANT),
+    });
+    return { created, approval };
+  });
+
+describe("approved action refused by its own guard — the agent adapts instead of parking", () => {
+  it("re-enters the loop with the refusal, queues a redraft, and does not park", async () => {
+    const convo = makeConversationServiceTest({});
+    // Capture what the re-entered agent is told, and script its redraft.
+    const seenUserMessages: string[] = [];
+    const llmLayer = LLMServiceFromFn((req, ctx) => {
+      seenUserMessages.push(
+        req.messages
+          .filter((m) => m.role === "user")
+          .map((m) => String(m.content))
+          .join("\n"),
+      );
+      return Effect.succeed(
+        ctx.callIndex === 0
+          ? ({
+              type: "tool_call",
+              callId: "r1",
+              tool: "conversation.reply",
+              input: replyInput("draft-correct-1", "cust@example.com"),
+            } as const)
+          : ({
+              type: "final_message",
+              text: "Queued the corrected reply.",
+            } as const),
+      );
+    });
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const approvals = yield* ApprovalService;
+          const { created, approval } = yield* seedApprovedAddressUpdate(
+            repo,
+            approvals,
+          );
+
+          const result = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: approval.id as never,
+            ticketId: created.id,
+            managerId: MGR,
+          });
+
+          const final = yield* repo.getById(created.id);
+          const decided = yield* approvals.getById(
+            approval.id,
+            TenantId(TENANT),
+          );
+          const pending = yield* approvals.listPending(TenantId(TENANT));
+          return { result, final, decided, pending };
+        }),
+        partialLayer(
+          convo,
+          [
+            llmLayer,
+            ShopifyServiceTest({
+              orders: new Map([[OrderId(SHIP_ORDER), shipOrder(true)]]),
+            }),
+          ],
+          defaultTenantSettings,
+          addressAgent(),
+        ),
+      ),
+    );
+
+    // No human takeover: the loop re-entered and queued the corrective reply.
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.final.status).toBe("waiting_for_approval");
+    expect(out.pending.map((a) => a.tool)).toEqual(["conversation.reply"]);
+    // The refused approval is retired (a later bundle can't re-run it).
+    expect(out.decided.resumedAt).not.toBeNull();
+    // Nothing was sent to the customer by the runtime itself.
+    expect(convo.handle.sent).toHaveLength(0);
+    // The agent was told which action was refused and why.
+    expect(seenUserMessages[0]).toMatch(/order\.update_shipping_address/);
+    expect(seenUserMessages[0]).toMatch(/fulfil/i);
+  });
+
+  it("still parks approved_tool_failed on an unexpected tool failure", async () => {
+    const convo = makeConversationServiceTest({});
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const approvals = yield* ApprovalService;
+          const { created, approval } = yield* seedApprovedAddressUpdate(
+            repo,
+            approvals,
+          );
+          const result = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: approval.id as never,
+            ticketId: created.id,
+            managerId: MGR,
+          });
+          const final = yield* repo.getById(created.id);
+          return { result, final };
+        }),
+        partialLayer(
+          convo,
+          [
+            // Unfulfilled order (guard passes) + the Shopify write blows up.
+            ShopifyServiceTest({
+              orders: new Map([[OrderId(SHIP_ORDER), shipOrder(false)]]),
+              updateOrderShippingAddress: () =>
+                Effect.fail(
+                  new OrderUpdateFailed({
+                    orderId: OrderId(SHIP_ORDER),
+                    code: null,
+                    message: "boom",
+                  }),
+                ),
+            }),
+          ],
+          defaultTenantSettings,
+          addressAgent(),
+        ),
+      ),
+    );
+
+    expect(out.result).toEqual({
+      type: "HumanTakeoverRequired",
+      reason: "approved tool order.update_shipping_address failed",
+    });
+    expect(out.final.status).toBe("human_takeover");
+  });
+
+  it("executes the approved update on a fulfilled order when the tenant declares the capability", async () => {
+    const convo = makeConversationServiceTest({});
+    const capability = new TenantSettings({
+      ...defaultTenantSettings,
+      addressUpdateAfterFulfillment: true,
+    });
+    const captured: Array<{ orderId: string }> = [];
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const approvals = yield* ApprovalService;
+          const { created, approval } = yield* seedApprovedAddressUpdate(
+            repo,
+            approvals,
+          );
+          const result = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: approval.id as never,
+            ticketId: created.id,
+            managerId: MGR,
+          });
+          const final = yield* repo.getById(created.id);
+          return { result, final };
+        }),
+        partialLayer(
+          convo,
+          [
+            ShopifyServiceTest({
+              orders: new Map([[OrderId(SHIP_ORDER), shipOrder(true)]]),
+              updateOrderShippingAddress: (input) => {
+                captured.push({ orderId: input.orderId });
+                return Effect.succeed(input.address);
+              },
+            }),
+          ],
+          capability,
+          addressAgent(),
+        ),
+      ),
+    );
+
+    // The guard stepped aside; the bundle completed and resolved normally.
+    expect(captured).toHaveLength(1);
+    expect(out.result.type).toBe("Completed");
+    expect(out.final.status).toBe("resolved");
   });
 });

@@ -121,6 +121,9 @@ import {
   applyOverride,
   specialistsCallableFrom,
   effectiveHandoffIds,
+  readApprovedActionRefusals,
+  toolPreconditionIssue,
+  type ApprovedActionRefusal,
 } from "./agent-runtime-helpers.js";
 
 // ============================================================
@@ -634,7 +637,8 @@ const AgentRuntimeLayer = Layer.effect(
           event: Extract<DomainEvent, { type: "approval.approved" }>,
         ): Effect.Effect<
           | WorkflowResult
-          | { readonly ok: true; readonly tool: string; readonly result: unknown },
+          | { readonly ok: true; readonly tool: string; readonly result: unknown }
+          | { readonly refused: ApprovedActionRefusal },
           unknown
         > =>
           Effect.gen(function* () {
@@ -819,13 +823,22 @@ const AgentRuntimeLayer = Layer.effect(
                     },
                   });
                   // Marker shares the tx with the audit row (audit C2):
-                  // both commit or neither does.
+                  // both commit or neither does. A precondition refusal writes
+                  // NO marker: the guard ran BEFORE any side effect, so there
+                  // is nothing to dedup — and a failed marker under the tool's
+                  // input-derived idempotency key would wrongly block a later,
+                  // legitimate re-proposal of the same action (e.g. after the
+                  // merchant declares the after-fulfillment capability).
                   const deferFailedReplyMarker =
                     result._tag === "Left" &&
                     isReplyDeliverySendFailure(approval.tool, result.left);
+                  const preconditionRefused =
+                    result._tag === "Left" &&
+                    toolPreconditionIssue(result.left) !== null;
                   if (
                     Option.isSome(maybeExecutions) &&
-                    !deferFailedReplyMarker
+                    !deferFailedReplyMarker &&
+                    !preconditionRefused
                   ) {
                     yield* maybeExecutions.value
                       .record({
@@ -854,6 +867,23 @@ const AgentRuntimeLayer = Layer.effect(
               .markResumed(approval.id, working.tenantId)
               .pipe(Effect.catchAll(() => Effect.void));
             if (exec._tag === "Left") {
+              // A guard refusal (ToolPreconditionFailed) is NOT a platform
+              // failure: the world changed while the approval sat pending
+              // (e.g. the merchant fulfilled the order) and the tool's own
+              // pre-write check said no, before any side effect. Hand it back
+              // to the caller as an observation — the bundle continues, and
+              // the agent re-enters the loop to redraft and tell the customer
+              // instead of the ticket parking for a human.
+              const refusedIssue = toolPreconditionIssue(exec.left);
+              if (refusedIssue !== null) {
+                return {
+                  refused: {
+                    approvalId: approval.id,
+                    tool: approval.tool,
+                    issue: refusedIssue,
+                  },
+                } as const;
+              }
               // Tool failed AFTER approval — park the ticket in human_takeover
               // so someone can intervene. The approval row is already
               // approved, which is the right audit shape (the manager said
@@ -1035,12 +1065,41 @@ const AgentRuntimeLayer = Layer.effect(
             }
             const ran: Array<{ readonly tool: string; readonly result: unknown }> =
               [];
+            const refused: ApprovedActionRefusal[] = [];
             for (const approval of bundle) {
               const outcome = yield* executeOneApproval(approval, event);
+              // A guard refusal doesn't stop the bundle: the row is audited +
+              // retired, the rest still run (prod 9d3d968d: stopping stranded
+              // the approved "already fulfilled" reply behind the failed
+              // address update). Collected; the agent re-enters below.
+              if ("refused" in outcome) {
+                refused.push(outcome.refused);
+                continue;
+              }
               // A WorkflowResult (no `ok`) means this action failed / couldn't
               // run; the ticket is already parked. Stop — don't run later actions.
               if (!("ok" in outcome)) return outcome;
               ran.push({ tool: outcome.tool, result: outcome.result });
+            }
+            // Persist the refusal note BEFORE any status decision: it must
+            // survive a partially-decided bundle (rows still pending) so the
+            // FINAL decision round still re-enters the agent with it, and a
+            // crash-redelivery can't lose it. Deduped by approvalId.
+            if (refused.length > 0) {
+              const prior = readApprovedActionRefusals(working.context);
+              const seen = new Set(prior.map((r) => r.approvalId));
+              const merged = [
+                ...prior,
+                ...refused.filter((r) => !seen.has(r.approvalId)),
+              ];
+              working = yield* tickets
+                .update(working.id, {
+                  context: {
+                    ...working.context,
+                    approvedActionRefusals: merged,
+                  } as never,
+                })
+                .pipe(Effect.catchAll(() => Effect.succeed(working)));
             }
             // Per-action approval: NEVER resolve a ticket that still has actions
             // awaiting a decision. The operator may approve some now and decide
@@ -1053,6 +1112,21 @@ const AgentRuntimeLayer = Layer.effect(
                 type: "PausedWaitingForApproval",
                 approvalId: stillPending[0]!.id,
               } as const;
+            }
+            // Every row is decided and at least one approved action was
+            // refused by its guard (this round or a prior partial one): the
+            // ticket must NOT resolve — the customer likely holds a promise
+            // the refusal broke. Move it back to the agent and let the
+            // caller re-enter the loop; the refusal note on the context
+            // becomes the agent's turn-1 observation.
+            if (readApprovedActionRefusals(working.context).length > 0) {
+              working = yield* tickets
+                .transitionStatus(working.id, "in_progress", {
+                  tenantId: working.tenantId,
+                  reason: "approved_action_refused",
+                })
+                .pipe(Effect.catchAll(() => Effect.succeed(working)));
+              return { type: "ApprovedActionRefused" } as const;
             }
             // All actions decided. If one was a fulfillmentOperator escalation, the ticket is
             // now waiting on the FULFILLMENT_OPERATOR (not done): park `waiting_for_fulfillment_operator`
@@ -3159,7 +3233,36 @@ const AgentRuntimeLayer = Layer.effect(
         });
 
         if (event.type === "approval.approved") {
-          return yield* resumeApprovedTool(event);
+          const resumed = yield* resumeApprovedTool(event);
+          if (resumed.type !== "ApprovedActionRefused") {
+            return resumed;
+          }
+          // A guard refused an approved action (the world changed while the
+          // approval sat pending). The ticket is back `in_progress` and the
+          // refusal note is stamped on its context — re-enter the agent loop
+          // so the agent observes the refusal and redrafts for the customer,
+          // instead of parking `approved_tool_failed`. Skips enrich/park
+          // guards deliberately: this ticket is mid-flight, not fresh inbound.
+          const rerun = yield* runAgentLoop;
+          // Consume the note so a LATER, unrelated approval round doesn't
+          // re-trigger this path or re-tell a stale refusal. Best-effort on a
+          // fresh read — the loop may have rewritten context meanwhile.
+          yield* tickets
+            .getById(working.id)
+            .pipe(
+              Effect.flatMap((fresh) => {
+                if (!("approvedActionRefusals" in fresh.context)) {
+                  return Effect.void;
+                }
+                const { approvedActionRefusals: _consumed, ...rest } =
+                  fresh.context;
+                return Effect.asVoid(
+                  tickets.update(working.id, { context: rest as never }),
+                );
+              }),
+              Effect.catchAll(() => Effect.void),
+            );
+          return rerun;
         }
         if (event.type === "approval.rejected") {
           return yield* handleApprovalRejected(event);

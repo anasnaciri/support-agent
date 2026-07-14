@@ -608,6 +608,76 @@ describe("shouldPrefetchThread", () => {
     // before it reaches the loop.
     expect(shouldPrefetchThread("manual.takeover")).toBe(false);
   });
+
+  it("prefetches on approval.approved (loop only re-enters on a guard refusal)", () => {
+    // The normal approval resume short-circuits before the loop; the loop
+    // only runs when a guard refused an approved action, and the agent must
+    // then reconcile what it already told the customer.
+    expect(shouldPrefetchThread("approval.approved")).toBe(true);
+  });
+});
+
+describe("buildInitialMessages — approval.approved after a guard refusal", () => {
+  const approvedEvent: DomainEvent = {
+    type: "approval.approved",
+    ticketId: TicketId("c-1"),
+    approvalId: "appr-1" as never,
+    managerId: "manager-1" as never,
+  };
+
+  it("names the refused action and instructs an honest customer reply", () => {
+    const text = textOf(
+      buildInitialMessages(approvedEvent, {
+        subject: "Change my address",
+        threadId: ThreadId("gmail:t-1"),
+        context: {
+          approvedActionRefusals: [
+            {
+              approvalId: "appr-1",
+              tool: "order.update_shipping_address",
+              issue: "OrderAlreadyFulfilled",
+            },
+          ],
+        },
+      }),
+    );
+    expect(text).toContain("threadId=gmail:t-1");
+    expect(text).toContain("order.update_shipping_address");
+    // The issue key is rendered as a merchant-readable sentence.
+    expect(text).toMatch(/already been fulfilled/i);
+    // The agent is steered to correct the customer, not to retry the action.
+    expect(text).toMatch(/could not be performed/i);
+    expect(text).toMatch(/Do NOT retry/i);
+    // And to end in a concrete tool action, not a plain message.
+    expect(text).toMatch(/Do NOT finish by writing your answer/i);
+  });
+
+  it("falls back to the raw issue key for an unknown refusal", () => {
+    const text = textOf(
+      buildInitialMessages(approvedEvent, {
+        subject: null,
+        threadId: null,
+        context: {
+          approvedActionRefusals: [
+            { approvalId: "a1", tool: "order.cancel", issue: "SomeNewGuard" },
+          ],
+        },
+      }),
+    );
+    expect(text).toContain("order.cancel");
+    expect(text).toContain("SomeNewGuard");
+  });
+
+  it("ignores a malformed refusal note (junk context decodes to none)", () => {
+    const text = textOf(
+      buildInitialMessages(approvedEvent, {
+        subject: null,
+        threadId: null,
+        context: { approvedActionRefusals: [{ nope: true }, "junk"] },
+      }),
+    );
+    expect(text).not.toMatch(/could not be performed/i);
+  });
 });
 
 describe("buildInitialMessages — fulfillment_operator.updated with an inlined thread transcript", () => {

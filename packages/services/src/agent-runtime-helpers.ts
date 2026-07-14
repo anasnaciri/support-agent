@@ -617,6 +617,10 @@ export const inboundCustomerPhone = (
  *   conversation. Without the thread the agent cannot recall what it already
  *   promised the customer (prod ticket 4746d9d6: it re-hunted the order across
  *   two turns before it could act).
+ * `approval.approved` — only reaches the loop when an approved action was
+ *   refused by its own guard (see `readApprovedActionRefusals`); the agent
+ *   must reconcile what it already told the customer with what could not be
+ *   done, which takes the real conversation.
  *
  * Everything else either carries its own message payload (`ticket.created`,
  * `customer.replied`, `message.received`) or never reaches the loop at all
@@ -624,7 +628,70 @@ export const inboundCustomerPhone = (
  * holds every event).
  */
 export const shouldPrefetchThread = (event: DomainEventType): boolean =>
-  event === "ticket.resumed" || event === "fulfillment_operator.updated";
+  event === "ticket.resumed" ||
+  event === "fulfillment_operator.updated" ||
+  event === "approval.approved";
+
+/**
+ * A guard refusal recorded on the ticket context when an APPROVED action's
+ * own precondition check said no (`ToolPreconditionFailed` — e.g. the order
+ * was fulfilled while the approval sat pending). Stamped by the approval
+ * resume, rendered into the re-entered agent's turn-1 message, and cleared
+ * once that loop has run.
+ */
+export interface ApprovedActionRefusal {
+  readonly approvalId: string;
+  readonly tool: string;
+  readonly issue: string;
+}
+
+const APPROVED_ACTION_REFUSALS_KEY = "approvedActionRefusals";
+
+/** Validating reader for `context.approvedActionRefusals` — junk decodes to []. */
+export const readApprovedActionRefusals = (
+  context: Record<string, unknown>,
+): ReadonlyArray<ApprovedActionRefusal> => {
+  const raw = context[APPROVED_ACTION_REFUSALS_KEY];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (r): r is ApprovedActionRefusal =>
+      typeof r === "object" &&
+      r !== null &&
+      typeof (r as Record<string, unknown>)["approvalId"] === "string" &&
+      typeof (r as Record<string, unknown>)["tool"] === "string" &&
+      typeof (r as Record<string, unknown>)["issue"] === "string",
+  );
+};
+
+/**
+ * The `ToolPreconditionFailed` issue key, or null for any other failure.
+ * The runtime branches on this at the approval resume: a refusal re-enters
+ * the agent loop; anything else parks `approved_tool_failed`.
+ */
+export const toolPreconditionIssue = (left: unknown): string | null => {
+  const e = left as { readonly _tag?: unknown; readonly issue?: unknown } | null;
+  return typeof e === "object" &&
+    e !== null &&
+    e._tag === "ToolPreconditionFailed" &&
+    typeof e.issue === "string"
+    ? e.issue
+    : null;
+};
+
+/**
+ * Merchant-readable sentence per refusal issue key, rendered into the
+ * re-entered agent's prompt. Unknown keys fall back to the raw key — the
+ * agent still learns WHICH action failed and can say so honestly.
+ */
+const REFUSAL_SENTENCE: Record<string, string> = {
+  OrderAlreadyFulfilled:
+    "the order has already been fulfilled (it shipped), so the change could not be applied",
+  OrderCancelled: "the order has been cancelled",
+  NothingToUpdate: "there was nothing to change",
+};
+
+export const refusalSentence = (issue: string): string =>
+  REFUSAL_SENTENCE[issue] ?? issue;
 
 export const buildInitialMessages = (
   event: DomainEvent,
@@ -782,6 +849,63 @@ export const buildInitialMessages = (
         transcript
           ? "Re-read the full conversation above and take into account what has already been said and done. Then take a concrete next action with your tools (reply to the customer, ask them a question, escalate, or hand off). Do NOT finish by writing your answer as a plain message."
           : "Start by calling conversation.fetch_thread with the threadId above to review the conversation so far, then take a concrete next action with your tools (reply, ask the customer, escalate, or hand off). Do NOT finish by writing your answer as a plain message.",
+      );
+    }
+    return [{ role: "user", content: parts.join("\n\n") }];
+  }
+  if (event.type === "approval.approved") {
+    // Only reached when an approved action was refused by its own guard
+    // (`ToolPreconditionFailed`): the runtime stamps the refusal(s) on the
+    // ticket context and re-enters the loop instead of parking
+    // `approved_tool_failed`. The agent must tell the customer honestly what
+    // could not be done (and correct any earlier reply that promised it) —
+    // prod ticket 9d3d968d: the approved "already fulfilled, can't change
+    // it" reply was stranded behind exactly this park.
+    const refusals = readApprovedActionRefusals(ticketRow.context);
+    const parts: string[] = [];
+    if (ticketRow.threadId) {
+      parts.push(`[Thread context: threadId=${ticketRow.threadId}]`);
+    }
+    parts.push(
+      "(system event: approval.approved)",
+      refusals.length > 0
+        ? [
+            "A manager approved your queued action(s), but the following could NOT be performed:",
+            ...refusals.map(
+              (r) => `- ${r.tool}: ${refusalSentence(r.issue)}`,
+            ),
+            "The situation changed after you proposed the action. Re-orient on the conversation, then reply to the CUSTOMER honestly about what could and could not be done (for example: the shipping address could not be changed because the order had already shipped). If an earlier reply promised the refused action, correct it. Do NOT retry the refused action unless something material has changed.",
+          ].join("\n")
+        : "A manager approved your queued action(s). Re-orient on the conversation and take the next concrete step.",
+    );
+    if (ticketSubject) {
+      parts.push(`Subject: ${ticketSubject}`);
+    }
+    // Same trusted directive/facts pair (and precedence) as every other
+    // agent-facing branch.
+    const directive =
+      orderIdentityDirective(ticketRow.context, ticketRow.threadId) ||
+      boundOrderDirective(ticketRow.context);
+    if (directive) {
+      parts.push(directive);
+    }
+    const facts = ticketFactsHeader(ticketRow.context);
+    if (facts) {
+      parts.push(facts);
+    }
+    const transcript = ticketRow.threadTranscript?.trim();
+    if (transcript) {
+      parts.push(
+        `Conversation so far (oldest first; includes replies already sent):\n${wrapUntrusted(
+          transcript,
+        )}`,
+      );
+    }
+    if (ticketRow.threadId) {
+      parts.push(
+        transcript
+          ? "Take a concrete next action with your tools (reply to the customer, ask them a question, escalate, or hand off). Do NOT finish by writing your answer as a plain message."
+          : "Start by calling conversation.fetch_thread with the threadId above to review the conversation so far, then take a concrete next action with your tools. Do NOT finish by writing your answer as a plain message.",
       );
     }
     return [{ role: "user", content: parts.join("\n\n") }];
@@ -1092,6 +1216,15 @@ export const toolFailureAuditDetail = (
       .join(",")
       .slice(0, 200);
     if (joined) return { error: joined };
+  }
+  // ToolPreconditionFailed carries its refusal key in `issue` — record THAT
+  // (e.g. "OrderAlreadyFulfilled"), not the class tag, same shape the issues
+  // branch above produces. Same truncate-at-`:` PII discipline.
+  {
+    const issue = (e as { readonly issue?: unknown }).issue;
+    if (typeof issue === "string" && issue) {
+      return { error: (issue.split(":")[0] ?? issue).slice(0, 200) };
+    }
   }
   if (typeof e._tag === "string" && e._tag) return { error: e._tag };
   // Non-tagged failures (a bare Error from the connector, an SMTP error): keep a
