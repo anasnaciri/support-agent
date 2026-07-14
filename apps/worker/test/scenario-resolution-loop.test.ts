@@ -2111,6 +2111,15 @@ const addressAgent = () =>
     },
   });
 
+const cancellationAgent = () =>
+  loopAgent({
+    tools: ["order.cancel", "conversation.reply", "ticket.update_context"],
+    permissionOverrides: {
+      "order.cancel": "ask",
+      "conversation.reply": "ask",
+    },
+  });
+
 const seedApprovedAddressUpdate = (
   repo: typeof TicketRepository.Service,
   approvals: typeof ApprovalService.Service,
@@ -2213,6 +2222,82 @@ describe("approved action refused by its own guard — the agent adapts instead 
     // The agent was told which action was refused and why.
     expect(seenUserMessages[0]).toMatch(/order\.update_shipping_address/);
     expect(seenUserMessages[0]).toMatch(/fulfil/i);
+  });
+
+  it("redrafts when a cancellation is approved after the order was fulfilled", async () => {
+    const convo = makeConversationServiceTest({});
+    const llmLayer = LLMServiceFromFn((_req, ctx) =>
+      Effect.succeed(
+        ctx.callIndex === 0
+          ? ({
+              type: "tool_call",
+              callId: "cancel-redraft",
+              tool: "conversation.reply",
+              input: replyInput("draft-cancel-refused", "cust@example.com"),
+            } as const)
+          : ({ type: "final_message", text: "Queued the corrected reply." } as const),
+      ),
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const approvals = yield* ApprovalService;
+          const created = yield* seedParkedTicket(repo);
+          const approval = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            ticketId: created.id,
+            agentId: AGENT_ID,
+            tool: "order.cancel",
+            proposedInput: {
+              orderId: SHIP_ORDER,
+              amount: { amount: "29.99", currencyCode: "USD" },
+            },
+            reasoning: "customer requested cancellation",
+            riskLevel: "high",
+            expiresAt: EXPIRES,
+          });
+          yield* approvals.approve({
+            id: approval.id,
+            decidedBy: MGR,
+            tenantId: TenantId(TENANT),
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: approval.id as never,
+            ticketId: created.id,
+            managerId: MGR,
+          });
+          const final = yield* repo.getById(created.id);
+          const decided = yield* approvals.getById(
+            approval.id,
+            TenantId(TENANT),
+          );
+          const pending = yield* approvals.listPending(TenantId(TENANT));
+          return { result, final, decided, pending };
+        }),
+        partialLayer(
+          convo,
+          [
+            llmLayer,
+            ShopifyServiceTest({
+              orders: new Map([[OrderId(SHIP_ORDER), shipOrder(true)]]),
+            }),
+          ],
+          defaultTenantSettings,
+          cancellationAgent(),
+        ),
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.final.status).toBe("waiting_for_approval");
+    expect(out.pending.map((a) => a.tool)).toEqual(["conversation.reply"]);
+    expect(out.decided.resumedAt).not.toBeNull();
+    expect(convo.handle.sent).toHaveLength(0);
   });
 
   it("cancels the rest of the bundle on a refusal instead of sending a stale draft", async () => {

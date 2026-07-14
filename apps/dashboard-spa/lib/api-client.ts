@@ -912,6 +912,16 @@ export const api = {
       ctx,
     }),
 
+  setCancellationAfterFulfillment: (
+    ctx: CallCtx,
+    enabled: boolean,
+  ): Promise<CallResult> =>
+    call("/cancellation-after-fulfillment", {
+      method: "POST",
+      body: { enabled },
+      ctx,
+    }),
+
   setDiscountPolicy: (
     ctx: CallCtx,
     input: {

@@ -355,7 +355,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       key: "order_cancellation",
       label: "Cancel my order",
       recognition:
-        "Customer wants to cancel an order they placed (e.g. changed their mind, ordered by mistake), before it ships.",
+        "Customer wants to cancel an order they placed (e.g. changed their mind or ordered by mistake).",
       builtin: true,
       enabled: true,
       enabledActions: [{ tool: "order.cancel", permission: "ask" }],
@@ -367,8 +367,9 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "If it has NOT shipped yet (fulfillment unfulfilled and not already cancelled), propose " +
         "/order.cancel to cancel and refund it, and tell the customer the cancellation is being " +
         "processed and the refund takes @returns.refund_processing_time to appear. If it has ALREADY shipped " +
-        "(fulfilled / in transit / delivered), do NOT cancel. Tell the customer it has already " +
-        "shipped and can no longer be cancelled, and that if they would like a refund they can " +
+        "(fulfilled / in transit / delivered), do NOT cancel unless the store facts say this store can " +
+        "cancel after fulfillment. Otherwise tell the customer it has already shipped and can no longer " +
+        "be cancelled, and that if they would like a refund they can " +
         "return the order to us within @returns.return_window of delivery and we will refund it " +
         "per our return policy.",
     },
@@ -819,6 +820,12 @@ export class TenantSettings extends Data.Class<{
    */
   readonly cancellationRestock?: boolean;
   /**
+   * Whether the store can cancel an order after fulfillment. Defaults to
+   * `false`; only an explicit merchant declaration may relax the tool's
+   * fulfilled-order precondition.
+   */
+  readonly cancellationAfterFulfillment?: boolean;
+  /**
    * Merchant-configurable per-scenario playbooks for the scenario-resolution
    * agent. Optional on the class (so existing construction sites don't ripple);
    * the Live `getSettings` ALWAYS populates it via `decodeResolutionPolicy`
@@ -961,6 +968,11 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setCancellationRestock: (
       tenantId: TenantId,
       restock: boolean,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+    /** Set whether the store can cancel orders after fulfillment. */
+    readonly setCancellationAfterFulfillment: (
+      tenantId: TenantId,
+      enabled: boolean,
     ) => Effect.Effect<void, TenantRepositoryError>;
     /**
      * Replace the tenant's resolution policy (per-scenario playbooks). Same
@@ -1120,6 +1132,20 @@ export const TenantRepositoryTest = (
         store.set(
           tenantId,
           new TenantSettings({ ...prev, cancellationRestock: restock }),
+        );
+        return Effect.void;
+      },
+      setCancellationAfterFulfillment: (tenantId, enabled) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({
+            ...prev,
+            cancellationAfterFulfillment: enabled,
+          }),
         );
         return Effect.void;
       },

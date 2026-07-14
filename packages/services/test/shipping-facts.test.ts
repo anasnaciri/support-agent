@@ -3,6 +3,7 @@ import {
   SHIPPING_FACTS_MAX_DELAY_DAYS,
   SHIPPING_FACTS_TEXT_MAX,
   decodeAddressUpdateAfterFulfillment,
+  decodeCancellationAfterFulfillment,
   decodeShippingFacts,
   type ShippingFacts,
 } from "../src/shipping-facts.js";
@@ -162,5 +163,25 @@ describe("decodeAddressUpdateAfterFulfillment", () => {
         shippingFacts: { processingTime: "" },
       }),
     ).toBe(true);
+  });
+});
+
+describe("decodeCancellationAfterFulfillment", () => {
+  it("accepts only a literal true from the settings level", () => {
+    expect(
+      decodeCancellationAfterFulfillment({
+        cancellationAfterFulfillment: true,
+      }),
+    ).toBe(true);
+    for (const raw of [
+      undefined,
+      null,
+      {},
+      { cancellationAfterFulfillment: false },
+      { cancellationAfterFulfillment: "true" },
+      { cancellationAfterFulfillment: 1 },
+    ]) {
+      expect(decodeCancellationAfterFulfillment(raw)).toBe(false);
+    }
   });
 });

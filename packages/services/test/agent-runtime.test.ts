@@ -413,6 +413,27 @@ describe("buildSystemPrompt", () => {
     );
   });
 
+  it("states the fulfilled-order cancellation capability only for agents holding the tool", () => {
+    const holder = baseAgent({
+      tools: ["order.cancel", "conversation.reply"],
+    });
+    const enabled = new TenantSettings({
+      ...makeSettings(null),
+      cancellationAfterFulfillment: true,
+    });
+    const got = buildSystemPrompt(holder, enabled);
+    expect(got).toMatch(/cancel[\s\S]{0,120}after[\s\S]{0,40}fulfill/i);
+    expect(got).toMatch(/overrides[\s\S]{0,120}cannot be cancelled/i);
+
+    expect(buildSystemPrompt(holder, makeSettings(null))).toBe(
+      withPreamble("Base prompt for testing."),
+    );
+    const bystander = baseAgent({ tools: ["conversation.reply"] });
+    expect(buildSystemPrompt(bystander, enabled)).toBe(
+      withPreamble("Base prompt for testing."),
+    );
+  });
+
   it("grounds every agent in the store's brand name", () => {
     // The name the agent signs its replies with. Unlike the facts headers this
     // is NOT gated on knowledge.search: an agent that writes to a customer at

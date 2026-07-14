@@ -108,6 +108,19 @@ export const decodeAddressUpdateAfterFulfillment = (
     "addressUpdateAfterFulfillment"
   ] === true;
 
+/** Decode the merchant-declared capability to cancel fulfilled orders. It is
+ * settings-level and fail-safe for the same reason as the address-update
+ * capability: only a literal `true` may relax the write tool's guard. */
+export const decodeCancellationAfterFulfillment = (
+  rawSettings: unknown,
+): boolean =>
+  typeof rawSettings === "object" &&
+  rawSettings !== null &&
+  !Array.isArray(rawSettings) &&
+  (rawSettings as Record<string, unknown>)[
+    "cancellationAfterFulfillment"
+  ] === true;
+
 /**
  * Decode the `shippingFacts` block of `tenants.settings`.
  *

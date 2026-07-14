@@ -480,6 +480,38 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("POST /dashboard/cancellation-after-fulfillment round-trips through settings", async () => {
+    if (!raw) return;
+    const saved = await post("/dashboard/cancellation-after-fulfillment", {
+      enabled: true,
+    });
+    expect(saved.status).toBe(200);
+
+    const body = (await (await get("/dashboard/settings")).json()) as {
+      readonly cancellationAfterFulfillment: boolean;
+      readonly refundPolicy: unknown;
+    };
+    expect(body.cancellationAfterFulfillment).toBe(true);
+    expect(body.refundPolicy).toBeTruthy();
+
+    const cleared = await post("/dashboard/cancellation-after-fulfillment", {
+      enabled: false,
+    });
+    expect(cleared.status).toBe(200);
+    const after = (await (await get("/dashboard/settings")).json()) as {
+      readonly cancellationAfterFulfillment: boolean;
+    };
+    expect(after.cancellationAfterFulfillment).toBe(false);
+  });
+
+  it("POST /dashboard/cancellation-after-fulfillment 400s on a non-boolean body", async () => {
+    if (!raw) return;
+    const bad = await post("/dashboard/cancellation-after-fulfillment", {
+      enabled: "yes",
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it("POST /dashboard/returns-facts round-trips through settings", async () => {
     if (!raw) return;
     const saved = await post("/dashboard/returns-facts", {

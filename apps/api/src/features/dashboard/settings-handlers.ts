@@ -452,6 +452,7 @@ export const handleDashboardSettings = async (
             fulfillmentOperatorEscalationSheet: null,
             legalAcceptance: null,
             cancellationRestock: true,
+            cancellationAfterFulfillment: false,
             shippingFacts: null,
             addressUpdateAfterFulfillment: false,
             returnsFacts: null,
@@ -471,6 +472,8 @@ export const handleDashboardSettings = async (
     // Restock-on-cancel flag for the refund-policy page's "Order
     // cancellations" checkbox. Defaults-on-read in getSettings ⇒ true.
     cancellationRestock: settings.cancellationRestock !== false,
+    cancellationAfterFulfillment:
+      settings.cancellationAfterFulfillment === true,
     // Null until the merchant fills the Knowledge base page's shipping form.
     shippingFacts: settings.shippingFacts ?? null,
     // Merchant-declared capability (Facts page): the store can update an
@@ -952,6 +955,39 @@ export const handleDashboardAddressUpdateAfterFulfillmentSet = async (
     ),
   );
   return sendJson(res, 200, { ok: true, addressUpdateAfterFulfillment: enabled });
+};
+
+// POST /dashboard/cancellation-after-fulfillment — declare whether this store
+// can cancel an order after fulfillment. Only a literal boolean is accepted
+// because enabling it relaxes a financial tool's pre-write guard.
+export const handleDashboardCancellationAfterFulfillmentSet = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const enabled = parseJsonBody(req)["enabled"];
+  if (typeof enabled !== "boolean") {
+    return sendJson(res, 400, { error: "invalid_enabled" });
+  }
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setCancellationAfterFulfillment(
+          TenantId(auth.tenantId),
+          enabled,
+        );
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, {
+    ok: true,
+    cancellationAfterFulfillment: enabled,
+  });
 };
 
 // ---- Returns facts ----

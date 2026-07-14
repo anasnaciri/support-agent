@@ -3,6 +3,7 @@ import {
   OrderId,
   defineTool,
   ToolOutputInvalid,
+  ToolPreconditionFailed,
 } from "@support-agent/agent-core";
 import { ShopifyService, TenantRepository } from "@support-agent/services";
 
@@ -40,9 +41,9 @@ const Output = Schema.Struct({
 export const shopifyOrderCancel = defineTool({
   name: "order.cancel",
   description:
-    "Cancel an existing Shopify order AND refund it. Use this ONLY for an order that has NOT shipped yet (fulfillment unfulfilled and not already cancelled). Shopify rejects cancelling a fulfilled order. The `orderId` must be a Shopify GID (`gid://shopify/Order/...`) or a numeric internal id (auto-wrapped); order names like `#1001` are NOT accepted, call `shopify.get_order` first to resolve the order and read its fulfillment status. `amount` is the order's refundable total (its `totalPrice`) as a decimal string + ISO currency code; the cancellation refunds the captured amount and `amount` is what the per-tenant refund policy is checked against. `reason` is recorded as a staff note on the order. Whether the items are returned to inventory is a store setting, not chosen here. Permission policy: defaultPermission is `ask` and the runtime overlays the SAME per-tenant refund threshold as `refund.create` (the cancel issues a refund), so small cancellations may auto-run and large ones escalate for approval. This cancels an order and moves real money: never call it twice for the same request, if the result is unclear, check the order state via `shopify.get_order` instead of retrying.",
+    "Cancel an existing Shopify order AND refund it. By default use this only before shipment; the tool refuses a fulfilled order with `OrderAlreadyFulfilled`. Exception: when the store facts declare that fulfilled orders can be cancelled, that refusal does not apply. The `orderId` must be a Shopify GID (`gid://shopify/Order/...`) or a numeric internal id (auto-wrapped); order names like `#1001` are NOT accepted, call `shopify.get_order` first to resolve the order and read its fulfillment status. `amount` is the order's refundable total (its `totalPrice`) as a decimal string + ISO currency code; the cancellation refunds the captured amount and `amount` is what the per-tenant refund policy is checked against. `reason` is recorded as a staff note on the order. Whether the items are returned to inventory is a store setting, not chosen here. Permission policy: defaultPermission is `ask` and the runtime overlays the SAME per-tenant refund threshold as `refund.create` (the cancel issues a refund), so small cancellations may auto-run and large ones escalate for approval. This cancels an order and moves real money: never call it twice for the same request, if the result is unclear, check the order state via `shopify.get_order` instead of retrying.",
   displayDescription:
-    "The agent cancels an unshipped order and refunds it. Governed by your refund-policy thresholds.",
+    "The agent cancels an eligible order and refunds it. Governed by your store facts and refund-policy thresholds.",
   // Cancelling issues a refund, so it's governed by the refund policy — not a
   // simple per-agent ask/auto toggle. Same control as `refund.create`.
   tenantControl: "refund-threshold",
@@ -66,15 +67,45 @@ export const shopifyOrderCancel = defineTool({
   execute: (input, ctx) =>
     Effect.gen(function* () {
       const shopify = yield* ShopifyService;
+      const tenants = yield* TenantRepository;
+      const settings = yield* tenants
+        .getSettings(ctx.tenantId)
+        .pipe(
+          Effect.catchAll(() =>
+            Effect.succeed({
+              cancellationRestock: true,
+              cancellationAfterFulfillment: false,
+            } as const),
+          ),
+        );
+
+      const order = yield* shopify
+        .getOrder(ctx.tenantId, OrderId(input.orderId))
+        .pipe(
+          Effect.mapError(
+            (e) =>
+              new ToolOutputInvalid({
+                tool: "order.cancel",
+                issues: [e._tag],
+              }),
+          ),
+        );
+      if (
+        order.fulfillments.length > 0 &&
+        settings.cancellationAfterFulfillment !== true
+      ) {
+        return yield* Effect.fail(
+          new ToolPreconditionFailed({
+            tool: "order.cancel",
+            issue: "OrderAlreadyFulfilled",
+          }),
+        );
+      }
 
       // Whether to return the cancelled items to inventory is a merchant
       // setting (the dashboard "Order cancellations" restock checkbox), not
       // an agent choice. Read it; on a settings miss restock (the safe
       // default for stores that track stock).
-      const tenants = yield* TenantRepository;
-      const settings = yield* tenants
-        .getSettings(ctx.tenantId)
-        .pipe(Effect.catchAll(() => Effect.succeed({ cancellationRestock: true } as const)));
       const restock = settings.cancellationRestock !== false;
 
       const cancellation = yield* shopify

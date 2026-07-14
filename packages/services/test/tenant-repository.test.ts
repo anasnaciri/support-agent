@@ -943,6 +943,11 @@ describe("order_cancellation built-in scenario", () => {
     ]);
   });
 
+  it("lets the merchant capability override the default fulfilled-order refusal", () => {
+    expect(cancel!.notes).toMatch(/unless the store facts say/i);
+    expect(cancel!.notes).toMatch(/cancel after fulfillment/i);
+  });
+
   it("phrases the gated cancellation conditionally, never as already done", () => {
     // order.cancel defaults to `ask`, so it is QUEUED, and the base prompt's
     // hard rule forbids claiming a queued action already happened. "Being

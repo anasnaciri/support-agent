@@ -364,6 +364,18 @@ export const buildSystemPrompt = (
     );
   }
 
+  const holdsCancellationTool = agent.tools.some(
+    (t) => (t as string) === "order.cancel",
+  );
+  if (
+    holdsCancellationTool &&
+    tenantSettings?.cancellationAfterFulfillment === true
+  ) {
+    headers.push(
+      "[This store can cancel an order after it is fulfilled. When a customer asks to cancel an already fulfilled order, you may still call order.cancel rather than refusing for that reason alone. This store fact overrides any generic scenario or playbook instruction that says fulfilled orders cannot be cancelled.]",
+    );
+  }
+
   // Merchant-defined specialists that opted to be callable from THIS agent
   // (Phase C inbound routing). Listed as a trusted bracketed header — same
   // out-of-fence discipline as the fulfillment operator/knowledge headers — so the model

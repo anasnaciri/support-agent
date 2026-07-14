@@ -17,6 +17,23 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Late-approved cancellations recover like shipping-address changes**
+      (2026-07-14). `order.cancel` now re-reads the order immediately before
+      its write. If the order was fulfilled while approval sat pending, the
+      tool returns the same side-effect-free `ToolPreconditionFailed` shape as
+      the address-update guard; the approval runtime retires the stale bundle,
+      re-enters the agent with the refusal, and queues a fresh customer reply
+      instead of parking `approved_tool_failed` or sending the old optimistic
+      draft. A new fail-safe `cancellationAfterFulfillment` store fact lets a
+      merchant explicitly permit fulfilled-order cancellation; absence,
+      malformed data, or `false` keeps the refusal. It is persisted separately
+      from the structured Facts blocks, editable on Store facts, injected only
+      for agents holding `order.cancel`, and explicitly overrides older generic
+      playbook wording that says fulfilled orders cannot be cancelled. Verified
+      red -> green with tool, decoder, prompt, built-in-playbook, and worker
+      recovery regressions (268 focused tests), 55 PostgreSQL settings tests,
+      `git diff --check`, `pnpm build`, and the dashboard production build.
+
 - [x] **Order identity verification accepts the checkout phone number**
       (2026-07-14). The deterministic runtime guard now compares normalized
       phone numbers as well as customer ids and email addresses, persists the

@@ -2,6 +2,7 @@ import { Effect, FiberRef, Layer } from "effect";
 import { eq, sql } from "drizzle-orm";
 import {
   decodeAddressUpdateAfterFulfillment,
+  decodeCancellationAfterFulfillment,
   decodeBlockedSenders,
   decodeShippingFacts,
   decodeReturnsFacts,
@@ -266,6 +267,8 @@ export const TenantRepositoryLive = Layer.effect(
           // Absent (older rows / never configured) ⇒ restock, the safe default
           // for stores that track inventory.
           const cancellationRestock = settings?.cancellationRestock !== false;
+          const cancellationAfterFulfillment =
+            decodeCancellationAfterFulfillment(settings);
           const blockedSenders = decodeBlockedSenders(
             settings?.blockedSenders,
           );
@@ -298,6 +301,7 @@ export const TenantRepositoryLive = Layer.effect(
             legalAcceptance,
             rephraseModel,
             cancellationRestock,
+            cancellationAfterFulfillment,
             resolutionPolicy,
             blockedSenders,
             shippingFacts,
@@ -569,6 +573,30 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setAddressUpdateAfterFulfillment",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setCancellationAfterFulfillment: (tenantId, enabled: boolean) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          const json = JSON.stringify({
+            cancellationAfterFulfillment: enabled,
+          });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({ settings: sql`${tenants.settings} || ${json}::jsonb` })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setCancellationAfterFulfillment",
                 cause,
               }),
           });

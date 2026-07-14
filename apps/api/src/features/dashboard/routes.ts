@@ -47,6 +47,7 @@ import {
   handleDashboardShippingFactsSet,
   handleDashboardReturnsFactsSet,
   handleDashboardAddressUpdateAfterFulfillmentSet,
+  handleDashboardCancellationAfterFulfillmentSet,
   handleDashboardFactReferences,
   handleDashboardFactReferencesResolve,
   handleDashboardBlockedSendersRemove,
@@ -611,6 +612,12 @@ export const registerDashboardRoutes = (
     "/dashboard/address-update-after-fulfillment",
     "Declare whether the store can update a shipping address after fulfillment",
     handleDashboardAddressUpdateAfterFulfillmentSet,
+    "knowledge.manage",
+  );
+  dashboardPost(
+    "/dashboard/cancellation-after-fulfillment",
+    "Declare whether the store can cancel an order after fulfillment",
+    handleDashboardCancellationAfterFulfillmentSet,
     "knowledge.manage",
   );
   dashboardGet(

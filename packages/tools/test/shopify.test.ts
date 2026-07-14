@@ -966,8 +966,14 @@ describe("order.cancel tool", () => {
   const envWith = (
     cancellationRestock: boolean,
     capture: { input?: CancelOrderInput },
+    order: ShopifyOrder = {
+      ...buildOrder("gid://shopify/Order/55"),
+      fulfillmentStatus: "unfulfilled",
+      fulfillments: [],
+    },
   ) => {
     const shopify = ShopifyServiceTest({
+      orders: new Map([[order.id, order]]),
       cancelOrder: (input) => {
         capture.input = input;
         return Effect.succeed<ShopifyOrderCancellation>({
@@ -995,6 +1001,83 @@ describe("order.cancel tool", () => {
     });
     return Layer.merge(shopify, tenants);
   };
+
+  const envWithFulfilledCancellation = (
+    cancellationAfterFulfillment: boolean,
+    capture: { input?: CancelOrderInput },
+  ) => {
+    const order = buildOrder("gid://shopify/Order/55");
+    const shopify = ShopifyServiceTest({
+      orders: new Map([[order.id, order]]),
+      cancelOrder: (input) => {
+        capture.input = input;
+        return Effect.succeed<ShopifyOrderCancellation>({
+          orderId: input.orderId,
+          jobId: "gid://shopify/Job/fulfilled",
+          accepted: true,
+        });
+      },
+    });
+    const tenants = TenantRepositoryTest({
+      settingsByTenant: new Map([
+        [
+          tenantId,
+          new TenantSettings({
+            notificationEmail: null,
+            refundPolicy: defaultRefundPolicy,
+            discountPolicy: defaultDiscountPolicy,
+            cancellationRestock: true,
+            cancellationAfterFulfillment,
+          }),
+        ],
+      ]),
+    });
+    return Layer.merge(shopify, tenants);
+  };
+
+  it("refuses a fulfilled order before attempting cancellation", async () => {
+    const capture: { input?: CancelOrderInput } = {};
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyOrderCancel.execute(
+          {
+            orderId: "gid://shopify/Order/55",
+            amount: { amount: "29.99", currencyCode: "USD" },
+          } as never,
+          baseCtx("c-cancel-fulfilled"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        envWith(false, capture, buildOrder("gid://shopify/Order/55")),
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(capture.input).toBeUndefined();
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolPreconditionFailed);
+      if (err instanceof ToolPreconditionFailed) {
+        expect(err.tool).toBe("order.cancel");
+        expect(err.issue).toBe("OrderAlreadyFulfilled");
+      }
+    }
+  });
+
+  it("cancels a fulfilled order when the tenant declares the capability", async () => {
+    const capture: { input?: CancelOrderInput } = {};
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyOrderCancel.execute(
+          {
+            orderId: "gid://shopify/Order/55",
+            amount: { amount: "29.99", currencyCode: "USD" },
+          } as never,
+          baseCtx("c-cancel-fulfilled-enabled"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        envWithFulfilledCancellation(true, capture),
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(capture.input?.orderId).toBe("gid://shopify/Order/55");
+  });
 
   it("cancels with refund forced on, notifyCustomer off, and restock from settings", async () => {
     const capture: { input?: CancelOrderInput } = {};
@@ -1043,11 +1126,22 @@ describe("order.cancel tool", () => {
   });
 
   it("maps OrderCancelFailed to ToolOutputInvalid with the tag in issues", async () => {
+    const orderId = OrderId("gid://shopify/Order/55");
     const shopify = ShopifyServiceTest({
+      orders: new Map([
+        [
+          orderId,
+          {
+            ...buildOrder(orderId),
+            fulfillmentStatus: "unfulfilled",
+            fulfillments: [],
+          },
+        ],
+      ]),
       cancelOrder: () =>
         Effect.fail(
           new OrderCancelFailed({
-            orderId: "gid://shopify/Order/55",
+            orderId,
             code: "CANT_CANCEL",
             message: "Order has already been fulfilled",
           }),

@@ -183,6 +183,61 @@ function AddressUpdateAfterFulfillmentToggle({
   );
 }
 
+function CancellationAfterFulfillmentToggle({
+  enabled,
+  ctx,
+}: {
+  readonly enabled: boolean;
+  readonly ctx: Ctx;
+}) {
+  const qc = useQueryClient();
+  const [checked, setChecked] = useState(enabled);
+  const toggle = useMutation({
+    mutationFn: (next: boolean) =>
+      api.setCancellationAfterFulfillment(ctx, next),
+    onSuccess: (res) => {
+      if (res.status !== 200) {
+        setChecked((prev) => !prev);
+        toast.warning("Something went wrong. Please try again.");
+        return;
+      }
+      invalidateFacts(qc, ctx.workspaceId);
+    },
+    onError: () => {
+      setChecked((prev) => !prev);
+      toast.warning("Something went wrong. Please try again.");
+    },
+  });
+
+  return (
+    <div className="border-t pt-4">
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          name="cancellationAfterFulfillment"
+          checked={checked}
+          onChange={(e) => {
+            const next = e.currentTarget.checked;
+            setChecked(next);
+            toggle.mutate(next);
+          }}
+          className="mt-0.5 size-4 rounded border-input accent-primary"
+        />
+        <span className="grid gap-1">
+          <span className="text-sm font-medium">
+            This store can cancel an order after fulfillment
+          </span>
+          <span className={hint}>
+            When off, the agent refuses cancellation once an order has shipped.
+            When on, it may still cancel and refund a fulfilled order; approval
+            and refund thresholds still apply.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 // The store's structured shipping facts. These are not prose the agent reads —
 // they're numbers it acts on. The delivery time is the window lateness is judged
 // against, and the delay threshold is the exact point past which the agent opens
@@ -719,14 +774,25 @@ export function FactsPage() {
           {settingsQuery.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
-            <ReturnsFactsForm
-              // Remount when the saved facts arrive so the inputs pick up their
-              // stored values instead of keeping their initial "".
-              key={settingsQuery.data?.returnsFacts ? "loaded" : "empty"}
-              facts={settingsQuery.data?.returnsFacts ?? null}
-              ctx={ctx}
-              reportDirty={reportDirty}
-            />
+            <>
+              <ReturnsFactsForm
+                // Remount when the saved facts arrive so the inputs pick up their
+                // stored values instead of keeping their initial "".
+                key={settingsQuery.data?.returnsFacts ? "loaded" : "empty"}
+                facts={settingsQuery.data?.returnsFacts ?? null}
+                ctx={ctx}
+                reportDirty={reportDirty}
+              />
+              <CancellationAfterFulfillmentToggle
+                key={`cancel-capability-${String(
+                  settingsQuery.data?.cancellationAfterFulfillment ?? false,
+                )}`}
+                enabled={
+                  settingsQuery.data?.cancellationAfterFulfillment ?? false
+                }
+                ctx={ctx}
+              />
+            </>
           )}
         </CardContent>
       </Card>

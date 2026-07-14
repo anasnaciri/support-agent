@@ -987,6 +987,8 @@ export interface TenantSettingsView {
    * Defaults-on-read to true.
    */
   readonly cancellationRestock: boolean;
+  /** Whether the store can cancel an order after fulfillment. */
+  readonly cancellationAfterFulfillment: boolean;
   /** The store's shipping facts; `null` until the merchant configures one. */
   readonly shippingFacts: ShippingFactsView | null;
   /**
