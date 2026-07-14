@@ -51,7 +51,8 @@ export const TICKET_STATUSES: ReadonlyArray<TicketStatus> = [
    *     until the retention sweep deletes it. Entry is restricted too: only a
    *     `resolved` ticket may be archived — retention is strictly
    *     post-resolution, whether the sweep or a person triggers it.
- *   - `failed`: reopen or hand to a human only.
+ *   - `failed`: reopen (to the agent loop, or parked waiting on the
+ *     customer's next message) or hand to a human only.
  */
 const RESTRICTED_TRANSITIONS: Partial<
   Record<TicketStatus, ReadonlyArray<TicketStatus>>
@@ -74,7 +75,7 @@ const RESTRICTED_TRANSITIONS: Partial<
     "waiting_for_fulfillment_operator",
     "human_takeover",
   ],
-  failed: ["in_progress", "triaging", "human_takeover"],
+  failed: ["in_progress", "triaging", "waiting_for_customer", "human_takeover"],
 };
 
 export const isStatusTransitionAllowed = (
@@ -92,18 +93,21 @@ export const isStatusTransitionAllowed = (
 /**
  * The statuses a human may set BY HAND from the dashboard ("change status
  * manually"). A curated subset of TICKET_STATUSES: the agent-internal lifecycle
- * states (`new`, `triaging`, `approved_action_running`) and the
+ * states (`new`, `triaging`, `in_progress`, `approved_action_running`) and the
  * machinery-driven parks (`waiting_for_fulfillment_operator` needs an escalation row;
  * `waiting_for_approval` needs a pending approval; `human_takeover` has its own
  * "Take over" action) are deliberately NOT offered — a person doesn't drive
- * those directly. Picking one of these is still re-checked against
- * `isStatusTransitionAllowed`, so the manual control never bypasses §10 —
- * `archived` in particular is only ever offered on a `resolved` ticket
- * ("Archive now" skips the 30-day retention wait; deletion still happens
- * 12 months after `archivedAt`).
+ * those directly. `in_progress` in particular: a manual status write never
+ * ticks the agent, so a hand-set in_progress would only fake the dashboard's
+ * "processing" treatment — reopening a closed ticket lands on
+ * `waiting_for_customer` (the agent runs on the customer's next message), and
+ * "Retry" is the control that actually runs the agent. Picking one of these
+ * is still re-checked against `isStatusTransitionAllowed`, so the manual
+ * control never bypasses §10 — `archived` in particular is only ever offered
+ * on a `resolved` ticket ("Archive now" skips the 30-day retention wait;
+ * deletion still happens 12 months after `archivedAt`).
  */
 export const MERCHANT_SETTABLE_STATUSES: ReadonlyArray<TicketStatus> = [
-  "in_progress",
   "waiting_for_customer",
   "resolved",
   "archived",

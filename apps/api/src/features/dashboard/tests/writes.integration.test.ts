@@ -340,31 +340,33 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect((await approvalRow(pSetStatus))?.status).toBe("rejected");
   });
 
-  it("set-status reopens a resolved ticket to in_progress", async () => {
+  it("set-status reopens a resolved ticket to waiting_for_customer (never a fake in_progress)", async () => {
     if (!raw) return;
-    // ticketSetStatus is resolved from the previous test.
+    // ticketSetStatus is resolved from the previous test. A manual reopen
+    // parks the ticket on the customer's next message — a manual status write
+    // never ticks the agent, so in_progress would only fake "processing".
     const res = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
-      status: "in_progress",
+      status: "waiting_for_customer",
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("updated");
-    expect(await ticketStatus(ticketSetStatus)).toBe("in_progress");
+    expect(await ticketStatus(ticketSetStatus)).toBe("waiting_for_customer");
   });
 
   it("setting the same status is a no-op (unchanged, no mutation)", async () => {
     if (!raw) return;
-    // ticketSetStatus is in_progress from the previous test.
+    // ticketSetStatus is waiting_for_customer from the previous test.
     const res = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
-      status: "in_progress",
+      status: "waiting_for_customer",
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("unchanged");
-    expect(await ticketStatus(ticketSetStatus)).toBe("in_progress");
+    expect(await ticketStatus(ticketSetStatus)).toBe("waiting_for_customer");
   });
 
   it("archive-now archives a resolved ticket but refuses a live one", async () => {
     if (!raw) return;
-    // ticketSetStatus is in_progress — archiving a live ticket is forbidden.
+    // ticketSetStatus is waiting_for_customer — archiving a live ticket is forbidden.
     const early = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
       status: "archived",
     });
@@ -391,12 +393,12 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(row?.status).toBe("archived");
     expect(row?.archivedAt).not.toBeNull();
 
-    // Restore for the later tests that expect an in_progress ticket.
+    // Restore for the later tests that expect a live ticket.
     const reopen = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
-      status: "in_progress",
+      status: "waiting_for_customer",
     });
     expect(reopen.status).toBe(200);
-    expect(await ticketStatus(ticketSetStatus)).toBe("in_progress");
+    expect(await ticketStatus(ticketSetStatus)).toBe("waiting_for_customer");
   });
 
   it("edit-details stamps a hand-corrected customer email + name into context", async () => {
@@ -515,8 +517,17 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(((await res.json()) as { kind: string }).kind).toBe(
       "invalid_status",
     );
+    // in_progress is agent-owned too: hand-setting it would fake the
+    // "processing" UI while nothing runs, so it's refused the same way.
+    const inProgress = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
+      status: "in_progress",
+    });
+    expect(inProgress.status).toBe(400);
+    expect(((await inProgress.json()) as { kind: string }).kind).toBe(
+      "invalid_status",
+    );
     // unchanged — an agent-internal status can't be forced by hand.
-    expect(await ticketStatus(ticketSetStatus)).toBe("in_progress");
+    expect(await ticketStatus(ticketSetStatus)).toBe("waiting_for_customer");
   });
 
   it("refuses an illegal transition the state machine forbids (409)", async () => {
@@ -690,7 +701,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       otherHeaders,
     );
     expect(r.status).toBe(404);
-    expect(await ticketStatus(ticketSetStatus)).toBe("in_progress");
+    expect(await ticketStatus(ticketSetStatus)).toBe("waiting_for_customer");
   });
 
   it("resume 404s for a ticket in another tenant (no mutation)", async () => {

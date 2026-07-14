@@ -61,6 +61,11 @@ describe("isStatusTransitionAllowed", () => {
 
   it("failed tickets can only be reopened or handed to a human", () => {
     expect(isStatusTransitionAllowed("failed", "in_progress")).toBe(true);
+    // Reopen-to-waiting: a manual reopen parks the ticket until the
+    // customer's next message rather than faking an active in_progress.
+    expect(isStatusTransitionAllowed("failed", "waiting_for_customer")).toBe(
+      true,
+    );
     expect(isStatusTransitionAllowed("failed", "human_takeover")).toBe(true);
     expect(isStatusTransitionAllowed("failed", "resolved")).toBe(false);
     expect(isStatusTransitionAllowed("failed", "waiting_for_approval")).toBe(
@@ -107,11 +112,15 @@ describe("isStatusTransitionAllowed", () => {
 describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
   it("only offers human-meaningful lifecycle states (never agent-internal ones)", () => {
     expect([...MERCHANT_SETTABLE_STATUSES].sort()).toEqual(
-      ["archived", "failed", "in_progress", "resolved", "waiting_for_customer"].sort(),
+      ["archived", "failed", "resolved", "waiting_for_customer"].sort(),
     );
+    // in_progress is agent-owned too: nothing ticks on a manual status write,
+    // so a hand-set in_progress would just fake the "processing" UI. A person
+    // reopens to waiting_for_customer; "Retry" actually runs the agent.
     for (const internal of [
       "new",
       "triaging",
+      "in_progress",
       "approved_action_running",
       "waiting_for_fulfillment_operator",
       "waiting_for_approval",
@@ -123,7 +132,7 @@ describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
 
   it("isMerchantSettableStatus accepts only the curated set", () => {
     expect(isMerchantSettableStatus("resolved")).toBe(true);
-    expect(isMerchantSettableStatus("in_progress")).toBe(true);
+    expect(isMerchantSettableStatus("waiting_for_customer")).toBe(true);
     expect(isMerchantSettableStatus("not_a_status")).toBe(false);
   });
 
@@ -133,10 +142,11 @@ describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
     );
   });
 
-  it("a resolved ticket can be reopened or archived but never manually marked failed", () => {
+  it("a resolved ticket can be reopened-to-waiting or archived but never manually marked failed", () => {
     const targets = allowedManualStatusTargets("resolved");
-    expect(targets).toContain("in_progress");
+    // Reopen lands on waiting_for_customer — never a fake in_progress.
     expect(targets).toContain("waiting_for_customer");
+    expect(targets).not.toContain("in_progress");
     // "Archive now" skips the 30-day retention wait.
     expect(targets).toContain("archived");
     // §10: resolved never flips to failed.
@@ -158,14 +168,12 @@ describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
     }
   });
 
-  it("a taken-over ticket can be handed back or closed-as-failed (not directly resolved)", () => {
-    expect([...allowedManualStatusTargets("human_takeover")].sort()).toEqual(
-      ["failed", "in_progress"].sort(),
-    );
+  it("a taken-over ticket can only be closed-as-failed (hand-back has its own flow)", () => {
+    expect(allowedManualStatusTargets("human_takeover")).toEqual(["failed"]);
   });
 
-  it("a failed ticket can only be reopened to in_progress", () => {
-    expect(allowedManualStatusTargets("failed")).toEqual(["in_progress"]);
+  it("a failed ticket reopens to waiting_for_customer (never a fake in_progress)", () => {
+    expect(allowedManualStatusTargets("failed")).toEqual(["waiting_for_customer"]);
   });
 
   it("every offered target is a legal transition from its source", () => {
