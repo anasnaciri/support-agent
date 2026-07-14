@@ -17,6 +17,29 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Hand-back sets honest expectations: wait-for-customer or retry, never
+      a fake "processing"** (2026-07-14). Handing a taken-over ticket back to
+      the agent is a pure status flip — no tick runs until the customer's next
+      message (a message received DURING takeover is consumed by the runtime's
+      takeover guard and never redelivered) — yet the ticket landed in
+      `in_progress`, which the dashboard renders with the "processing" shimmer.
+      Fixed at both layers, TDD: (1) `TicketLifecycleWriter.resume` accepts
+      `waitForCustomer`, which continues the resume past `in_progress` to
+      `waiting_for_customer` in the same tx — a §10-legal bridge mirroring the
+      manual-resolve bridge, so the state machine is untouched; epoch bump and
+      kept approvals unchanged. Plumbed through `resumeTicket` and
+      `POST /dashboard/tickets/:id/resume` (`waitForCustomer: true` in the
+      body). (2) The SPA's Bot header button now opens `HandBackDialog` with
+      two options (pure metadata in `lib/hand-back-options.ts`): "Wait for the
+      customer's reply" (resume + waitForCustomer) or "Retry last step" (the
+      existing `/retry`, which enqueues `ticket.resumed` and replays the full
+      thread — covering replies that arrived during takeover). Plain
+      `POST /resume` without the flag still lands on `in_progress` (the
+      `/retry` handler resumes through the same path before its immediate
+      tick). Also corrected the stale `resumeTicket` doc comment that still
+      claimed the runtime has no message-history replay. Verified red → green
+      at each layer, full suite (3,343 passed), `pnpm build` green.
+
 - [x] **Onboarding now configures playbooks, agent, documents, and complete
       money policies** (2026-07-14). The wizard no longer defers core setup to
       Settings: step 2 can confirm-delete imported documents; step 4 exposes
