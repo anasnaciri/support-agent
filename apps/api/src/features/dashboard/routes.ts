@@ -64,6 +64,8 @@ import {
   handleDashboardSetResolutionPolicy,
   handleDashboardSettings,
   handleDashboardShopCurrency,
+  handleDashboardStoreProfile,
+  handleDashboardBrandName,
   handleDashboardTenant,
   handleDashboardWorkspaceCreate,
   handleDashboardWorkspaceDelete,
@@ -260,6 +262,12 @@ export const registerDashboardRoutes = (
     "/dashboard/shop-currency",
     "Best-effort Shopify store currency (ISO 4217) or null",
     handleDashboardShopCurrency,
+  );
+  dashboardGet(
+    "/dashboard/store-profile",
+    "The connected store's own name / domain / currency (best-effort)",
+    handleDashboardStoreProfile,
+    "settings.integrations",
   );
   dashboardGet(
     "/dashboard/blocked-senders",
@@ -591,6 +599,12 @@ export const registerDashboardRoutes = (
     "/dashboard/returns-facts",
     "Save the store's returns facts",
     handleDashboardReturnsFactsSet,
+    "knowledge.manage",
+  );
+  dashboardPost(
+    "/dashboard/brand",
+    "Save the name the agent writes under",
+    handleDashboardBrandName,
     "knowledge.manage",
   );
   dashboardPost(

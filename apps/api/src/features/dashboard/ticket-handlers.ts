@@ -14,6 +14,7 @@ import {
   LLMService,
   normalizeBlockedSenderInput,
   ShopifyService,
+  resolveDefaultModel,
   TenantRepository,
   toMessageAttachment,
   TrackingService,
@@ -2264,10 +2265,12 @@ export const handleDashboardRefundContext = async (
   return sendJson(res, status, outcome);
 };
 
-// Default model for the one-shot "Rephrase with AI" action. A cheap, fast model
-// is the right default for polishing a short reply; a tenant-configurable
-// override lands in a later slice.
-const REPHRASE_MODEL = "google/gemini-3.5-flash";
+// Last-resort model for the one-shot "Rephrase with AI" action, used only when
+// no provider can be resolved (in which case the rephrase can't run anyway).
+// The real default follows the tenant's connected provider: a cheap, fast model
+// is right for polishing a short reply, but the id has to be one that provider
+// serves — sending an OpenRouter id to a direct Anthropic key just fails.
+const REPHRASE_MODEL_FALLBACK = "google/gemini-3.5-flash";
 
 // POST /dashboard/rephrase — AI polish of a reply draft. One-shot text
 // generation (LLMService.runToolCalling with no tools → a final message), spent
@@ -2297,7 +2300,14 @@ export const handleDashboardRephrase = async (
           .pipe(Effect.either);
         const configured =
           settings._tag === "Right" ? settings.right.rephraseModel : null;
-        return configured && configured.length > 0 ? configured : REPHRASE_MODEL;
+        if (configured && configured.length > 0) return configured;
+        // Nothing configured: use the connected provider's default, so the
+        // model id is one that provider will actually accept.
+        const cred = yield* resolveActiveLlmCredential(tenantId);
+        const providerDefault = cred
+          ? resolveDefaultModel(cred.provider)
+          : null;
+        return providerDefault ?? REPHRASE_MODEL_FALLBACK;
       }),
       layer,
     ),

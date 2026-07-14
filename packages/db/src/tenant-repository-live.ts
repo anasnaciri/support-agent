@@ -229,6 +229,7 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly shippingFacts?: unknown;
                 readonly returnsFacts?: unknown;
                 readonly onboarding?: unknown;
+                readonly brandName?: unknown;
               }
             | null;
           const notificationEmail =
@@ -281,6 +282,13 @@ export const TenantRepositoryLive = Layer.effect(
           // Null for a tenant that predates the setup wizard — such a row is
           // never gated into it.
           const onboarding = decodeOnboardingState(settings?.onboarding);
+          // The name the agent writes under. Null (rather than a guess) until
+          // the merchant confirms it.
+          const brandName =
+            typeof settings?.brandName === "string" &&
+            settings.brandName.trim().length > 0
+              ? settings.brandName.trim()
+              : null;
           return new TenantSettings({
             notificationEmail,
             refundPolicy,
@@ -296,6 +304,7 @@ export const TenantRepositoryLive = Layer.effect(
             addressUpdateAfterFulfillment,
             returnsFacts,
             onboarding,
+            brandName,
           });
         }),
 
@@ -587,6 +596,32 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setReturnsFacts",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setBrandName: (tenantId, name: string | null) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          // Same shallow `||` JSONB merge as setRefundPolicy. A `null` writes
+          // JSON null, which getSettings reads back as "not set" — the clear.
+          const json = JSON.stringify({ brandName: name });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${json}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setBrandName",
                 cause,
               }),
           });

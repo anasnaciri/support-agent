@@ -32,6 +32,7 @@ import { TicketsSidebar } from "./TicketsSidebar";
 import { ticketIdFromPathname } from "@/lib/tickets-sidebar-data";
 import { fulfillmentOperatorEscalationIdFromPathname } from "@/lib/fulfillment-operator-ticket-chat";
 import { logout } from "@/lib/auth/session-api";
+import { SetupBanners } from "./SetupBanners";
 
 const SIDEBAR_KEY = "sidebar:state";
 const WIDTH_KEY = "sidebar:width";
@@ -310,7 +311,14 @@ export function AppShell({
                 {children}
               </div>
             ) : (
-              <div className="mx-auto w-full max-w-5xl">{children}</div>
+              // Setup gaps ride above every document-layout page. Deliberately
+              // NOT on the ticket detail (a full-height inbox with no room for
+              // them) and not in the fulfillment partner shell below — a partner
+              // has no say in the merchant's setup.
+              <div className="mx-auto w-full max-w-5xl">
+                <SetupBanners />
+                {children}
+              </div>
             )}
           </main>
         </div>
@@ -509,7 +517,14 @@ export function AppShell({
                 {children}
               </div>
             ) : (
-              <div className="mx-auto w-full max-w-5xl">{children}</div>
+              // Setup gaps ride above every document-layout page. Deliberately
+              // NOT on the ticket detail (a full-height inbox with no room for
+              // them) and not in the fulfillment partner shell below — a partner
+              // has no say in the merchant's setup.
+              <div className="mx-auto w-full max-w-5xl">
+                <SetupBanners />
+                {children}
+              </div>
             )}
           </main>
         </div>

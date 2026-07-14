@@ -24,6 +24,7 @@ const tool = (over: Partial<ToolDto> & { name: string }): ToolDto => ({
 
 const catalog: CatalogResponse = {
   agents: [],
+  defaultModel: null,
   tools: [
     tool({
       name: "conversation.reply",
@@ -126,6 +127,7 @@ describe("capabilitiesForProvider", () => {
   const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
   const scopedCatalog: CatalogResponse = {
     agents: [],
+    defaultModel: null,
     tools: [
       tool({
         name: "fulfillment_operator.read_sheet_columns",
@@ -200,6 +202,7 @@ describe("capabilitiesForProvider", () => {
     // misleading "Missing a capability? Reinstall" hint to always show.
     const cat: CatalogResponse = {
       agents: [],
+      defaultModel: null,
       tools: [
         tool({
           name: "shopify.get_store_info",

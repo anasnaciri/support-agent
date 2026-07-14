@@ -249,6 +249,17 @@ const FIELD_CATALOG: ReadonlyArray<FactReference> = [
     render: (x) => refundThresholdFragment(x),
     fallback: "your refund approval settings",
   },
+  // store.* — who the merchant is, as their customers know them.
+  {
+    id: "store.brand_name",
+    namespace: "store",
+    field: "brand_name",
+    label: "Store name",
+    render: (x) => x?.brandName?.trim() || null,
+    // Noun phrase, matching the render: "...contact @store.brand_name" reads
+    // correctly either way.
+    fallback: "our store",
+  },
 ];
 
 /**
@@ -307,7 +318,14 @@ export const FACT_NAMESPACES: ReadonlySet<string> = new Set(
 // optional field group is only taken when a `.` is immediately followed by a
 // token char — so `@returns.` (trailing punct) still resolves the bare
 // `@returns` summary.
-const TOKEN = /@([a-z][a-z0-9_]*)(?:\.([a-z0-9][a-z0-9_-]*))?/gi;
+//
+// Anchored to start-of-text or a space/bracket, exactly like ACTION_TOKEN below
+// and for the same reason: the local part of an email address runs straight
+// into the `@`, so an UNANCHORED pattern reads "help@store.com" as a `store`
+// ref. That was harmless only while no namespace resembled an email domain;
+// `store` does. The leading char is captured, not consumed, so it survives the
+// replace.
+const TOKEN = /(^|[\s(\[])@([a-z][a-z0-9_]*)(?:\.([a-z0-9][a-z0-9_-]*))?/gi;
 
 // ============================================================
 // Action references — the `/` sigil
@@ -452,17 +470,19 @@ export const resolveFactReferences = (
   // Actions first, on the raw text: a Fact fragment can't contain a `/`-ref, so
   // the passes are independent — this order just keeps each one's input simple.
   const withActions = resolveActionReferences(text);
-  const resolved = withActions.replace(TOKEN, (match, ns: string, field?: string) => {
+  const resolved = withActions.replace(
+    TOKEN,
+    (match, lead: string, ns: string, field?: string) => {
     const namespace = ns.toLowerCase();
     const id = field ? `${namespace}.${field.toLowerCase()}` : namespace;
     const doc = docByRef.get(id);
-    if (doc) return renderKnowledgeDocReference(doc);
+    if (doc) return `${lead}${renderKnowledgeDocReference(doc)}`;
     const entry = factReferenceById.get(id);
     if (entry) {
       const rendered = entry.render(settings);
-      if (rendered && rendered.trim().length > 0) return rendered;
+      if (rendered && rendered.trim().length > 0) return `${lead}${rendered}`;
       dangling.push(id);
-      return entry.fallback;
+      return `${lead}${entry.fallback}`;
     }
     // Not a catalog id. A KNOWN namespace means a mistaken ref (typo, removed
     // field) — flag it dangling but leave the raw token so the merchant can see
@@ -475,6 +495,7 @@ export const resolveFactReferences = (
       dangling.push(id);
     }
     return match;
-  });
+    },
+  );
   return { resolved, dangling };
 };

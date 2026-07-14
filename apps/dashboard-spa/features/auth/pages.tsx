@@ -192,8 +192,10 @@ export function OnboardingPage() {
       // The cookie now carries the org — refetch the gate and enter.
       await qc.invalidateQueries({ queryKey: qk.authSession });
       await qc.invalidateQueries({ queryKey: qk.workspaces });
-      // Land on Today with the "workspace is ready" toast (mirrors the Next flow).
-      nav.replace("/?onboarded=1");
+      // Into the setup wizard: the workspace exists but has no store, no facts,
+      // no AI key, and no inbox, so Today would be an empty room. (The shell's
+      // gate would send them here anyway; going direct skips a bounce.)
+      nav.replace("/welcome");
     },
   });
 

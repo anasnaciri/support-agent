@@ -6,7 +6,11 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 
-import { AuthedLayout } from "@/components/shell/DashboardShell";
+import {
+  AuthedBareLayout,
+  AuthedLayout,
+} from "@/components/shell/DashboardShell";
+import { WelcomePage } from "@/features/onboarding/WelcomePage";
 import { HomePage } from "@/features/home/HomePage";
 import { TicketsPage } from "@/features/tickets/TicketsPage";
 import { TicketDetailPage } from "@/features/tickets/TicketDetailPage";
@@ -59,6 +63,21 @@ const authedChild = (
   path: string,
   component: () => React.JSX.Element | null,
 ) => createRoute({ getParentRoute: () => authedRoute, path, component });
+
+// Authed but shell-less: the setup wizard owns the whole screen. Note the
+// SEPARATE parent route — nesting it under `authedRoute` would wrap it in the
+// AppShell, whose gate would then redirect it to itself, forever.
+const authedBareRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: "authed-bare",
+  component: AuthedBareLayout,
+});
+
+const welcomeRoute = createRoute({
+  getParentRoute: () => authedBareRoute,
+  path: "/welcome",
+  component: WelcomePage,
+});
 
 const ClientRedirect = ({ to }: { readonly to: string }) => {
   const nav = useAppNavigate();
@@ -190,6 +209,7 @@ const routeTree = rootRoute.addChildren([
     fulfillmentOperatorTicketsRoute,
     fulfillmentOperatorTicketDetailRoute,
   ]),
+  authedBareRoute.addChildren([welcomeRoute]),
   signInRoute,
   signUpRoute,
   goodbyeRoute,

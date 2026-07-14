@@ -97,6 +97,40 @@ describe("resolveFactReferences", () => {
     expect(dangling).toEqual([]);
   });
 
+  it("does not read an email whose DOMAIN is a known namespace as a ref", () => {
+    // The local part runs straight into the `@`, so only a leading boundary
+    // tells "help@store.com" (an address) from "@store.brand_name" (a ref).
+    // Every namespace is a plausible email domain, and `store` is a likely one.
+    const { resolved, dangling } = resolveFactReferences(
+      "Write to help@store.com or returns@shipping.com.",
+      withReturns,
+    );
+    expect(resolved).toBe("Write to help@store.com or returns@shipping.com.");
+    expect(dangling).toEqual([]);
+  });
+
+  it("still resolves a ref that opens the text or follows a space or bracket", () => {
+    const settings = new TenantSettings({ ...withReturns, brandName: "Elva" });
+    expect(resolveFactReferences("@store.brand_name ships fast.", settings).resolved).toBe(
+      "Elva ships fast.",
+    );
+    expect(resolveFactReferences("Contact @store.brand_name today.", settings).resolved).toBe(
+      "Contact Elva today.",
+    );
+    expect(resolveFactReferences("Ask us (@store.brand_name).", settings).resolved).toBe(
+      "Ask us (Elva).",
+    );
+  });
+
+  it("falls back to a neutral noun phrase when the store name is unset", () => {
+    const { resolved, dangling } = resolveFactReferences(
+      "Contact @store.brand_name for help.",
+      withReturns,
+    );
+    expect(resolved).toBe("Contact our store for help.");
+    expect(dangling).toContain("store.brand_name");
+  });
+
   it("flags a typo'd ref in a KNOWN namespace as dangling but leaves it verbatim", () => {
     // Unknown id under a known namespace is a mistake, not an email — the
     // merchant should see a warning, but we can't invent a substitution.

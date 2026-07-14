@@ -113,7 +113,12 @@ function BuiltinAgentDetail({
 
   const override = overrideRow?.model ?? null;
   const systemPromptOverride = overrideRow?.systemPrompt ?? null;
-  const effectiveModel = override ?? agent.model;
+  // The default follows the CONNECTED provider, not the agent's in-code model:
+  // a model id only works on the provider it belongs to, so an OpenRouter id
+  // would be a dead agent for a merchant who brought an Anthropic key. Null
+  // when no provider is connected — there is no model, because nothing runs.
+  const providerDefault = catalog.defaultModel;
+  const effectiveModel = override ?? providerDefault;
   // The tenant-configurable outward actions for this agent (reply, refund, …).
   // Internal plumbing tools are filtered out by `tenantConfigurableActions`.
   const actions = tenantConfigurableActions(agent, catalog);
@@ -153,7 +158,7 @@ function BuiltinAgentDetail({
   }, [override]);
 
   const dirty = agentEditsDirty({
-    defaultModel: agent.model,
+    defaultModel: providerDefault ?? agent.model,
     savedPrompt: systemPromptOverride,
     promptText,
     savedModel: override,
@@ -167,7 +172,9 @@ function BuiltinAgentDetail({
 
   const modelMutation = useMutation({
     mutationFn: async (model: string) => {
-      if (model === "" || model === agent.model) {
+      // Re-picking the default is a RESET (drop the override row), not an
+      // override that would pin today's default forever.
+      if (model === "" || model === (providerDefault ?? agent.model)) {
         await api.clearAgentModel(ctx, agent.id);
         return "reset" as const;
       }
@@ -177,7 +184,7 @@ function BuiltinAgentDetail({
     onSuccess: (outcome) => {
       toast.success(
         outcome === "reset"
-          ? "Model reset to the agent default."
+          ? "Model reset to the default."
           : "Model updated.",
       );
       invalidateAgents();
@@ -188,7 +195,7 @@ function BuiltinAgentDetail({
   const clearModelMutation = useMutation({
     mutationFn: () => api.clearAgentModel(ctx, agent.id),
     onSuccess: () => {
-      toast.success("Model reset to the agent default.");
+      toast.success("Model reset to the default.");
       invalidateAgents();
     },
     onError: () => toast.warning("Something went wrong. Please try again."),
@@ -281,23 +288,35 @@ function BuiltinAgentDetail({
         <CardContent className="space-y-4">
           <dl className="grid grid-cols-[max-content_1fr] items-center gap-x-4 gap-y-2">
             <Row label="Effective model">
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                {effectiveModel}
-              </code>
+              {effectiveModel ? (
+                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                  {effectiveModel}
+                </code>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  Unavailable
+                </span>
+              )}
               {override ? (
                 <Badge variant="info" className="ml-2">
                   override
                 </Badge>
-              ) : (
+              ) : effectiveModel ? (
                 <span className="ml-2 text-xs text-muted-foreground">
-                  agent default
+                  default
+                </span>
+              ) : null}
+            </Row>
+            <Row label="Default">
+              {providerDefault ? (
+                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                  {providerDefault}
+                </code>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  Unavailable until you connect an AI provider
                 </span>
               )}
-            </Row>
-            <Row label="Agent default">
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                {agent.model}
-              </code>
             </Row>
             {agent.fallback ? (
               <Row label="Fallback">
@@ -370,7 +389,7 @@ function BuiltinAgentDetail({
                   key={override ?? "__default__"}
                   name="model"
                   value={override ?? ""}
-                  defaultModel={agent.model}
+                  defaultModel={providerDefault ?? agent.model}
                   options={catalogModels}
                   disabled={catalogModels.length === 0}
                   onValueChange={setSelectedModel}

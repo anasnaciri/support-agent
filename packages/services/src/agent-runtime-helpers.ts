@@ -293,6 +293,17 @@ export const buildSystemPrompt = (
 ): string => {
   const headers: string[] = [];
 
+  // Who the agent is speaking for. Deliberately NOT gated on knowledge.search
+  // like the facts headers below: this is identity, not grounding — any agent
+  // that writes a word to a customer needs it, and without it the model invents
+  // a name or writes around the gap.
+  const brandName = tenantSettings?.brandName?.trim();
+  if (brandName) {
+    headers.push(
+      `[Store identity: you are writing on behalf of ${brandName}. Refer to the store by this name, and never by any other.]`,
+    );
+  }
+
   const sheet = tenantSettings?.fulfillmentOperatorEscalationSheet ?? null;
   const usesSheetTool = agent.tools.some(
     (t) => (t as string) === "fulfillment_operator.add_sheet_row",
@@ -1725,12 +1736,23 @@ export const riskFor = (tool: AnyTool): ApprovalRiskLevel => {
 export const applyOverride = (
   agent: AgentConfig,
   overrideMap: ReadonlyMap<AgentConfig["id"], AgentOverride>,
+  providerDefaultModel?: string | null,
 ): AgentConfig => {
   const o = overrideMap.get(agent.id);
-  if (!o) return agent;
+
+  // Model precedence, most specific first:
+  //   1. the merchant's explicit pick on the Agent page (an override row),
+  //   2. the connected provider's default (`DEFAULT_MODEL_BY_PROVIDER`) — the
+  //      agent's in-code model is an OpenRouter id, which a direct Anthropic or
+  //      OpenAI key cannot serve,
+  //   3. the agent's in-code model, reached only when no provider is connected
+  //      — in which case nothing runs anyway (the runtime parks the ticket).
+  const model = o?.model ?? providerDefaultModel ?? agent.model;
+
+  if (!o) return model === agent.model ? agent : { ...agent, model };
   let next = agent;
-  if (o.model && o.model !== agent.model) {
-    next = { ...next, model: o.model };
+  if (model !== agent.model) {
+    next = { ...next, model };
   }
   const extra = o.systemPrompt?.trim();
   if (extra) {

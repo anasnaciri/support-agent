@@ -24,6 +24,39 @@ import {
  */
 export type LLMProvider = "openrouter" | "anthropic" | "openai";
 
+/**
+ * The model an agent runs on when the merchant has never picked one.
+ *
+ * This CANNOT be a single hardcoded id, which is what it used to be (every
+ * agent config pinned `google/gemini-3.5-flash`). The id is passed to the
+ * connected provider's SDK verbatim, so it has to be one that provider can
+ * serve: OpenRouter's namespaced `vendor/model` form is meaningless to
+ * Anthropic's API, and a bare `claude-…` is meaningless to OpenAI's. A merchant
+ * who brought an Anthropic key and never opened the Agent page would otherwise
+ * have every ticket fail at the provider and park in human takeover.
+ *
+ * Each entry is a floating "latest" pointer on purpose: a merchant who has
+ * expressed no preference gets the current default model, not one frozen at the
+ * date they signed up. A merchant who wants a specific model pins it on the
+ * Agent page, and that pin always wins (see `applyOverride`).
+ */
+export const DEFAULT_MODEL_BY_PROVIDER: Readonly<Record<LLMProvider, string>> = {
+  openrouter: "google/gemini-flash-latest",
+  anthropic: "claude-sonnet-5",
+  openai: "gpt-5.6-luna",
+};
+
+/**
+ * The default model for the tenant's connected provider, or `null` when no
+ * provider is connected — in which case there is no model to name, because
+ * nothing can run at all (the runtime parks on `LLMCredentialMissing`). The
+ * dashboard renders that null as "Unavailable" rather than a model the merchant
+ * cannot use.
+ */
+export const resolveDefaultModel = (
+  provider: LLMProvider | null,
+): string | null => (provider ? DEFAULT_MODEL_BY_PROVIDER[provider] : null);
+
 export interface LLMCredential {
   readonly provider: LLMProvider;
   readonly apiKey: string;

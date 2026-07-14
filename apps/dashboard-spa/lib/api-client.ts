@@ -46,6 +46,7 @@ import type {
   WorkspacesResponse,
   OnboardingStateView,
   OnboardingAdvanceInput,
+  StoreProfileView,
   MePermissionsResponse,
   MembersResponse,
   RolesResponse,
@@ -708,6 +709,14 @@ export const api = {
   // ---- Setup wizard ----
   onboardingState: (ctx: CallCtx): Promise<OnboardingStateView> =>
     okBody("/onboarding/state", ctx) as Promise<OnboardingStateView>,
+
+  /** The connected store's own name/domain/currency — the brand-name prefill. */
+  storeProfile: (ctx: CallCtx): Promise<StoreProfileView> =>
+    okBody("/store-profile", ctx) as Promise<StoreProfileView>,
+
+  /** The name the agent writes under. `null` clears it. */
+  setBrandName: (ctx: CallCtx, brandName: string | null): Promise<CallResult> =>
+    call("/brand", { method: "POST", body: { brandName }, ctx }),
 
   /**
    * Record a step outcome and/or move the resume pointer. The pointer-only form

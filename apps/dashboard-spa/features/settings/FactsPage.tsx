@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { RotateCcw, Truck } from "lucide-react";
+import { RotateCcw, Store as StoreIcon, Truck } from "lucide-react";
 
 import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
@@ -58,6 +58,73 @@ const invalidateFacts = (
  * independent of the shipping form: it must work even when the delivery
  * times above were never filled in.
  */
+/**
+ * The name the agent signs its replies with, referenceable in a playbook as
+ * `@store.brand_name`. Read from Shopify during setup and confirmed by the
+ * merchant, because a store's legal name is often not the one its customers
+ * know. Left blank, the agent simply never claims a name.
+ */
+function BrandNameForm({
+  brandName,
+  ctx,
+  reportDirty,
+}: {
+  readonly brandName: string | null;
+  readonly ctx: Ctx;
+  readonly reportDirty: ReportDirty;
+}) {
+  const qc = useQueryClient();
+  const [value, setValue] = useState(brandName ?? "");
+
+  const saved = brandName ?? "";
+  useReportDirty(reportDirty, "brand", value.trim() !== saved.trim());
+
+  const save = useMutation({
+    mutationFn: (next: string) => api.setBrandName(ctx, next),
+    onSuccess: (res) => {
+      if (res.status !== 200) {
+        toast.warning("Something went wrong. Please try again.");
+        return;
+      }
+      invalidateFacts(qc, ctx.workspaceId);
+      toast.success("Store name saved.");
+    },
+    onError: () => toast.warning("Something went wrong. Please try again."),
+  });
+
+  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    save.mutate(value.trim());
+  };
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="grid gap-1.5">
+        <Label htmlFor="brandName">Store name</Label>
+        <Input
+          id="brandName"
+          name="brandName"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          maxLength={120}
+          placeholder="e.g. Elva Labs"
+        />
+        <p className={hint}>
+          The name your agent writes under. Reference it in a playbook with{" "}
+          <span className="font-mono">@store.brand_name</span>.
+        </p>
+      </div>
+      <Button
+        type="submit"
+        size="sm"
+        disabled={save.isPending || value.trim().length === 0}
+      >
+        {save.isPending ? "Saving…" : "Save store name"}
+      </Button>
+    </form>
+  );
+}
+
 function AddressUpdateAfterFulfillmentToggle({
   enabled,
   ctx,
@@ -573,6 +640,29 @@ export function FactsPage() {
           change lands everywhere at once.
         </p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <StoreIcon className="size-4" aria-hidden />
+            Your store
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-0">
+          {settingsQuery.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <BrandNameForm
+              // Remount when the saved name arrives so the input picks up its
+              // stored value instead of keeping its initial "".
+              key={settingsQuery.data?.brandName ? "loaded" : "empty"}
+              brandName={settingsQuery.data?.brandName ?? null}
+              ctx={ctx}
+              reportDirty={reportDirty}
+            />
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3">

@@ -10,6 +10,14 @@ import { useRequirePermission } from "@/lib/require-permission";
 import { LegalRequiredError, NoTenantError } from "@/lib/errors";
 import { formatRelativeTime } from "@/lib/format";
 import { integrationStatusVariant } from "@/lib/status-variants";
+import {
+  LLM_PROVIDERS,
+  PROVIDER_DESCRIPTION,
+  PROVIDER_LABEL,
+  compatibleModelsFor,
+  isLlmProvider,
+  type LlmProvider,
+} from "@/lib/llm-providers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,36 +26,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
-
-const LLM_PROVIDERS = ["openrouter", "anthropic", "openai"] as const;
-type LlmProvider = (typeof LLM_PROVIDERS)[number];
-
-const PROVIDER_LABEL: Readonly<Record<LlmProvider, string>> = {
-  openrouter: "OpenRouter",
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-};
-
-const PROVIDER_DESCRIPTION: Readonly<Record<LlmProvider, string>> = {
-  openrouter:
-    "One key that works with every AI model your agents use. Recommended unless you need direct provider billing.",
-  anthropic:
-    "Direct Anthropic access. Your agents must use Anthropic models (claude-opus-4-7, claude-sonnet-4-6, …).",
-  openai:
-    "Direct OpenAI access. Your agents must use OpenAI models (gpt-5o, gpt-4o, …).",
-};
-
-const isLlmProvider = (p: string): p is LlmProvider =>
-  (LLM_PROVIDERS as ReadonlyArray<string>).includes(p);
-
-const compatibleModelsFor = (provider: LlmProvider, model: string): boolean => {
-  if (provider === "openrouter") return true;
-  if (provider === "anthropic")
-    return !model.includes("/") || model.startsWith("anthropic/");
-  if (provider === "openai")
-    return !model.includes("/") || model.startsWith("openai/");
-  return false;
-};
 
 interface ConnectInput {
   readonly provider: string;

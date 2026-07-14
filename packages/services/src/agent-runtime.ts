@@ -30,6 +30,10 @@ import { TicketRepository } from "./ticket-repository.js";
 import { AuditLogService } from "./audit-log.js";
 import { ApprovalService } from "./approval-service.js";
 import { LLMService } from "./llm-service.js";
+import {
+  LLMCredentialResolver,
+  resolveDefaultModel,
+} from "./llm-credential-resolver.js";
 import { ShopifyService } from "./shopify-service.js";
 import { TransactionRunner } from "./transaction-runner.js";
 import { PlatformMailService } from "./platform-mail.js";
@@ -166,6 +170,27 @@ const fulfillmentOperatorDisabledForSelectedScenario = (
   );
 };
 
+/**
+ * The default model for whichever LLM provider this tenant brought a key for,
+ * or `null` when we can't tell (no resolver wired, no credential, a DB blip).
+ *
+ * Deliberately total: a failure here must not fail the tick. If the credential
+ * really is missing, the LLM call a few lines later parks the ticket with the
+ * precise `llm_credential_missing` reason the merchant is shown — that is the
+ * right place to report it, and reporting it twice from two layers would just
+ * make the audit trail lie about what happened.
+ */
+const resolveProviderDefaultModel = (
+  maybeResolver: Option.Option<Context.Tag.Service<typeof LLMCredentialResolver>>,
+  tenantId: TenantId,
+): Effect.Effect<string | null> =>
+  Option.isNone(maybeResolver)
+    ? Effect.succeed(null)
+    : maybeResolver.value.resolve(tenantId).pipe(
+        Effect.map((cred) => resolveDefaultModel(cred.provider)),
+        Effect.catchAll(() => Effect.succeed(null)),
+      );
+
 const AgentRuntimeLayer = Layer.effect(
   AgentRuntime,
   Effect.gen(function* () {
@@ -200,6 +225,15 @@ const AgentRuntimeLayer = Layer.effect(
     // don't, in which ticket the knowledge-base title header is simply omitted.
     // The `knowledge.search` tool resolves the service itself at execute time.
     const maybeKnowledge = yield* Effect.serviceOption(KnowledgeBaseService);
+    // Optional — same reason as the others. Present in the worker; absent in
+    // lean test layers. Used ONLY to learn WHICH provider the tenant brought a
+    // key for, so an agent the merchant never configured runs on a model that
+    // provider can actually serve (see DEFAULT_MODEL_BY_PROVIDER). Absent or
+    // erroring, the agent's in-code model stands — which is the pre-existing
+    // behavior, and moot anyway, since without a credential the tick parks.
+    const maybeLlmCredentials = yield* Effect.serviceOption(
+      LLMCredentialResolver,
+    );
     // Optional — captured at layer-build time so `tick` can close over it.
     // Present in the worker (which wires ImageHashStoreLive); absent in the
     // many test layers that don't, in which ticket duplicate-photo detection
@@ -1647,6 +1681,16 @@ const AgentRuntimeLayer = Layer.effect(
                 ),
               ),
             );
+          // Which provider the tenant's key is for — the default model has to be
+          // one that provider serves. Resolved once per tick alongside the
+          // overrides, and never fatal: any failure here leaves the agent on its
+          // in-code model, and a genuinely missing credential is caught (and
+          // parked) by the LLM call itself, with a far better error than this
+          // could produce.
+          const providerDefaultModel = yield* resolveProviderDefaultModel(
+            maybeLlmCredentials,
+            working.tenantId,
+          );
           // Load tenant settings once per tick — `buildSystemPrompt` reads
           // `fulfillmentOperatorEscalationSheet` to optionally append the fulfillmentOperator
           // header to the agent prompt. DB failures fall back to `null`
@@ -1731,14 +1775,14 @@ const AgentRuntimeLayer = Layer.effect(
           // The swap is skipped when the resolution agent can't be resolved for
           // this tenant, which leaves the ticket on triage — the one remaining
           // path back to the legacy specialists, and the safe failure mode.
-          let entryBase: AgentConfig = applyOverride(resolved, overrideMap);
+          let entryBase: AgentConfig = applyOverride(resolved, overrideMap, providerDefaultModel);
           if ((resolved.id as string) === "support-triage") {
             const resolutionAgent = yield* resolver.tryResolve(
               working.tenantId,
               makeAgentId(SCENARIO_RESOLUTION_AGENT_ID),
             );
             if (resolutionAgent) {
-              entryBase = applyOverride(resolutionAgent, overrideMap);
+              entryBase = applyOverride(resolutionAgent, overrideMap, providerDefaultModel);
               // Persist the entry binding so the dashboard shows the agent that
               // is actually handling the ticket and a later resume runs it
               // directly (resolves straight to the resolution agent, no re-swap).
@@ -2156,7 +2200,7 @@ const AgentRuntimeLayer = Layer.effect(
                   });
                   return { agent, current, done: null };
                 }
-                agentBase = applyOverride(resolvedTarget, overrideMap);
+                agentBase = applyOverride(resolvedTarget, overrideMap, providerDefaultModel);
                 const targetAgent = withScenario(agentBase, current.context);
                 current = yield* tx.run(
                   Effect.gen(function* () {
@@ -3078,7 +3122,7 @@ const AgentRuntimeLayer = Layer.effect(
                 );
                 continue;
               }
-              agentBase = applyOverride(resolvedNext, overrideMap);
+              agentBase = applyOverride(resolvedNext, overrideMap, providerDefaultModel);
               const nextAgent = withScenario(agentBase, current.context);
               current = yield* tx.run(
                 Effect.gen(function* () {

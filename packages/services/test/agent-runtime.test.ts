@@ -413,6 +413,23 @@ describe("buildSystemPrompt", () => {
     );
   });
 
+  it("grounds every agent in the store's brand name", () => {
+    // The name the agent signs its replies with. Unlike the facts headers this
+    // is NOT gated on knowledge.search: an agent that writes to a customer at
+    // all needs to know whose store it is speaking for.
+    const named = new TenantSettings({
+      ...makeSettings(null),
+      brandName: "Elva Labs",
+    });
+    const writer = baseAgent({ tools: ["conversation.reply"] });
+    expect(buildSystemPrompt(writer, named)).toContain("Elva Labs");
+
+    // Unset → nothing at all, rather than an empty or guessed name.
+    expect(buildSystemPrompt(writer, makeSettings(null))).toBe(
+      withPreamble("Base prompt for testing."),
+    );
+  });
+
   it("renders each customs payer as a merchant-facing sentence, and omits it when unset", () => {
     const agent = baseAgent({ tools: ["knowledge.search"] });
     const render = (customsDuties: ShippingFacts["customsDuties"]) =>

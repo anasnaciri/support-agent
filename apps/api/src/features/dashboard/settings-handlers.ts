@@ -18,6 +18,7 @@ import {
   defaultResolutionPolicy,
   legalAcceptanceIsCurrent,
   normalizeBlockedSenderInput,
+  resolveDefaultModel,
   TenantAgentOverridesService,
   TenantRepository,
   type BlockedSenderEntry,
@@ -46,7 +47,7 @@ import {
   resolveActiveLlmCredential,
   resolveLlmCredentialStatus,
 } from "./llm.js";
-import { resolveShopCurrencyCode } from "./shopify-panels.js";
+import { resolveShopCurrencyCode, resolveStoreProfile } from "./shopify-panels.js";
 import {
   deleteResultStatus,
   deleteTenantAccount,
@@ -73,13 +74,24 @@ export const handleDashboardCatalog = async (
 ): Promise<FastifyReply> => {
   const auth = await authenticateDashboard(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
-  const customs = await Effect.runPromise(
+  const { customs, defaultModel } = await Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
         const svc = yield* CustomAgentService;
-        return yield* svc
+        const customs = yield* svc
           .listForTenant(TenantId(auth.tenantId))
           .pipe(Effect.catchAll(() => Effect.succeed([])));
+        // The default model follows the connected provider: an OpenRouter id is
+        // not servable by a direct Anthropic key, and vice versa. This resolves
+        // the EFFECTIVE credential (workspace key, else the account-level
+        // OpenRouter default) — the same one the runtime will use. None → null,
+        // which the Agent page renders as "Unavailable" rather than naming a
+        // model the merchant cannot use.
+        const cred = yield* resolveActiveLlmCredential(auth.tenantId);
+        return {
+          customs,
+          defaultModel: cred ? resolveDefaultModel(cred.provider) : null,
+        };
       }),
       layer,
     ),
@@ -87,7 +99,7 @@ export const handleDashboardCatalog = async (
   return sendJson(
     res,
     200,
-    buildCatalogResponse(ALL_AGENTS, ALL_TOOLS, customs),
+    buildCatalogResponse(ALL_AGENTS, ALL_TOOLS, customs, defaultModel),
   );
 };
 
@@ -359,6 +371,62 @@ export const handleDashboardShopCurrency = async (
   return sendJson(res, 200, { currencyCode });
 };
 
+// GET /dashboard/store-profile — the connected store's own identity, read live
+// from Shopify. Backs the setup wizard's brand-name prefill: the merchant
+// confirms a real name instead of typing one, but nothing is saved until they
+// do. Best-effort — an unconnected or unreachable store yields nulls.
+export const handleDashboardStoreProfile = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const profile = await Effect.runPromise(
+    Effect.provide(resolveStoreProfile(TenantId(auth.tenantId)), layer),
+  );
+  return sendJson(res, 200, profile);
+};
+
+/** Long enough for a real trading name, short enough to stay a name. */
+const BRAND_NAME_MAX = 120;
+
+// POST /dashboard/brand — the name the agent writes under. Set on the setup
+// wizard's first step and editable afterwards on the Facts page.
+export const handleDashboardBrandName = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const raw = parseJsonBody(req)["brandName"];
+  // An explicit null clears it (back to "the agent claims no name"); anything
+  // else must be a usable name.
+  if (raw !== null && typeof raw !== "string") {
+    return sendJson(res, 400, { error: "invalid_brand_name" });
+  }
+  const trimmed = typeof raw === "string" ? raw.trim() : null;
+  if (trimmed !== null && trimmed.length === 0) {
+    return sendJson(res, 400, { error: "invalid_brand_name" });
+  }
+  if (trimmed !== null && trimmed.length > BRAND_NAME_MAX) {
+    return sendJson(res, 400, { error: "brand_name_too_long" });
+  }
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setBrandName(TenantId(auth.tenantId), trimmed);
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true, brandName: trimmed });
+};
+
 // GET /dashboard/settings — resolved tenant settings (refund policy +
 // fulfillment-operator-escalation sheet + notification email). Defaults are applied by
 // getSettings; a transient error falls back to platform defaults.
@@ -387,6 +455,7 @@ export const handleDashboardSettings = async (
             shippingFacts: null,
             addressUpdateAfterFulfillment: false,
             returnsFacts: null,
+            brandName: null,
           } as const),
         ),
       ),
@@ -410,6 +479,9 @@ export const handleDashboardSettings = async (
       settings.addressUpdateAfterFulfillment === true,
     // Null until the merchant fills the Knowledge base page's returns form.
     returnsFacts: settings.returnsFacts ?? null,
+    // The name the agent writes under. Null until confirmed in the setup
+    // wizard (or on the Facts page).
+    brandName: settings.brandName ?? null,
   });
 };
 

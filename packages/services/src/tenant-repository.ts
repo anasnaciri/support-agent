@@ -872,6 +872,15 @@ export class TenantSettings extends Data.Class<{
    */
   readonly returnsFacts?: ReturnsFacts | null;
   /**
+   * What the store calls itself to its customers — the name the agent writes
+   * under. Read from Shopify at connect time and then confirmed (or corrected)
+   * by the merchant, because a store's legal name and the name it trades under
+   * are often different, and only the merchant knows which one a customer would
+   * recognise. `null` until confirmed; the agent then simply doesn't claim a
+   * name rather than guessing one.
+   */
+  readonly brandName?: string | null;
+  /**
    * Setup-wizard progress for this workspace. `null` (or absent) means the
    * tenant is NOT in onboarding — which is exactly how every tenant created
    * before the wizard shipped stays out of it, with no migration. Only rows
@@ -1001,6 +1010,15 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setReturnsFacts: (
       tenantId: TenantId,
       facts: ReturnsFacts | null,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+
+    /**
+     * Set (or clear, with `null`) the store's customer-facing brand name. Same
+     * shallow JSONB merge as `setRefundPolicy` — unrelated settings preserved.
+     */
+    readonly setBrandName: (
+      tenantId: TenantId,
+      name: string | null,
     ) => Effect.Effect<void, TenantRepositoryError>;
 
     /**
@@ -1161,6 +1179,14 @@ export const TenantRepositoryTest = (
           tenantId,
           new TenantSettings({ ...prev, returnsFacts: facts }),
         );
+        return Effect.void;
+      },
+      setBrandName: (tenantId, name) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(tenantId, new TenantSettings({ ...prev, brandName: name }));
         return Effect.void;
       },
       setOnboardingState: (tenantId, state) => {

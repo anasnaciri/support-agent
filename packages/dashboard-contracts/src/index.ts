@@ -607,6 +607,14 @@ export interface AgentDto {
 export interface CatalogResponse {
   readonly agents: ReadonlyArray<AgentDto>;
   readonly tools: ReadonlyArray<ToolDto>;
+  /**
+   * The model an agent runs on when the merchant has picked none — resolved
+   * from the LLM provider this workspace connected, because a model id only
+   * works on the provider it belongs to. `null` when no provider is connected:
+   * no agent can run, and the Agent page says so rather than naming a model the
+   * merchant can't use.
+   */
+  readonly defaultModel: string | null;
 }
 
 // ============================================================
@@ -990,6 +998,22 @@ export interface TenantSettingsView {
   readonly addressUpdateAfterFulfillment: boolean;
   /** The store's returns facts; `null` until the merchant configures one. */
   readonly returnsFacts: ReturnsFactsView | null;
+  /**
+   * The name the agent writes under, confirmed by the merchant during setup.
+   * `null` until then — the agent claims no name rather than guessing one.
+   */
+  readonly brandName: string | null;
+}
+
+/**
+ * The connected store's own identity, read live from Shopify — the setup
+ * wizard's brand-name prefill. Every field is null when no store is connected
+ * or Shopify can't be reached.
+ */
+export interface StoreProfileView {
+  readonly name: string | null;
+  readonly primaryDomainUrl: string | null;
+  readonly currencyCode: string | null;
 }
 
 // ============================================================

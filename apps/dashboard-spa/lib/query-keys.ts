@@ -42,6 +42,7 @@ export const qk = {
   factReferences: (w: string) => ["fact-references", w] as const,
   blockedSenders: (w: string) => ["blocked-senders", w] as const,
   connections: (w: string) => ["connections", w] as const,
+  llmStatus: (w: string) => ["llm-status", w] as const,
   shopifyApp: (w: string) => ["shopify-app", w] as const,
   knowledge: (w: string) => ["knowledge", w] as const,
   knowledgeDoc: (w: string, id: string) => ["knowledge", w, id] as const,
@@ -53,6 +54,7 @@ export const qk = {
   roles: (w: string) => ["roles", w] as const,
   permissionCatalog: (w: string) => ["permission-catalog", w] as const,
   shopCurrency: (w: string) => ["shop-currency", w] as const,
+  storeProfile: (w: string) => ["store-profile", w] as const,
   fulfillmentOperatorTickets: (w: string) => ["fulfillment-operator-tickets", w] as const,
   fulfillmentOperatorTicket: (w: string, id: string) => ["fulfillment-operator-ticket", w, id] as const,
 } as const;

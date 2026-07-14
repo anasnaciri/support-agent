@@ -66,7 +66,15 @@ export const buildCatalogResponse = (
   agents: ReadonlyArray<AgentConfig>,
   tools: ReadonlyArray<AnyTool>,
   customs: ReadonlyArray<CustomAgentRecord> = [],
+  /**
+   * The default model for the provider this tenant brought a key for — what an
+   * agent runs on when the merchant has picked nothing. `null` when no provider
+   * is connected, which the dashboard renders as "Unavailable": there is no
+   * model to name, because nothing can run at all.
+   */
+  defaultModel: string | null = null,
 ): CatalogResponse => ({
   agents: [...agents.map(toAgentDto), ...customs.map(customRecordToAgentDto)],
   tools: tools.map(toToolDto),
+  defaultModel,
 });

@@ -73,6 +73,43 @@ export const resolveShopCurrencyCode = (
     );
   });
 
+export interface StoreProfile {
+  readonly name: string | null;
+  readonly primaryDomainUrl: string | null;
+  readonly currencyCode: string | null;
+}
+
+/**
+ * The store's own identity, straight from Shopify. The setup wizard prefills
+ * the brand-name field with `name` so the merchant confirms a real value rather
+ * than typing one from scratch — but we never SAVE it on their behalf, because
+ * the legal name Shopify holds is often not the name customers know.
+ *
+ * Best-effort like the currency read above: no connection, network trouble, or
+ * expired auth all resolve to nulls, and the wizard just asks the merchant to
+ * type the name.
+ */
+export const resolveStoreProfile = (
+  tenantId: TenantId,
+): Effect.Effect<StoreProfile, never, ShopifyService> =>
+  Effect.gen(function* () {
+    const shopify = yield* ShopifyService;
+    return yield* shopify.getShopInfo(tenantId).pipe(
+      Effect.map((info) => ({
+        name: info.name,
+        primaryDomainUrl: info.primaryDomainUrl,
+        currencyCode: info.currencyCode,
+      })),
+      Effect.catchAll(() =>
+        Effect.succeed({
+          name: null,
+          primaryDomainUrl: null,
+          currencyCode: null,
+        }),
+      ),
+    );
+  });
+
 /**
  * Single source of truth for the ticket's customer, resolved through ONE ordered
  * chain of fallbacks (never several independent lookups racing to fill the same
