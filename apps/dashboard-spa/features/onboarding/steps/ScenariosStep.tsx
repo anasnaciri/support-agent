@@ -1,9 +1,15 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
 
 import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
 import { useWorkspaceCtx } from "@/lib/session-context";
+import { cn } from "@/lib/utils";
+import {
+  PERMISSION_OPTIONS,
+  REMEDY_ACTIONS,
+} from "@/lib/resolution-action-labels";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "@/components/ui/link";
@@ -20,6 +26,7 @@ import type { WizardStepProps } from "../steps";
 
 export function ScenariosStep({ onDone }: WizardStepProps) {
   const ctx = useWorkspaceCtx();
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const policy = useQuery({
     queryKey: qk.resolutionPolicy(ctx.workspaceId),
@@ -35,20 +42,95 @@ export function ScenariosStep({ onDone }: WizardStepProps) {
   return (
     <div className="space-y-6">
       <ul className="divide-y rounded-lg border">
-        {scenarios.map((s) => (
-          <li key={s.key} className="flex items-center gap-3 px-4 py-3">
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">
-              {s.label}
-            </span>
-            <Badge variant="secondary">
-              {s.enabledActions.length === 0
-                ? "Replies only"
-                : `${s.enabledActions.length} action${
-                    s.enabledActions.length === 1 ? "" : "s"
-                  }`}
-            </Badge>
-          </li>
-        ))}
+        {scenarios.map((s) => {
+          const expanded = expandedKey === s.key;
+          const panelId = `onboarding-scenario-${s.key}`;
+          return (
+            <li key={s.key}>
+              <button
+                type="button"
+                aria-expanded={expanded}
+                aria-controls={panelId}
+                onClick={() => setExpandedKey(expanded ? null : s.key)}
+                className="flex min-h-12 w-full items-center gap-3 px-4 py-3 text-left transition-[background-color,scale] duration-150 ease-out hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset active:scale-[0.96]"
+              >
+                <span className="min-w-0 flex-1 text-sm font-medium">
+                  {s.label}
+                </span>
+                <Badge variant="secondary" className="tabular-nums">
+                  {s.enabledActions.length === 0
+                    ? "Replies only"
+                    : `${s.enabledActions.length} action${
+                        s.enabledActions.length === 1 ? "" : "s"
+                      }`}
+                </Badge>
+                <ChevronDown
+                  className={cn(
+                    "size-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-out",
+                    expanded && "rotate-180",
+                  )}
+                  aria-hidden
+                />
+              </button>
+
+              {expanded ? (
+                <div
+                  id={panelId}
+                  role="region"
+                  aria-label={`${s.label} playbook`}
+                  className="space-y-4 border-t bg-muted/25 px-4 py-4"
+                >
+                  <section className="space-y-1.5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Playbook notes
+                    </h3>
+                    <p className="whitespace-pre-wrap text-pretty text-sm leading-6">
+                      {s.notes?.trim() || "No additional playbook notes."}
+                    </p>
+                  </section>
+
+                  <section className="space-y-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Actions
+                    </h3>
+                    {s.enabledActions.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Reply to the customer without taking a remedy action.
+                      </p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {s.enabledActions.map((action) => {
+                          const label =
+                            REMEDY_ACTIONS.find(
+                              (candidate) => candidate.tool === action.tool,
+                            )?.label ?? action.tool;
+                          const permission =
+                            PERMISSION_OPTIONS.find(
+                              (candidate) =>
+                                candidate.value === action.permission,
+                            )?.label ?? action.permission;
+                          return (
+                            <li
+                              key={action.tool}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background px-3 py-2 shadow-sm ring-1 ring-foreground/5"
+                            >
+                              <span className="text-sm font-medium">
+                                {label}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {permission}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </section>
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
 
       <p className="text-sm text-muted-foreground">

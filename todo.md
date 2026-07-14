@@ -17,6 +17,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Onboarding scenario review is an accordion** (2026-07-14).
+      Step 5 now starts each enabled scenario collapsed; selecting a row opens
+      its playbook notes and enabled remedy actions, including the same
+      merchant-facing action name and Ask/Automatic permission label used by
+      the scenario editor. Opening another scenario closes the first, and
+      selecting the open row collapses it. Empty notes/actions have explicit
+      read-only fallback copy. Verified red -> green with a jsdom interaction
+      regression, 25 focused wizard tests, the dashboard SPA production build,
+      `git diff --check`, and `pnpm build`.
+
 - [x] **Legacy tenants can preview the setup wizard in production**
       (2026-07-14). Opening `/welcome?preview=1` suppresses the wizard's
       legacy-tenant redirect and renders the flow from step one against the
