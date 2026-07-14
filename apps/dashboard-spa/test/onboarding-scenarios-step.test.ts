@@ -4,12 +4,13 @@ import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const { resolutionPolicy } = vi.hoisted(() => ({
+const { resolutionPolicy, setResolutionPolicy } = vi.hoisted(() => ({
   resolutionPolicy: vi.fn(),
+  setResolutionPolicy: vi.fn(),
 }));
 
 vi.mock("@/lib/api-client", () => ({
-  api: { resolutionPolicy },
+  api: { resolutionPolicy, setResolutionPolicy },
 }));
 
 vi.mock("@/lib/session-context", () => ({
@@ -61,6 +62,8 @@ const scenarioButton = (label: string): HTMLButtonElement => {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
+  setResolutionPolicy.mockResolvedValue({ status: 200, body: null });
   resolutionPolicy.mockResolvedValue({
     scenarios: [
       {
@@ -82,6 +85,16 @@ beforeEach(() => {
         enabledActions: [{ tool: "discount.create", permission: "allow" }],
         fulfillmentOperatorMode: "none",
         notes: "Offer a modest incentive when it can save the relationship.",
+      },
+      {
+        key: "custom:wholesale",
+        label: "Wholesale question",
+        recognition: "A buyer asks about a bulk order.",
+        builtin: false,
+        enabled: true,
+        enabledActions: [],
+        fulfillmentOperatorMode: "none",
+        notes: null,
       },
     ],
   });
@@ -120,5 +133,81 @@ describe("onboarding scenario review", () => {
     await act(async () => retention.click());
     expect(retention.getAttribute("aria-expanded")).toBe("false");
     expect(container.textContent).not.toContain("Offer a modest incentive");
+  });
+
+  it("lets the merchant edit a playbook and persist the scenario configuration", async () => {
+    await mount();
+    await act(async () => scenarioButton("Delivery problem").click());
+
+    const notes = container.querySelector<HTMLTextAreaElement>('[name="notes:delivery_issue"]')!;
+    expect(notes).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        notes,
+        "Verify tracking, then refund after approval.",
+      );
+      notes.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const permission = container.querySelector<HTMLSelectElement>('[name="permission:delivery_issue:refund.create"]')!;
+    expect(permission).not.toBeNull();
+    await act(async () => {
+      permission.value = "allow";
+      permission.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => scenarioButton("Save and continue").click());
+
+    const saved = setResolutionPolicy.mock.calls[0]?.[1];
+    expect(saved[0]).toMatchObject({
+      key: "delivery_issue",
+      notes: "Verify tracking, then refund after approval.",
+      enabledActions: [{ tool: "refund.create", permission: "allow" }],
+    });
+  });
+
+  it("lets the merchant edit a custom scenario's name and matching rule", async () => {
+    await mount();
+    await act(async () => scenarioButton("Wholesale question").click());
+    const label = container.querySelector<HTMLInputElement>('[name="label:custom:wholesale"]')!;
+    const recognition = container.querySelector<HTMLTextAreaElement>('[name="recognition:custom:wholesale"]')!;
+    expect(label).not.toBeNull();
+    expect(recognition).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        recognition,
+        "A buyer asks for volume pricing or a bulk order.",
+      );
+      recognition.dispatchEvent(new Event("input", { bubbles: true }));
+      recognition.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => scenarioButton("Save and continue").click());
+    expect(setResolutionPolicy.mock.calls[0]?.[1][2]).toMatchObject({
+      label: "Wholesale question",
+      recognition: "A buyer asks for volume pricing or a bulk order.",
+    });
+  });
+
+  it("configures active state, available actions, and fulfillment handling", async () => {
+    await mount();
+    await act(async () => scenarioButton("Delivery problem").click());
+    const region = container.querySelector<HTMLElement>('[aria-label="Delivery problem playbook"]')!;
+    const active = region.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    const discountPermission = region.querySelector<HTMLSelectElement>('[name="permission:delivery_issue:discount.create"]')!;
+    const discountEnabled = discountPermission.closest("li")!.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    const fulfillment = document.getElementById("fulfillment:delivery_issue") as HTMLSelectElement;
+    await act(async () => {
+      active.click();
+      discountEnabled.click();
+      fulfillment.value = "notify_and_proceed";
+      fulfillment.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => scenarioButton("Save and continue").click());
+    expect(setResolutionPolicy.mock.calls[0]?.[1][0]).toMatchObject({
+      enabled: false,
+      fulfillmentOperatorMode: "notify_and_proceed",
+      enabledActions: [
+        { tool: "refund.create", permission: "ask" },
+        { tool: "discount.create", permission: "ask" },
+      ],
+    });
   });
 });

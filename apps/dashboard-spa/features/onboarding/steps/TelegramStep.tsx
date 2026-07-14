@@ -18,6 +18,9 @@ import { activeConnection, useConnections } from "../use-connect";
 //
 // The link is a signed t.me deep link with a 15-minute TTL, minted server-side.
 
+export const TELEGRAM_APPROVAL_COPY =
+  "When the agent needs your approval, for example for refunds and cancellations, it will message you here. Approve or reject from your phone and the agent carries on.";
+
 export function TelegramStep({ onDone, canEdit }: WizardStepProps) {
   const ctx = useWorkspaceCtx();
   const connections = useConnections();
@@ -74,9 +77,7 @@ export function TelegramStep({ onDone, canEdit }: WizardStepProps) {
             <span className="text-sm font-medium">Telegram</span>
           </div>
           <p className="text-sm text-muted-foreground">
-            When the agent needs your approval — a refund, a cancellation — it
-            will message you here. Approve or reject from your phone and the agent
-            carries on.
+            {TELEGRAM_APPROVAL_COPY}
           </p>
           {link ? (
             <div className="space-y-2">

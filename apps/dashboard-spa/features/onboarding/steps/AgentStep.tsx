@@ -1,109 +1,147 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
 import { useWorkspaceCtx } from "@/lib/session-context";
-import { findAgent, tenantConfigurableActions } from "@/lib/catalog";
+import { currentToolPermission, findAgent, tenantConfigurableActions } from "@/lib/catalog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Link } from "@/components/ui/link";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Textarea } from "@/components/ui/textarea";
 import type { WizardStepProps } from "../steps";
-
-// Step 7. The scenario-resolution agent — the one agent on the live path, and
-// the one the whole dashboard's Agent page is about.
-//
-// Read-only here, deliberately. The model default now follows the connected
-// provider (so it is already correct), and the per-tool Ask/Auto choices are a
-// judgment a merchant can only make once they've seen the agent work. What this
-// step owes them is to SHOW the permissions before a single customer sees a
-// reply: which actions run on their own, and which wait for approval.
 
 const SCENARIO_AGENT_ID = "scenario-resolution-agent";
 
-export function AgentStep({ onDone }: WizardStepProps) {
+export function AgentStep({ onDone, canEdit }: WizardStepProps) {
   const ctx = useWorkspaceCtx();
+  const qc = useQueryClient();
+  const catalogQ = useQuery({ queryKey: qk.catalog(ctx.workspaceId), queryFn: () => api.catalog(ctx) });
+  const modelsQ = useQuery({ queryKey: qk.models(ctx.workspaceId), queryFn: () => api.models(ctx) });
+  const overridesQ = useQuery({ queryKey: qk.agentOverrides(ctx.workspaceId), queryFn: () => api.agentOverrides(ctx) });
 
-  const catalog = useQuery({
-    queryKey: qk.catalog(ctx.workspaceId),
-    queryFn: () => api.catalog(ctx),
+  const catalog = catalogQ.data;
+  const agent = catalog ? findAgent(catalog, SCENARIO_AGENT_ID) : null;
+  const override = overridesQ.data?.find((row) => row.agentId === SCENARIO_AGENT_ID) ?? null;
+  const actions = useMemo(() => agent && catalog ? tenantConfigurableActions(agent, catalog) : [], [agent, catalog]);
+  const configurable = actions.filter(({ tool }) => tool.tenantControl === "permission-toggle");
+  const policyControlled = actions.filter(({ tool }) => tool.tenantControl !== "permission-toggle");
+  const [model, setModel] = useState<string | null>(null);
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
+  const [permissions, setPermissions] = useState<Readonly<Record<string, "ask" | "allow">>>({});
+
+  useEffect(() => {
+    if (!agent || !catalog || model !== null) return;
+    setModel(override?.model ?? "");
+    setSystemPrompt(override?.systemPrompt ?? "");
+    setPermissions(Object.fromEntries(configurable.map(({ tool }) => [
+      tool.name,
+      currentToolPermission(agent, catalog, override, tool.name) === "allow" ? "allow" : "ask",
+    ])));
+  }, [agent, catalog, configurable, model, override]);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (!agent || !catalog || model === null || systemPrompt === null) throw new Error("agent unavailable");
+      const defaultModel = catalog.defaultModel ?? agent.model;
+      if (model !== (override?.model ?? "")) {
+        const result = model === "" || model === defaultModel
+          ? await api.clearAgentModel(ctx, agent.id)
+          : await api.setAgentModel(ctx, agent.id, model);
+        if (result.status !== 200) throw new Error("model rejected");
+      }
+      for (const { tool, agentDefault } of configurable) {
+        const next = permissions[tool.name] ?? "ask";
+        const current = currentToolPermission(agent, catalog, override, tool.name);
+        if (next === current) continue;
+        const result = next === agentDefault
+          ? await api.clearAgentToolPermission(ctx, agent.id, tool.name)
+          : await api.setAgentToolPermission(ctx, agent.id, tool.name, next);
+        if (result.status !== 200) throw new Error("permission rejected");
+      }
+      const nextPrompt = systemPrompt.trim();
+      if (nextPrompt !== (override?.systemPrompt ?? "").trim()) {
+        const result = nextPrompt
+          ? await api.setAgentSystemPrompt(ctx, agent.id, nextPrompt)
+          : await api.clearAgentSystemPrompt(ctx, agent.id);
+        if (result.status !== 200) throw new Error("instructions rejected");
+      }
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.agentOverrides(ctx.workspaceId) }),
+        qc.invalidateQueries({ queryKey: qk.catalog(ctx.workspaceId) }),
+      ]);
+      onDone();
+    },
+    onError: () => toast.warning("Couldn't save the agent configuration. Please try again."),
   });
 
-  if (catalog.isLoading) {
+  if (catalogQ.isLoading || modelsQ.isLoading || overridesQ.isLoading || !agent || !catalog || model === null || systemPrompt === null) {
     return <Loader2 className="size-5 animate-spin text-muted-foreground" />;
   }
 
-  const data = catalog.data;
-  const agent = data ? findAgent(data, SCENARIO_AGENT_ID) : null;
-  const actions = data && agent ? tenantConfigurableActions(agent, data) : [];
-  const defaultModel = data?.defaultModel ?? null;
-
+  const models = modelsQ.data;
+  const defaultModel = catalog.defaultModel ?? agent.model;
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Model</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          {defaultModel ? (
-            <>
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                {defaultModel}
-              </code>
-              <p className="mt-2 text-sm text-muted-foreground">
-                A fast, inexpensive model that suits support work. You can change
-                it whenever you like.
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Unavailable until you connect an AI provider.
-            </p>
-          )}
+        <CardHeader className="pb-3"><CardTitle className="text-base">Model</CardTitle></CardHeader>
+        <CardContent className="space-y-2 pt-0">
+          <Label htmlFor="agent-model">Model used for support</Label>
+          <NativeSelect id="agent-model" name="model" value={model} onChange={(event) => setModel(event.currentTarget.value)}
+            disabled={!canEdit || !models?.connected || (models.entries.length === 0)}>
+            <option value="">Default ({defaultModel})</option>
+            {(models?.entries ?? []).map((option) => <option key={option.id} value={option.id}>{option.name} ({option.id})</option>)}
+          </NativeSelect>
+          <p className="text-pretty text-xs text-muted-foreground">
+            {models?.connected ? `Models from ${models.provider ?? "your provider"}.` : "Connect an AI provider before choosing a model."}
+          </p>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">What it may do on its own</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
+        <CardHeader className="pb-3"><CardTitle className="text-base">Action permissions</CardTitle></CardHeader>
+        <CardContent className="space-y-1 pt-0">
+          <p className="pb-2 text-pretty text-sm text-muted-foreground">Choose whether each action waits for you or runs automatically.</p>
           <ul className="divide-y">
-            {actions.map(({ tool, agentDefault }) => (
-              <li
-                key={tool.name}
-                className="flex items-center justify-between gap-3 py-2.5"
-              >
-                <span className="min-w-0 truncate text-sm">
-                  {tool.displayName ?? tool.name}
-                </span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {agentDefault === "allow" ? "On its own" : "Asks you first"}
-                </span>
+            {configurable.map(({ tool }) => (
+              <li key={tool.name} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div><p className="text-sm font-medium">{tool.displayName ?? tool.name}</p>
+                  {tool.displayDescription ? <p className="text-xs text-muted-foreground">{tool.displayDescription}</p> : null}</div>
+                <NativeSelect name={`permission:${tool.name}`} value={permissions[tool.name] ?? "ask"} disabled={!canEdit}
+                  onChange={(event) => { const next = event.currentTarget.value as "ask" | "allow"; setPermissions((current) => ({ ...current, [tool.name]: next })); }} className="w-48">
+                  <option value="ask">Ask me first</option><option value="allow">Run automatically</option>
+                </NativeSelect>
+              </li>
+            ))}
+            {policyControlled.map(({ tool }) => (
+              <li key={tool.name} className="flex items-center justify-between gap-3 py-3 text-sm">
+                <span className="font-medium">{tool.displayName ?? tool.name}</span>
+                <span className="text-xs text-muted-foreground">Controlled by refund/discount policy</span>
               </li>
             ))}
           </ul>
         </CardContent>
       </Card>
 
-      <Alert variant="info">
-        <AlertTitle>Anything that moves money asks you first</AlertTitle>
-        <AlertDescription>
-          Refunds, discounts, and cancellations are queued for your approval by
-          default, and your refund limits cap them on top of that. You can loosen
-          or tighten any of this under{" "}
-          <Link
-            href="/settings/agent"
-            className="font-medium underline underline-offset-4"
-          >
-            Settings → Agent
-          </Link>
-          .
-        </AlertDescription>
-      </Alert>
+      <Card>
+        <CardHeader className="pb-3"><CardTitle className="text-base">Agent instructions</CardTitle></CardHeader>
+        <CardContent className="space-y-2 pt-0">
+          <Label htmlFor="agent-instructions">Your instructions</Label>
+          <Textarea id="agent-instructions" name="systemPrompt" value={systemPrompt}
+            onChange={(event) => setSystemPrompt(event.currentTarget.value)} disabled={!canEdit} rows={5}
+            placeholder="For example: Keep replies warm and concise, and sign off as The Acme Team." />
+          <p className="text-pretty text-xs text-muted-foreground">These instructions are appended to the built-in safety and workflow prompt.</p>
+        </CardContent>
+      </Card>
 
-      <Button onClick={onDone}>Continue</Button>
+      <Button onClick={() => save.mutate()} disabled={!canEdit || save.isPending}>
+        {save.isPending ? "Saving…" : "Save and continue"}
+      </Button>
     </div>
   );
 }

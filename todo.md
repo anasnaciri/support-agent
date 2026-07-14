@@ -17,6 +17,29 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Onboarding now configures playbooks, agent, documents, and complete
+      money policies** (2026-07-14). The wizard no longer defers core setup to
+      Settings: step 2 can confirm-delete imported documents; step 4 exposes
+      refund and discount thresholds plus Always ask / Always deny, percentage
+      and fixed-amount coupon limits, and coupon expiry; step 5 edits active
+      state, custom scenario identity/matching, notes, remedy actions,
+      per-action Ask/Automatic handling, and fulfillment-partner behavior; step
+      7 edits the provider model, tenant instructions, and non-policy action
+      permissions. Every save uses the same permission-gated endpoint as its
+      canonical Settings surface. The Telegram approval explanation was also
+      rewritten without em dashes. This supersedes the earlier onboarding
+      decision to show scenarios and agent permissions read-only. Verified
+      red -> green with document, policy, scenario, agent, and copy regressions;
+      21 focused onboarding tests; the full non-DB suite (localhost socket tests
+      included, environment-gated integrations skipped); the dashboard SPA
+      production build; `git diff --check`; and
+      `pnpm build`.
+      - [ ] **Make the combined onboarding money-policy save atomic.** Refund
+        and discount settings currently use two established endpoints. Both
+        forms validate before writes, but a network/API failure on the second
+        write can leave the first saved. Add one transaction-backed combined
+        endpoint before promising all-or-nothing behavior in this step.
+
 - [x] **Onboarding scenario review is an accordion** (2026-07-14).
       Step 5 now starts each enabled scenario collapsed; selecting a row opens
       its playbook notes and enabled remedy actions, including the same
@@ -123,9 +146,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         pages remain the full editors and are untouched. `llm-providers.ts` WAS
         extracted (shared by LlmPage and the wizard's LLM step) — provider
         metadata is a list that must not drift.
-      - Scenarios and agent permissions are shown read-only: those are judgments
-        a merchant cannot make in their first four minutes, the defaults are
-        good, and the copy says where to change them.
+      - **Superseded 2026-07-14:** scenarios and agent permissions were initially
+        shown read-only. They are now compact editors in the wizard at the
+        user's request; the full Settings surfaces remain available later.
       - Verified with 3,309 tests, `pnpm build`, the SPA production build
         (strict tsc), and a jsdom render of the wizard driving all eight shell
         flows (resume point, done/skip persistence, no-skip on the required

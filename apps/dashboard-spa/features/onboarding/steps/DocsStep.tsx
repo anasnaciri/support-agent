@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
+import { ConfirmButton } from "@/features/tickets/ConfirmButton";
 import type { WizardStepProps } from "../steps";
 
 // Step 2. Connecting the store queues a background import of the shop's
@@ -54,6 +55,19 @@ export function DocsStep({ onDone, canEdit }: WizardStepProps) {
       toast.success("Document added.");
     },
     onError: () => toast.warning("Couldn't add that document."),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteKnowledge(ctx, id),
+    onSuccess: async (res) => {
+      if (res.status !== 200) {
+        toast.warning("Couldn't delete that document.");
+        return;
+      }
+      await qc.invalidateQueries({ queryKey: qk.knowledge(ctx.workspaceId) });
+      toast.success("Document deleted.");
+    },
+    onError: () => toast.warning("Couldn't delete that document."),
   });
 
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -104,6 +118,19 @@ export function DocsStep({ onDone, canEdit }: WizardStepProps) {
               <span className="shrink-0 text-xs text-muted-foreground">
                 {doc.sourceType === "url" ? "From your store" : "Pasted"}
               </span>
+              {canEdit ? (
+                <ConfirmButton
+                  variant="ghost"
+                  size="sm"
+                  title={`Delete “${doc.title}”?`}
+                  description="Your agent stops referencing this document immediately. This can't be undone."
+                  confirmLabel="Delete document"
+                  pending={remove.isPending && remove.variables === doc.id}
+                  onConfirm={() => remove.mutate(doc.id)}
+                >
+                  Delete
+                </ConfirmButton>
+              ) : null}
             </li>
           ))}
         </ul>
