@@ -1691,10 +1691,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       from prod ticket `9d3d968d`): a deterministic pre-write refusal
       (`ToolPreconditionFailed`, e.g. `OrderAlreadyFulfilled` after the
       merchant fulfilled mid-approval) no longer parks `approved_tool_failed`
-      or stops the bundle — the row is audited + retired (NO execution
-      marker: nothing ran, and a failed marker under the `ship:` idempotency
-      key would block a legitimate re-proposal), remaining rows still run,
-      and once every row is decided the ticket moves back `in_progress` and
+      — the row is audited + retired (NO execution marker: nothing ran, and
+      a failed marker under the `ship:` idempotency key would block a
+      legitimate re-proposal), the bundle STOPS and every not-yet-acted-on
+      row (approved unresumed + pending) is CANCELLED as "superseded: a
+      queued action could not be performed" (a reply drafted assuming the
+      action would apply must not send — the first live test sent the stale
+      draft; fixed same day), then the ticket moves back `in_progress` and
       the loop re-enters with the refusal note
       (`context.approvedActionRefusals`, consumed after the loop) so the
       agent redrafts and tells the customer. Unexpected failures (provider
