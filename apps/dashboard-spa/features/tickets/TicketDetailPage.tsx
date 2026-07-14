@@ -54,7 +54,10 @@ import {
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { composerKey } from "@/lib/composer-key";
 import { isTicketProcessing } from "@/lib/ticket-processing";
-import { orderIsCancelled } from "@/lib/order-panel-data";
+import {
+  addressEditDisabledReason,
+  cancelOrderDisabledReason,
+} from "@/lib/order-panel-data";
 import { Link } from "@/components/ui/link";
 import { AnimateHeight } from "@/components/ui/animate-height";
 import { Badge } from "@/components/ui/badge";
@@ -1012,13 +1015,12 @@ export function TicketDetailPage() {
                     orderName={order.name}
                     size="sm"
                   />
-                  {orderIsCancelled(order) ? null : (
-                    <CancelOrderDialog
-                      workspaceId={ctx.workspaceId}
-                      ticketId={id}
-                      orderName={order.name}
-                    />
-                  )}
+                  <CancelOrderDialog
+                    workspaceId={ctx.workspaceId}
+                    ticketId={id}
+                    orderName={order.name}
+                    disabledReason={cancelOrderDisabledReason(order)}
+                  />
                   <CardEditPopover
                     ticketId={id}
                     onSubmit={submitShippingAddress}
@@ -1029,6 +1031,10 @@ export function TicketDetailPage() {
                     description="Fix where this order ships. Saves to the order in your store; clear a field to remove it from the address."
                     submitEmpty
                     fields={shippingAddressFields}
+                    disabledReason={addressEditDisabledReason(
+                      order,
+                      shopify?.addressUpdateAfterFulfillment ?? false,
+                    )}
                   />
                 </>
               ) : undefined

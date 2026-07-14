@@ -373,7 +373,22 @@ export const handleDashboardTicketShopify = async (
           context,
           order,
         );
-        return { kind: "ok" as const, customer, order, shopDomain };
+        // Merchant-declared capability (Facts page): the Order card disables
+        // "Change address" on fulfilled orders unless this is true — the same
+        // precondition `order.update_shipping_address` enforces. A failed
+        // settings read falls back to false, the safe refusal.
+        const addressUpdateAfterFulfillment = yield* Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          const settings = yield* repo.getSettings(TenantId(auth.tenantId));
+          return settings.addressUpdateAfterFulfillment === true;
+        }).pipe(Effect.catchAll(() => Effect.succeed(false)));
+        return {
+          kind: "ok" as const,
+          customer,
+          order,
+          shopDomain,
+          addressUpdateAfterFulfillment,
+        };
       }),
       layer,
     ),
@@ -385,6 +400,7 @@ export const handleDashboardTicketShopify = async (
     customer: result.customer,
     order: result.order,
     shopDomain: result.shopDomain,
+    addressUpdateAfterFulfillment: result.addressUpdateAfterFulfillment,
   });
 };
 

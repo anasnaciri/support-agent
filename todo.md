@@ -2490,12 +2490,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       being invisible (it was filtered out of `CARD_KEYS` and would have
       JSON-dumped via the fallback). Internal `fulfillmentOperatorId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
-- [x] Order card hides "Cancel order" for already-cancelled orders
-      (2026-07-13): `orderIsCancelled` in `lib/order-panel-data.ts` (handles
-      the JSON-wire ISO string as well as a Date) gates `CancelOrderDialog`
-      in `TicketDetailPage`. The server already rejected the second cancel
-      (`already_cancelled`), so the button was a dead end. Refund/address
-      actions still render for cancelled orders — revisit if that's wrong.
+- [x] Order card disables (not hides) blocked actions with a visible reason
+      (2026-07-14, supersedes the 2026-07-13 hide): `cancelOrderDisabledReason`
+      / `addressEditDisabledReason` in `lib/order-panel-data.ts` render the
+      trigger disabled inside a `Tooltip`. Cancel disables on `cancelledAt`
+      (a Shopify-reported fact, never a guess); Change address disables when
+      the order has any fulfillment and the workspace's
+      `addressUpdateAfterFulfillment` fact is off — the same precondition the
+      `order.update_shipping_address` tool enforces. The flag rides the
+      `/tickets/:id/shopify` panel response (fail-safe false).
+      `CancelOrderDialog` + `CardEditPopover` gained a `disabledReason` prop.
+      Verified by unit + integration tests and `tsc`; NOT browser-verified
+      (no Playwright harness in-repo). Refund still renders for cancelled
+      orders (a cancelled order can need a further partial refund).
 - [ ] Make partially-decided approval bundles visible. Prod ticket
       `4015769d` (2026-07-08, test tenant): a 2-item bundle (`order.cancel` +
       `conversation.reply`) had the cancel approved+executed within a minute,

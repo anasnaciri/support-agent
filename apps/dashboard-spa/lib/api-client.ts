@@ -370,6 +370,10 @@ export interface TicketShopifyPanels {
   readonly customer: ShopifyCustomer | null;
   readonly order: ShopifyOrder | null;
   readonly shopDomain: string | null;
+  /** Merchant-declared capability (Facts page): the store can update an
+   *  order's shipping address after fulfillment. Gates "Change address" on
+   *  the Order card the same way the agent tool's precondition does. */
+  readonly addressUpdateAfterFulfillment: boolean;
 }
 
 // FulfillmentOperator portal — the minimal privacy projection the api returns (no customer

@@ -389,11 +389,15 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       customer: unknown;
       order: unknown;
       shopDomain: string | null;
+      addressUpdateAfterFulfillment: boolean;
     };
     // ticketA has empty context -> no Shopify lookups, so customer/order null.
     expect(body.customer).toBeNull();
     expect(body.order).toBeNull();
     expect(body.shopDomain).toBe("batch-shop.myshopify.com");
+    // The Order card disables "Change address" on fulfilled orders unless the
+    // tenant declared the capability (Facts page). Default: false.
+    expect(body.addressUpdateAfterFulfillment).toBe(false);
   });
 
   it("GET /dashboard/tickets/:id/shopify — 404 cross-tenant", async () => {

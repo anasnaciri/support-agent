@@ -3,6 +3,7 @@ import { Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export interface EditFieldConfig {
@@ -43,6 +44,12 @@ interface Props {
    * (the Ship-to pencil; the api reads blank as "clear this field").
    */
   readonly submitEmpty?: boolean;
+  /**
+   * When set, the trigger renders disabled with this reason as its tooltip
+   * and the popover can't open (e.g. "Change address" on a fulfilled order
+   * when the store disallows post-fulfillment edits).
+   */
+  readonly disabledReason?: string | null;
 }
 
 /**
@@ -62,9 +69,33 @@ export const CardEditPopover = ({
   trigger = "pencil",
   align = "right",
   submitEmpty = false,
+  disabledReason = null,
 }: Props) => {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  if (disabledReason !== null) {
+    return (
+      <div className="relative shrink-0">
+        <Tooltip content={disabledReason}>
+          {trigger === "button" ? (
+            <Button type="button" variant="outline" size="sm" disabled>
+              {label}
+            </Button>
+          ) : (
+            <button
+              type="button"
+              disabled
+              aria-label={label}
+              className="flex size-6 cursor-not-allowed items-center justify-center rounded-md text-muted-foreground/40"
+            >
+              <Pencil className="size-3.5" aria-hidden />
+            </button>
+          )}
+        </Tooltip>
+      </div>
+    );
+  }
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

@@ -26,10 +26,34 @@ export const fulfillmentDay = (
   date: Date | string | null,
 ): string | null => (date === null ? null : asDate(date).toISOString().slice(0, 10));
 
-/** Whether the order is already cancelled. The Order card uses this to hide
- *  "Cancel order" — the server rejects a second cancel (`already_cancelled`),
- *  so offering the button is a dead end. `cancelledAt` arrives as an ISO
+/** Whether the order is already cancelled. `cancelledAt` arrives as an ISO
  *  string over the JSON wire, a real Date in domain code. */
 export const orderIsCancelled = (order: {
   cancelledAt: Date | string | null;
 }): boolean => order.cancelledAt !== null;
+
+// The Order card's action buttons stay visible but disable with a reason the
+// operator can read (rendered as a tooltip) — a vanished button reads as a
+// missing feature; a disabled one explains itself.
+
+/** Why "Cancel" is disabled, or null when the order can still be cancelled.
+ *  The server rejects a second cancel (`already_cancelled`), so the button
+ *  would be a dead end. */
+export const cancelOrderDisabledReason = (order: {
+  cancelledAt: Date | string | null;
+}): string | null =>
+  orderIsCancelled(order)
+    ? "This order has already been cancelled."
+    : null;
+
+/** Why "Change address" is disabled, or null when the edit is allowed.
+ *  Mirrors the `order.update_shipping_address` tool's precondition: any
+ *  fulfillment means a parcel is moving to the old address, unless the store
+ *  declared (Facts page) it can update addresses after fulfillment. */
+export const addressEditDisabledReason = (
+  order: { fulfillments: ReadonlyArray<unknown> },
+  addressUpdateAfterFulfillment: boolean,
+): string | null =>
+  order.fulfillments.length > 0 && !addressUpdateAfterFulfillment
+    ? "This order has already shipped, and your store doesn't change addresses after fulfillment."
+    : null;

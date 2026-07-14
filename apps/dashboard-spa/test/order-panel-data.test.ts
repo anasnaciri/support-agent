@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { ShopifyFulfillment } from "@support-agent/agent-core";
 
 import {
+  addressEditDisabledReason,
+  cancelOrderDisabledReason,
   fulfillmentDay,
   latestFulfillment,
   orderIsCancelled,
@@ -83,5 +85,39 @@ describe("orderIsCancelled", () => {
     expect(
       orderIsCancelled({ cancelledAt: new Date("2026-07-08T14:01:35.000Z") }),
     ).toBe(true);
+  });
+});
+
+// The Order card's action buttons stay VISIBLE but disable with a reason the
+// operator can read, instead of silently vanishing.
+describe("cancelOrderDisabledReason", () => {
+  it("null for a live order", () => {
+    expect(cancelOrderDisabledReason({ cancelledAt: null })).toBeNull();
+  });
+
+  it("explains when the order is already cancelled (ISO-string wire)", () => {
+    expect(
+      cancelOrderDisabledReason({ cancelledAt: "2026-07-08T14:01:35.000Z" }),
+    ).toMatch(/already been cancelled/);
+  });
+});
+
+describe("addressEditDisabledReason", () => {
+  const unshipped = { fulfillments: [] };
+  const shipped = { fulfillments: [fulfillment({})] };
+
+  it("null for an unshipped order regardless of the setting", () => {
+    expect(addressEditDisabledReason(unshipped, false)).toBeNull();
+    expect(addressEditDisabledReason(unshipped, true)).toBeNull();
+  });
+
+  it("explains when the order shipped and the store disallows post-fulfillment edits", () => {
+    expect(addressEditDisabledReason(shipped, false)).toMatch(
+      /already shipped/,
+    );
+  });
+
+  it("null for a shipped order when the store allows post-fulfillment edits", () => {
+    expect(addressEditDisabledReason(shipped, true)).toBeNull();
   });
 });

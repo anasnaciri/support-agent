@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { api, type CancelOrderReason } from "@/lib/api-client";
 import { useTicketMutation } from "@/lib/use-ticket-mutation";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,6 +21,14 @@ interface Props {
   readonly ticketId: string;
   /** The order name (e.g. "#1001"), shown in the trigger's tooltip + title. */
   readonly orderName: string;
+  /**
+   * When set, the trigger renders disabled with this reason as its tooltip
+   * and the dialog can't open. Only pass a FACT Shopify itself reported
+   * (e.g. the order carries a `cancelledAt`), never a guess about
+   * eligibility — Shopify stays the authority, and its refusal surfaces via
+   * the `cancel_failed` toast.
+   */
+  readonly disabledReason?: string | null;
 }
 
 const REASONS: ReadonlyArray<{
@@ -45,15 +54,17 @@ const REASONS: ReadonlyArray<{
  * authority (`refunds.issue`), not an agent action, so it never asks the
  * customer's agent for anything; the operator tells the customer themselves.
  *
- * The button is ALWAYS offered for a linked order — never disabled on a guess
- * about eligibility. Shopify is the authority on whether a given order can be
- * cancelled; when it refuses, the `cancel_failed` toast says so plainly and
- * confirms no money moved.
+ * The button is ALWAYS visible for a linked order and only disables via
+ * `disabledReason` on a fact Shopify reported (an already-cancelled order) —
+ * never on a guess about eligibility. Shopify stays the authority on whether
+ * a given order can be cancelled; when it refuses, the `cancel_failed` toast
+ * says so plainly and confirms no money moved.
  */
 export function CancelOrderDialog({
   workspaceId,
   ticketId,
   orderName,
+  disabledReason = null,
 }: Props) {
   const [open, setOpen] = React.useState(false);
   const [refund, setRefund] = React.useState(true);
@@ -78,6 +89,16 @@ export function CancelOrderDialog({
       if (kind === "cancelled" || kind === "already_cancelled") setOpen(false);
     },
   });
+
+  if (disabledReason !== null) {
+    return (
+      <Tooltip content={disabledReason}>
+        <Button variant="outline" size="sm" disabled>
+          Cancel
+        </Button>
+      </Tooltip>
+    );
+  }
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
