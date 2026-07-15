@@ -2216,6 +2216,66 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Pilot Shopify provisioning enforces per-tenant custom app credentials,
       install-link support, deterministic shop routing, and compliance webhooks.
 - [x] Pilot and SaaS are runtime/config variants of this repo, not forked source.
+- [x] **Dedicated deployment and perpetual licensing direction documented**
+      (2026-07-15). [`docs/dedicated-deployment-licensing.md`](./docs/dedicated-deployment-licensing.md)
+      consolidates the customer-owned deployment model, unavoidable code
+      exposure, one-repo rule, 1/5/unlimited internal-workspace editions,
+      separate MSP rights, offline signed entitlements, atomic workspace-limit
+      enforcement, deployment-level LLM vs workspace connector credentials,
+      retained SaaS/IP rights, customer-owned continuity dependencies,
+      production-image hardening, merchant responsibility allocation, and
+      versioned per-action Automatic consent/audit requirements. It is a
+      product/engineering direction and counsel brief, not final legal terms.
+      Verified with `git diff --check` and `pnpm build`.
+- [ ] **Define and implement a dedicated licensed-workspace deployment profile.**
+      Keep the tenant row, `tenantId` scoping, state-machine/audit invariants,
+      and one source tree; a dedicated deployment is one permitted workspace
+      per database/deploy, not a tenancy-free fork. Add a single configuration
+      seam that resolves the deployment's workspace and capabilities, then use
+      it to disable workspace create/switch/delete, self-service signup,
+      platform tenant administration, and SaaS billing where appropriate.
+      Document which settings are (a) deploy-wide env/secrets, (b) seeded
+      workspace configuration that remains in Postgres, and (c) connector
+      credentials/tokens that remain encrypted records. Cover dedicated
+      identity/org bootstrap, callback/webhook domains, per-customer queues and
+      storage, backup/restore, migrations, observability, upgrades/rollback,
+      account deletion/retention, outbound-mail branding, and secret rotation.
+      The commercial default is a customer-funded, customer-owned-cloud
+      installation with a perpetual offline-signed right to run the purchased
+      major version; installation, a bounded initial support/update period,
+      optional annual maintenance, and future major upgrades are separate
+      obligations. Do not add a remote kill switch or require this company to
+      stay online for an already-licensed deployment to boot. Model dedicated
+      editions as signed entitlements (`maxWorkspaces`: 1 / 5 / unlimited,
+      internal-business-use only, optional capabilities). The customer grant
+      must be non-exclusive and non-transferable; support-agent retains all IP
+      and every right not expressly granted, including the right to develop,
+      modify, host, sell, and license the same product as SaaS or under other
+      commercial models. Enforce the
+      workspace count atomically in the database mutation on EVERY creation
+      path; the current list-then-create handler is raceable and is not a
+      licensing seam. Dedicated mode should normally use one organization- or
+      deployment-level LLM credential and disable workspace LLM overrides,
+      while Shopify/mailbox access tokens and all business data remain
+      workspace-scoped. Credential sharing is a billing/configuration choice,
+      not the anti-redistribution control; the license terms and entitlement
+      gate are. Produce the
+      profile from this repo under `deploy/`; never create a repo or
+      source branch per customer.
+- [ ] **Add merchant AI-operation responsibility terms and versioned Auto
+      authorization consent.** Have counsel draft the final allocation: the
+      merchant configures, authorizes, supervises, and remains responsible for
+      agent actions taken on its behalf; AI output/action accuracy is not
+      guaranteed; indemnity, warranty disclaimers, and liability caps apply
+      only to the maximum extent permitted by governing law. Do not describe
+      Auto as unbounded "full authorization": confirmation must name the exact
+      tool/action, scenarios, monetary/quantity limits, affected stores, and
+      consequences. Only an RBAC-authorized owner may enable it. Persist the
+      terms/version, actor, workspace, old/new mode, scope, timestamp, and
+      acknowledgement in the audit transaction; provide immediate revoke,
+      Ask/Deny fallback, activity review, and emergency stop. Preserve the
+      platform's responsibility for honoring configured gates, security, and
+      non-excludable legal duties.
 
 ### Agents, Policy, Knowledge, And Models
 
