@@ -2230,7 +2230,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       envelope: roughly USD 10–30/month for one low/moderate-volume workspace,
       USD 20–60 for several moderate workspaces, and materially more when high
       availability—not workspace count—requires redundant compute/database
-      capacity. Verified with `git diff --check` and `pnpm build`.
+      capacity. The same document now defines fleet operations: autonomous
+      customer data planes plus an optional non-critical control plane,
+      idempotent provisioning/inventory, observability and alert thresholds,
+      backup/PITR and restore drills, signed cohort upgrades, scaling order,
+      access/incident controls, support bundles, and the boundary between the
+      perpetual license, annual maintenance, and managed operations. Verified
+      with `git diff --check` and `pnpm build`.
 - [ ] **Define and implement a dedicated licensed-workspace deployment profile.**
       Keep the tenant row, `tenantId` scoping, state-machine/audit invariants,
       and one source tree; a dedicated deployment is one permitted workspace
@@ -2266,6 +2272,21 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       gate are. Produce the
       profile from this repo under `deploy/`; never create a repo or
       source branch per customer.
+- [ ] **Build the dedicated fleet-operations appliance and management seam.**
+      Keep each customer data plane autonomous: loss of the optional Licensor
+      control plane may stop telemetry, updates, and support, but must not stop
+      an already licensed deployment. Add a local OpenTelemetry Collector,
+      dependency-aware readiness, worker/schedule heartbeat metrics, Postgres
+      and pg-boss metrics, structured/redacted logs, off-host encrypted
+      pgBackRest/WAL backups, automated restore verification, immutable signed
+      image releases, preflight/drain/migrate/verify/rollback orchestration,
+      idempotent host provisioning, sanitized support bundles, and a fleet
+      inventory containing no customer credentials or business payloads. Split
+      `apps/worker` into scalable workflow-consumer and singleton
+      scheduler/maintenance roles before horizontally scaling it; the current
+      combined worker must remain single-instance. Follow the phased design in
+      `docs/dedicated-deployment-licensing.md` section 16 and validate stated
+      RPO/RTO only through customer-shaped recovery drills.
 - [ ] **Add merchant AI-operation responsibility terms and versioned Auto
       authorization consent.** Have counsel draft the final allocation: the
       merchant configures, authorizes, supervises, and remains responsible for
