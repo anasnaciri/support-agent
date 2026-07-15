@@ -145,6 +145,38 @@ capabilities such as public self-service signup, platform-wide tenant admin,
 SaaS billing, and unlicensed workspace creation. Workspace switching remains
 available for editions with more than one workspace.
 
+### 5.1 Indicative infrastructure cost
+
+Excluding LLM inference and all connector/provider charges, the current
+single-host Compose topology (API, worker, Postgres/pg-boss, and Caddy) should
+start at 2 shared vCPUs and 4 GB RAM. Four vCPUs and 8 GB RAM provide a safer
+floor for several active workspaces. Actual sizing follows ticket volume,
+concurrent agent ticks, mailbox polling, attachment volume, retention, and
+availability requirements—not the licensed workspace count alone.
+
+As of 2026-07-15, indicative monthly infrastructure budgets are:
+
+| Shape | Expected monthly infrastructure |
+| --- | ---: |
+| One low/moderate-volume workspace, single VPS | USD 10–30 |
+| Up to five moderate-volume workspaces, single VPS | USD 20–60 |
+| Unlimited edition with modest aggregate traffic, larger single VPS | USD 40–120 |
+| Redundant production topology with separate/managed DB and recovery capacity | USD 150–500+ |
+
+Examples anchoring the ranges: Hetzner's post-2026-06-15 EU CX23 is USD 6.49
+per month before USD 0.60 IPv4, VAT, and backups; provider backups add 20% of
+server price. DigitalOcean lists 2 vCPU/4 GiB at USD 24 and 4 vCPU/8 GiB at USD
+48. AWS Lightsail lists 2 vCPU/4 GB at USD 24. Cloudflare Workers static
+delivery can remain in the free allowance at low traffic, and R2 includes 10
+GB-month before USD 0.015/GB-month storage charges. Add domain registration and
+an independent database backup destination.
+
+For a customer-owned self-hosted license, these are the customer's bills, so
+the Licensor's direct per-customer hosting cost is approximately zero. Release
+infrastructure and support labor remain Licensor costs and must not be confused
+with hosting. A cheap single VPS has a single point of failure; it should never
+be marketed with high-availability guarantees.
+
 ## 6. Configuration classification
 
 Moving all workspace state to environment variables would be a mistake. Use
@@ -643,4 +675,3 @@ a green `pnpm build`.
   provides a risk-proportionate human-oversight model. Ordinary ecommerce
   support is not assumed here to be a high-risk use; applicability requires
   legal analysis of the actual deployment and market.
-

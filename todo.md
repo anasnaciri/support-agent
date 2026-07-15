@@ -2226,7 +2226,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       production-image hardening, merchant responsibility allocation, and
       versioned per-action Automatic consent/audit requirements. It is a
       product/engineering direction and counsel brief, not final legal terms.
-      Verified with `git diff --check` and `pnpm build`.
+      It now also records the indicative provider-key-excluded infrastructure
+      envelope: roughly USD 10–30/month for one low/moderate-volume workspace,
+      USD 20–60 for several moderate workspaces, and materially more when high
+      availability—not workspace count—requires redundant compute/database
+      capacity. Verified with `git diff --check` and `pnpm build`.
 - [ ] **Define and implement a dedicated licensed-workspace deployment profile.**
       Keep the tenant row, `tenantId` scoping, state-machine/audit invariants,
       and one source tree; a dedicated deployment is one permitted workspace
