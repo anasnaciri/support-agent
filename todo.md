@@ -2350,6 +2350,15 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Ticket retention sweep re-checks status/cutoff predicates under row locks
       before archive/delete, so reopened tickets are not archived or purged by a
       stale sweep selection.
+- [ ] **Bound storage that the ticket-retention sweep does not currently cap.**
+      `processed_messages` survives ticket deletion with `ticket_id = NULL`,
+      `processed_events` has no tenant FK or time sweep, non-ticket audit rows
+      persist, and failed/human-takeover/unresolved tickets never age out. Define
+      explicit safe retention for the two dedup ledgers (long enough to preserve
+      redelivery protection), non-ticket audit policy, and a merchant-visible
+      policy for indefinitely unresolved tickets before claiming the 30-day +
+      12-month ticket policy places a hard ceiling on dedicated database size.
+      Add per-tenant storage/row metrics and alerts.
 - [x] Test teardown purges leaked tenants in dependency order.
 - [x] `purgeLeakedTenants` takes an `onlyTenantIds` scope (2026-07-10), and its
       own integration test uses it. Root cause of a long-standing "shared dev DB

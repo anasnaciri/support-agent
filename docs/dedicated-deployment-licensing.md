@@ -177,6 +177,105 @@ infrastructure and support labor remain Licensor costs and must not be confused
 with hosting. A cheap single VPS has a single point of failure; it should never
 be marketed with high-availability guarantees.
 
+### 5.2 Database and storage capacity model
+
+The app does not mirror a merchant's Shopify order catalog. It stores support
+tickets that may reference an order and fetches order data on demand. Capacity
+must therefore be sold and monitored in tickets/events per day, not total store
+orders. A store may process millions of Shopify orders while producing only a
+small number of support tickets.
+
+Current ticket retention is approximately 13 months after resolution: a
+resolved ticket remains resolved for 30 days, becomes archived, then is deleted
+after 12 months archived. Ticket-linked approvals, audit rows, transitions,
+tool-execution rows, reply deliveries, attachment indexes, and attachment blobs
+are removed with it. Important exceptions prevent this from being a perfect
+hard ceiling today: unresolved/failed/human-takeover tickets are not deleted by
+age, and `processed_messages` plus `processed_events` have no time-based sweep.
+Tenant-wide audit rows without a ticket and durable knowledge/configuration also
+persist. Capacity planning must include margin until those policies are made
+explicit.
+
+Until live measurements exist, use these conservative planning assumptions:
+
+- 100 KB of Postgres per retained ticket, including indexes and ordinary
+  audit/tool/state history. A reasonable sensitivity range is 50–150 KB.
+- 0.5 MB of object storage per ticket averaged over all tickets. This assumes
+  most tickets have no file and a minority have compressed photos. Recalculate
+  for merchants with image-heavy damage/returns workflows.
+- 395 days of steady-state retained resolved-ticket volume.
+- Keep Postgres below 70% of its volume and reserve additional space for WAL,
+  vacuum, temporary files, migrations/index builds, container images, and the
+  operating system.
+
+Formulas:
+
+```text
+retained tickets ≈ tickets/day × 395
+Postgres GiB ≈ retained tickets × average DB KB / 1,048,576
+object GiB ≈ retained tickets × average attachment MB / 1,024
+```
+
+At 100 KB DB and 0.5 MB blobs per ticket:
+
+| Sustained tickets/day | Retained tickets | Live Postgres estimate | Object estimate | Suggested total server disk |
+| ---: | ---: | ---: | ---: | ---: |
+| 100 | 39,500 | 3.8 GiB | 19 GiB | 50–80 GB |
+| 500 | 197,500 | 18.8 GiB | 96 GiB | 80–120 GB |
+| 1,000 | 395,000 | 37.7 GiB | 193 GiB | 150–250 GB |
+| 5,000 | 1,975,000 | 188 GiB | 965 GiB | 500 GB–1 TB, separate DB volume |
+
+Object bytes should remain in R2/S3-compatible storage, not the Postgres/VM
+disk. R2's current standard price makes 100 GB roughly USD 1.35/month after the
+10 GB free allowance and 1 TB roughly USD 14.85/month before operation charges.
+Object storage grows elastically; set billing alerts rather than preallocating
+it. The code caps a Gmail message at eight images, 10 MiB each, and 25 MiB
+cumulative, while dashboard/portal uploads cap each file at 10 MiB and each
+reply/update at eight files. These safety caps are not average-size assumptions.
+
+A self-managed Postgres instance on the same VPS has no separate license or
+database-service charge; it consumes the VPS's included CPU, RAM, and disk.
+Additional block storage is commonly about USD 0.10/GiB-month on DigitalOcean
+and Lightsail, so 100 GiB costs about USD 10/month and 500 GiB about USD
+50/month there. Provider/server snapshots and an independent database backup
+destination are additional. Never count a backup on the same disk/server as a
+recoverable backup; budget roughly another 1–2× the live database size for
+compressed backups/PITR history, depending on frequency and retention.
+
+For an 80 GB all-in-one server, reserve roughly 20–25 GB for the OS, images,
+WAL/temp operations, and safety margin. A steady 500 tickets/day at the planning
+average should reach a roughly 19 GiB ticket-data equilibrium after the
+retention window and fit without a storage scale. At 1,000/day, it approaches
+38 GiB and should move to a larger/separate database volume before the first
+year. At 5,000/day, compute and queue throughput will generally require scaling
+well before the retention plateau.
+
+The default worker runs four tickets concurrently and gives each tick a
+three-minute hard timeout. If a normal tick averages 60–90 seconds, the
+mathematical ceiling is roughly 3,800–5,700 ticks/day at continuous saturation;
+production should not run at that ceiling. Use roughly 1,000–2,000 new
+single-tick tickets/day as the conservative starting capacity of one small
+worker, then measure. Tickets with multiple customer replies generate multiple
+ticks. Scale worker concurrency/nodes based on queue latency rather than
+licensed workspace count.
+
+Scale before any of these conditions persist:
+
+- Postgres volume exceeds 70% or projected 90-day growth crosses that point.
+- CPU exceeds about 70% for sustained periods or memory begins swapping/OOMing.
+- Workflow queue age/backlog grows during normal traffic; target a p95 new-job
+  wait below one minute unless the product defines a different SLA.
+- Postgres connections exceed roughly 70% of the configured pool/limit.
+- Autovacuum cannot keep up, dead tuples grow, or indexed dashboard queries
+  regress materially.
+- Retention/attachment sweeps cannot finish comfortably inside a day.
+
+Before quoting contractual volume, run a load test against a customer-shaped
+database and publish measured limits for the exact server profile. After the
+first 30–60 production days, calculate real bytes per ticket using
+`pg_total_relation_size`, real attachment bytes per ticket, tick latency, queue
+age, and unresolved-ticket growth, then replace these assumptions.
+
 ## 6. Configuration classification
 
 Moving all workspace state to environment variables would be a mistake. Use
