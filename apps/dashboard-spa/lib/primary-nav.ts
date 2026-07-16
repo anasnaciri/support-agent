@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   ClipboardCheck,
   Home,
   Inbox,
@@ -18,6 +19,12 @@ export interface PrimaryNavItem {
 export const PRIMARY_NAV: ReadonlyArray<PrimaryNavItem> = [
   { href: "/", label: "Today", icon: Home, requires: "tickets.view" },
   { href: "/tickets", label: "Tickets", icon: Inbox, requires: "tickets.view" },
+  {
+    href: "/analytics",
+    label: "Analytics",
+    icon: BarChart3,
+    requires: "tickets.view",
+  },
   {
     href: "/approvals",
     label: "Approvals",

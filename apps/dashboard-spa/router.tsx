@@ -12,6 +12,7 @@ import {
 } from "@/components/shell/DashboardShell";
 import { WelcomePage } from "@/features/onboarding/WelcomePage";
 import { HomePage } from "@/features/home/HomePage";
+import { AnalyticsPage } from "@/features/analytics/AnalyticsPage";
 import { TicketsPage } from "@/features/tickets/TicketsPage";
 import { TicketDetailPage } from "@/features/tickets/TicketDetailPage";
 import { ApprovalsPage } from "@/features/approvals/ApprovalsPage";
@@ -88,6 +89,7 @@ const ClientRedirect = ({ to }: { readonly to: string }) => {
 };
 
 const homeRoute = authedChild("/", HomePage);
+const analyticsRoute = authedChild("/analytics", AnalyticsPage);
 const ticketsRoute = authedChild("/tickets", TicketsPage);
 const ticketDetailRoute = authedChild("/tickets/$ticketId", TicketDetailPage);
 const approvalsRoute = authedChild("/approvals", ApprovalsPage);
@@ -176,6 +178,7 @@ const onboardingRoute = publicRoute("/onboarding", OnboardingPage);
 const routeTree = rootRoute.addChildren([
   authedRoute.addChildren([
     homeRoute,
+    analyticsRoute,
     ticketsRoute,
     ticketDetailRoute,
     approvalsRoute,

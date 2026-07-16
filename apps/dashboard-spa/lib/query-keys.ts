@@ -18,6 +18,10 @@ export const qk = {
   onboarding: (w: string) => ["onboarding", w] as const,
 
   today: (w: string) => ["today", w] as const,
+  supportAnalytics: (w: string, start: string, end: string) =>
+    ["support-analytics", w, start, end] as const,
+  deliveryAnalytics: (w: string, start: string, end: string) =>
+    ["delivery-analytics", w, start, end] as const,
   tickets: (w: string, f: TicketsFilter, page: number, limit: number) =>
     ["tickets", w, f, page, limit] as const,
   ticket: (w: string, id: string) => ["ticket", w, id] as const,
@@ -64,6 +68,8 @@ export const workspaceScopedKeyPrefixes = [
   "me",
   "fulfillment-operator-session",
   "today",
+  "support-analytics",
+  "delivery-analytics",
   "tickets",
   "ticket",
   "ticket-events",

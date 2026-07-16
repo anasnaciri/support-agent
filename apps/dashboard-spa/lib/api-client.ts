@@ -429,7 +429,7 @@ export const api = {
     return okBody(`/analytics/support${suffix}`, ctx) as Promise<SupportAnalytics>;
   },
   deliveryAnalytics: (
-    ctx: DashboardRequestContext,
+    ctx: CallCtx,
     period?: { readonly start: string; readonly end: string },
   ): Promise<DeliveryAnalytics> => {
     const query = period

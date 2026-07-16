@@ -78,6 +78,21 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
             Railway, CLI-start, and Compose migration paths invoke it.
             New/reconnected stores write the same marker after their callback
             successfully enqueues the backfill.
+      - [x] **Merchant dashboard analytics surface** (2026-07-16). Added
+            `/analytics` as a `tickets.view`-gated primary dashboard
+            destination. It queries both workspace-scoped read models over
+            selectable trailing 7/30/90-day periods and surfaces explicit
+            count/denominator rates for ticket resolution, handoffs, agent vs
+            human ownership, draft outcomes, categories, response timing,
+            backlog, refunds, reply delivery, shipment delivery/exceptions/
+            recovery, current fleet state, transit timing, and carrier
+            performance. Formatting and period construction live behind a
+            small pure dashboard module; query keys include workspace and both
+            bounds. Also corrected the delivery analytics SPA client to use
+            its existing `CallCtx` interface. Verified red -> green with
+            formatting, populated-page DOM, and navigation regressions; the
+            dashboard production build; the full suite (2,878 passed / 497
+            environment-gated skips); `git diff --check`; and `pnpm build`.
 
 - [x] **Order agents read the real nested tracking fields and retain the
       17TRACK URL fallback** (2026-07-14). The order-status and missing-package
