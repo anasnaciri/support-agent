@@ -8,6 +8,7 @@ export interface ShopifyShipmentRolloutTarget {
   readonly shopDomain: string;
   readonly accessToken: string;
   readonly apiVersion: string;
+  readonly scopes: ReadonlyArray<string>;
 }
 
 interface ReconciliationDependencies {
@@ -26,6 +27,11 @@ interface ReconciliationDependencies {
 export interface ShopifyShipmentRolloutSummary {
   readonly attempted: number;
   readonly completed: number;
+  readonly deferred: ReadonlyArray<{
+    readonly tenantId: string;
+    readonly shopDomain: string;
+    readonly reason: "missing_read_fulfillments_scope";
+  }>;
   readonly failed: ReadonlyArray<{
     readonly tenantId: string;
     readonly shopDomain: string;
@@ -54,8 +60,20 @@ export const reconcileShopifyShipmentRollout = async (
   deps: ReconciliationDependencies,
 ): Promise<ShopifyShipmentRolloutSummary> => {
   let completed = 0;
+  const deferred: Array<ShopifyShipmentRolloutSummary["deferred"][number]> = [];
   const failed: Array<ShopifyShipmentRolloutSummary["failed"][number]> = [];
   for (const target of targets) {
+    if (
+      !target.scopes.includes("read_fulfillments") &&
+      !target.scopes.includes("read_marketplace_orders")
+    ) {
+      deferred.push({
+        tenantId: target.tenantId,
+        shopDomain: target.shopDomain,
+        reason: "missing_read_fulfillments_scope",
+      });
+      continue;
+    }
     try {
       const webhooks = await deps.registerWebhooks(target);
       await deps.enqueueBackfill(target);
@@ -69,5 +87,5 @@ export const reconcileShopifyShipmentRollout = async (
       });
     }
   }
-  return { attempted: targets.length, completed, failed };
+  return { attempted: targets.length, completed, deferred, failed };
 };

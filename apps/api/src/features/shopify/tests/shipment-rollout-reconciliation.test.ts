@@ -10,6 +10,7 @@ describe("reconcileShopifyShipmentRollout", () => {
       shopDomain: "acme.myshopify.com",
       accessToken: "token",
       apiVersion: "2026-04",
+      scopes: ["read_fulfillments"],
     };
     const result = await reconcileShopifyShipmentRollout([target], {
       registerWebhooks: vi.fn(async () => {
@@ -41,6 +42,42 @@ describe("reconcileShopifyShipmentRollout", () => {
     expect(result).toEqual({
       attempted: 1,
       completed: 1,
+      deferred: [],
+      failed: [],
+    });
+  });
+
+  it("defers legacy connectors missing Shopify's fulfillment webhook scope without failing the release", async () => {
+    const target = {
+      tenantId: TenantId("11111111-1111-1111-1111-111111111111"),
+      shopDomain: "legacy.myshopify.com",
+      accessToken: "token",
+      apiVersion: "2026-04",
+      scopes: ["read_orders"],
+    };
+    const registerWebhooks = vi.fn();
+    const enqueueBackfill = vi.fn();
+    const markComplete = vi.fn();
+
+    const result = await reconcileShopifyShipmentRollout([target], {
+      registerWebhooks,
+      enqueueBackfill,
+      markComplete,
+    });
+
+    expect(registerWebhooks).not.toHaveBeenCalled();
+    expect(enqueueBackfill).not.toHaveBeenCalled();
+    expect(markComplete).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      attempted: 1,
+      completed: 0,
+      deferred: [
+        {
+          tenantId: "11111111-1111-1111-1111-111111111111",
+          shopDomain: "legacy.myshopify.com",
+          reason: "missing_read_fulfillments_scope",
+        },
+      ],
       failed: [],
     });
   });
@@ -55,6 +92,7 @@ describe("reconcileShopifyShipmentRollout", () => {
       shopDomain: `${name}.myshopify.com`,
       accessToken: "token",
       apiVersion: "2026-04",
+      scopes: ["read_fulfillments"],
     }));
     const marked: string[] = [];
     const result = await reconcileShopifyShipmentRollout(targets, {
@@ -74,6 +112,7 @@ describe("reconcileShopifyShipmentRollout", () => {
     expect(result).toEqual({
       attempted: 2,
       completed: 1,
+      deferred: [],
       failed: [
         {
           tenantId: "11111111-1111-1111-1111-111111111111",

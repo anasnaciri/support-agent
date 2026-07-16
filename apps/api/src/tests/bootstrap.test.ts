@@ -16,6 +16,7 @@ describe("DEFAULT_SHOPIFY_SCOPES", () => {
       "write_orders", // refund.create + order.cancel
       "write_discounts", // discount.create
       "read_locations", // shopify.list_pickup_locations
+      "read_fulfillments", // fulfillment create/update shipment webhooks
       "write_merchant_managed_fulfillment_orders", // fulfillmentOperator tracking edits
       "write_third_party_fulfillment_orders", // fulfillmentOperator tracking edits
     ]) {

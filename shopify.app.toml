@@ -76,6 +76,10 @@ embedded = false
 # protected customer data. ALSO backs the dashboard refund modal's
 # restock-location dropdown.
 #
+# read_fulfillments → fulfillment create/update webhooks that discover tracked
+# shipments for delivery analytics. Existing installs must re-authorize after
+# this scope is added before those webhook subscriptions can be registered.
+#
 # read_inventory / write_inventory → the dashboard refund modal's restock leg:
 # getOrderRefundContext reads the suggested restock location, and refundOrder
 # restocks the returned units through refundCreate. Best-effort — an install
@@ -89,7 +93,7 @@ embedded = false
 # installing/admin user to hold the `fulfill_and_ship_orders` user permission —
 # that is a staff permission inside the merchant's admin, not an app scope, so
 # no config here can grant it.
-scopes = "read_orders,read_customers,read_products,write_orders,write_discounts,read_legal_policies,read_online_store_pages,read_locations,read_inventory,write_inventory,write_merchant_managed_fulfillment_orders,write_third_party_fulfillment_orders"
+scopes = "read_orders,read_customers,read_products,write_orders,write_discounts,read_legal_policies,read_online_store_pages,read_locations,read_fulfillments,read_inventory,write_inventory,write_merchant_managed_fulfillment_orders,write_third_party_fulfillment_orders"
 
 [auth]
 redirect_urls = [

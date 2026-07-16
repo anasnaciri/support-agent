@@ -68,6 +68,7 @@ const main = async (): Promise<void> => {
           shopDomain: candidate.shopDomain,
           accessToken: connection.accessToken,
           apiVersion: connection.apiVersion ?? defaultApiVersion,
+          scopes: connection.scopes,
         };
       }),
     );
@@ -102,8 +103,13 @@ const main = async (): Promise<void> => {
       },
     });
     console.log(
-      `[shopify-shipment-rollout] attempted=${summary.attempted} completed=${summary.completed} failed=${summary.failed.length}`,
+      `[shopify-shipment-rollout] attempted=${summary.attempted} completed=${summary.completed} deferred=${summary.deferred.length} failed=${summary.failed.length}`,
     );
+    for (const deferred of summary.deferred) {
+      console.warn(
+        `[shopify-shipment-rollout] tenant=${deferred.tenantId} shop=${deferred.shopDomain} deferred: reconnect Shopify to grant read_fulfillments`,
+      );
+    }
     for (const failure of summary.failed) {
       console.error(
         `[shopify-shipment-rollout] tenant=${failure.tenantId} shop=${failure.shopDomain} failed: ${failure.error}`,

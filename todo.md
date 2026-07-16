@@ -77,7 +77,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
             release visibly after the other connectors were attempted. Fly,
             Railway, CLI-start, and Compose migration paths invoke it.
             New/reconnected stores write the same marker after their callback
-            successfully enqueues the backfill.
+            successfully enqueues the backfill. Follow-up (2026-07-16):
+            Shopify requires `read_fulfillments` for both fulfillment webhook
+            topics. Added it to the managed/default scope catalog and
+            `shopify.app.toml`; legacy connectors without it are now reported
+            as deferred/reconnect-required instead of aborting every release,
+            while registration failures for sufficiently scoped connectors
+            remain fatal. Verified with scope and rollout red -> green tests,
+            focused webhook/server tests, `git diff --check`, and `pnpm build`.
       - [x] **Merchant dashboard analytics surface** (2026-07-16). Added
             `/analytics` as a `tickets.view`-gated primary dashboard
             destination. It queries both workspace-scoped read models over

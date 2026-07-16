@@ -103,6 +103,8 @@ export interface ShopifyAppConfig {
  *                             pickup answers; the service filters to
  *                             pickup-enabled locations only) AND the dashboard
  *                             refund modal's restock-location dropdown
+ *      - `read_fulfillments` → fulfillment create/update webhooks used to
+ *                             discover shipments for delivery analytics
  *      - `read_inventory` / `write_inventory` → the dashboard refund modal's
  *                             restock leg (`getOrderRefundContext` reads the
  *                             suggested restock location; `refundOrder`
@@ -141,6 +143,7 @@ export const DEFAULT_SHOPIFY_SCOPES: ReadonlyArray<string> = [
   "read_legal_policies",
   "read_online_store_pages",
   "read_locations",
+  "read_fulfillments",
   "read_inventory",
   "write_inventory",
   ...SHOPIFY_FULFILLMENT_TRACKING_SCOPES,
