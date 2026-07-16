@@ -85,6 +85,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
             while registration failures for sufficiently scoped connectors
             remain fatal. Verified with scope and rollout red -> green tests,
             focused webhook/server tests, `git diff --check`, and `pnpm build`.
+            - [ ] **Surface shipment analytics in the Shopify Integration
+                  capability grid.** `read_fulfillments` is now required by the
+                  install and rollout, but unlike every other required Shopify
+                  scope it has no tool-derived or platform capability row.
+                  Until added, a stale connection missing this scope does not
+                  show the red capability or "Reinstall to update scopes"
+                  action on the Integration detail page.
       - [x] **Merchant dashboard analytics surface** (2026-07-16). Added
             `/analytics` as a `tickets.view`-gated primary dashboard
             destination. It queries both workspace-scoped read models over
