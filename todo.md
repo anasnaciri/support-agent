@@ -17,12 +17,24 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
-- [ ] **Merchant analytics and observability — design awaiting validation**
-      (2026-07-16). Proposed as two deep read models rather than metric logic
+- [ ] **Merchant analytics and observability — design validated; delivery
+      slice remains** (validated 2026-07-16). Implemented as two deep read
+      models rather than metric logic
       scattered through dashboard handlers:
-      1. **Support analytics** derives tenant-scoped period metrics from durable
-         ticket, transition, approval, tool-execution, and audit records behind
-         one analytics query interface and one dashboard endpoint.
+      1. [x] **Support analytics.** `GET /dashboard/analytics/support` derives
+         tenant-scoped cohort + activity metrics from durable ticket,
+         approval, audit, and reply-delivery records behind one DB query
+         interface. Cohort = tickets created in `[start,end)`; activity =
+         decisions/events occurring in that range. It returns explicit
+         numerator/denominator percentages, split merchant takeover vs
+         automatic escalation, agent-assisted vs human-handled ownership,
+         top scenarios, draft outcomes, median first-response/resolution/
+         approval-wait times, refunds split by actor and currency, failed
+         reply delivery, and current backlog. Bounds default to trailing 30
+         days, are capped at 365 days, and use UTC until tenant timezone is
+         stored. The Worker-safe dashboard contract and SPA API client expose
+         the same response. Verified TDD through the authenticated HTTP
+         endpoint against PostgreSQL, period parser tests, and `pnpm build`.
       2. **Delivery analytics** requires a new provider-neutral shipment
          subscription/event ledger. 17TRACK is the first ingest adapter:
          register tracking with a stable internal shipment tag, accept signed
@@ -36,7 +48,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       (accepted unchanged / edited then accepted / declined), resolution owner
       (agent-assisted vs human-closed), successful refunds and value by
       currency, failed customer-reply deliveries, and approval wait time.
-      Semantic decisions still to validate before TDD/implementation:
+      Validated semantic decisions:
       - period cohort: tickets created during the range vs events occurring in
         the range;
       - whether an agent draft accepted by a manager counts as agent-assisted
@@ -48,7 +60,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         every shipment, requiring Shopify fulfillment ingestion);
       - percentage denominators and timezone (proposed: always return counts +
         denominator; use tenant timezone once one is stored, UTC until then).
-      No implementation was retained before merchant validation.
+      The support slice follows these decisions. Delivery ingestion and its
+      endpoint remain before this parent item can be completed.
 
 - [x] **Order agents read the real nested tracking fields and retain the
       17TRACK URL fallback** (2026-07-14). The order-status and missing-package

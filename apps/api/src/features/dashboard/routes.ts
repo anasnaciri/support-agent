@@ -37,6 +37,7 @@ import {
   handleDashboardBlockTicketSender,
   handleDashboardTakeover,
   handleDashboardToday,
+  handleDashboardSupportAnalytics,
   handleDashboardUsage,
 } from "./ticket-handlers.js";
 import {
@@ -116,6 +117,12 @@ export const registerDashboardRoutes = (
 
   // ---- Dashboard read API ----
   dashboardGet("/dashboard/today", "Today-view rollup", handleDashboardToday, "tickets.view");
+  dashboardGet(
+    "/dashboard/analytics/support",
+    "Support operations cohort and activity analytics",
+    handleDashboardSupportAnalytics,
+    "tickets.view",
+  );
   dashboardGet(
     "/dashboard/tickets",
     "Paginated tickets list",

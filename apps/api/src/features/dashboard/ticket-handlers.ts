@@ -61,6 +61,7 @@ import {
   resolveTicketManually,
   resumeTicket,
   setTicketStatus,
+  supportAnalytics,
   takeOverTicket,
   todaySummary,
   usageRows,
@@ -124,6 +125,7 @@ import {
   authenticateDashboard,
 } from "../../auth/dashboard-context.js";
 import { resolveTenantShopifyApp } from "../shopify/handlers.js";
+import { parseAnalyticsPeriod } from "./analytics-period.js";
 
 // GET /dashboard/today — Today-view rollup.
 export const handleDashboardToday = async (
@@ -138,6 +140,26 @@ export const handleDashboardToday = async (
     todaySummary(db, auth.tenantId),
   );
   return sendJson(res, 200, summary);
+};
+
+// GET /dashboard/analytics/support?start=&end= — support operations cohort +
+// activity analytics. Bounds are inclusive-start/exclusive-end.
+export const handleDashboardSupportAnalytics = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const period = parseAnalyticsPeriod(
+    (req.query ?? {}) as Record<string, unknown>,
+  );
+  if (!period.ok) return sendJson(res, 400, { error: period.error });
+  const result = await runWithDb(layer, (db) =>
+    supportAnalytics(db, auth.tenantId, period),
+  );
+  return sendJson(res, 200, result);
 };
 
 // GET /dashboard/tickets?q=&status=&excludeStatus=&page=&limit= — paginated tickets

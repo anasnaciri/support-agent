@@ -87,6 +87,84 @@ export interface TodaySummary {
 }
 
 // ============================================================
+// Analytics
+// ============================================================
+
+export interface AnalyticsRate {
+  readonly count: number;
+  readonly total: number;
+  readonly percentage: number;
+}
+
+export interface AnalyticsPeriod {
+  /** Inclusive lower bound. */
+  readonly start: string;
+  /** Exclusive upper bound. */
+  readonly end: string;
+  /** UTC until tenants carry an explicit timezone setting. */
+  readonly timezone: "UTC";
+}
+
+export interface SupportScenarioMetric {
+  readonly scenarioKey: string;
+  readonly count: number;
+  readonly percentage: number;
+}
+
+export interface SupportAnalytics {
+  readonly period: AnalyticsPeriod;
+  readonly cohort: {
+    readonly ticketsCreated: number;
+    readonly resolutionRate: AnalyticsRate;
+    readonly handoffRate: AnalyticsRate;
+    readonly handoffs: {
+      readonly merchantTakeovers: number;
+      readonly automaticEscalations: number;
+    };
+    readonly resolutionOwnership: {
+      readonly agentAssisted: number;
+      readonly humanHandled: number;
+      readonly unresolved: number;
+    };
+    readonly topScenarios: ReadonlyArray<SupportScenarioMetric>;
+    readonly unclassifiedTickets: number;
+  };
+  readonly activity: {
+    readonly ticketsResolved: number;
+    readonly medianFirstResponseMinutes: number | null;
+    readonly medianResolutionMinutes: number | null;
+    readonly medianApprovalWaitMinutes: number | null;
+    readonly drafts: {
+      readonly decided: number;
+      readonly accepted: AnalyticsRate;
+      readonly acceptedWithoutEdit: number;
+      readonly editedThenAccepted: number;
+      readonly declined: number;
+    };
+    readonly refunds: {
+      readonly total: number;
+      readonly issuedByAgent: number;
+      readonly issuedByHuman: number;
+      readonly valueByCurrency: ReadonlyArray<{
+        readonly currencyCode: string;
+        readonly amountMinorUnits: number;
+      }>;
+    };
+    readonly customerReplyDeliveries: {
+      readonly failed: number;
+      readonly abandoned: number;
+    };
+  };
+  readonly backlog: {
+    readonly total: number;
+    readonly byStatus: ReadonlyArray<{
+      readonly status: string;
+      readonly count: number;
+    }>;
+  };
+}
+
+// ============================================================
 // Tickets
 // ============================================================
 

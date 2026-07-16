@@ -41,6 +41,7 @@ import type {
   TenantInfo,
   TenantSettingsView,
   TodaySummary,
+  SupportAnalytics,
   UsageDecisionRow,
   WorkspaceSummary,
   WorkspacesResponse,
@@ -416,6 +417,16 @@ export const api = {
   // ---- Reads ----
   today: (ctx: CallCtx): Promise<TodaySummary> =>
     okBody("/today", ctx) as Promise<TodaySummary>,
+  supportAnalytics: (
+    ctx: CallCtx,
+    period?: { readonly start?: string; readonly end?: string },
+  ): Promise<SupportAnalytics> => {
+    const qs = new URLSearchParams();
+    if (period?.start) qs.set("start", period.start);
+    if (period?.end) qs.set("end", period.end);
+    const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
+    return okBody(`/analytics/support${suffix}`, ctx) as Promise<SupportAnalytics>;
+  },
 
   tickets: (
     ctx: CallCtx,

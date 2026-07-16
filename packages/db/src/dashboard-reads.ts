@@ -35,6 +35,7 @@ import {
   type Page,
   type TodaySummary,
   type UsageDecisionRow,
+  type SupportAnalytics,
 } from "@support-agent/dashboard-contracts";
 import {
   allowedManualStatusTargets,
@@ -54,6 +55,7 @@ import {
   tenantAgentOverrides,
   tenantKnowledgeDocuments,
   tenants,
+  replyDeliveries,
 } from "./schema.js";
 import { hasOpenEscalationForTicket } from "./fulfillment-operator-store.js";
 import { getActiveReplyDeliveryForTicket } from "./reply-delivery-store.js";
@@ -97,6 +99,7 @@ export type {
   AgentOverrideRow,
   KnowledgeDocumentSummaryView,
   UsageDecisionRow,
+  SupportAnalytics,
 } from "@support-agent/dashboard-contracts";
 
 const TOP_N = 5;
@@ -355,6 +358,395 @@ export const todaySummary = async (
       scenarioKey: c.scenarioKey,
       updatedAt: c.updatedAt.toISOString(),
     })),
+  };
+};
+
+const analyticsPercentage = (count: number, total: number): number =>
+  total === 0 ? 0 : Math.round((count / total) * 1_000) / 10;
+
+/**
+ * Merchant-facing support operations analytics.
+ *
+ * Cohort measures are anchored on tickets CREATED in [start, end), while
+ * activity measures are anchored on events DECIDED in that same window. This
+ * distinction is part of the interface: it prevents an old ticket resolved
+ * today from silently changing the denominator of today's intake quality.
+ */
+export const supportAnalytics = async (
+  db: DrizzleDb,
+  tenantId: string,
+  period: { readonly start: Date; readonly end: Date },
+): Promise<SupportAnalytics> => {
+  const manualHandling = exists(
+    db
+      .select({ one: sql`1` })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.tenantId, tenantId),
+          eq(auditLog.ticketId, tickets.id),
+          eq(auditLog.actorType, "user"),
+          or(
+            eq(auditLog.action, "ticket.replied"),
+            and(
+              eq(auditLog.action, "ticket.resolved"),
+              sql`coalesce(${auditLog.details}->>'reason', '') NOT LIKE 'approved %'`,
+            ),
+          ),
+        ),
+      ),
+  );
+  const merchantTakeover = exists(
+    db
+      .select({ one: sql`1` })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.tenantId, tenantId),
+          eq(auditLog.ticketId, tickets.id),
+          eq(auditLog.action, "ticket.taken_over"),
+        ),
+      ),
+  );
+  const automaticEscalation = exists(
+    db
+      .select({ one: sql`1` })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.tenantId, tenantId),
+          eq(auditLog.ticketId, tickets.id),
+          eq(auditLog.action, "ticket.escalated_to_human"),
+        ),
+      ),
+  );
+  const cohortWhere = and(
+    eq(tickets.tenantId, tenantId),
+    gte(tickets.createdAt, period.start),
+    lt(tickets.createdAt, period.end),
+  );
+  const firstResponseTimes = db
+    .select({
+      minutes:
+        sql<number>`extract(epoch FROM (min(${auditLog.occurredAt}) - ${tickets.createdAt})) / 60.0`.as(
+          "minutes",
+        ),
+    })
+    .from(tickets)
+    .innerJoin(
+      auditLog,
+      and(
+        eq(auditLog.tenantId, tickets.tenantId),
+        eq(auditLog.ticketId, tickets.id),
+      ),
+    )
+    .where(
+      and(
+        cohortWhere,
+        or(
+          and(
+            eq(auditLog.action, "tool.invoked"),
+            sql`${auditLog.details}->>'tool' IN ('conversation.reply', 'conversation.ask_customer')`,
+            sql`${auditLog.details}->>'ok' = 'true'`,
+          ),
+          and(
+            eq(auditLog.action, "ticket.replied"),
+            eq(auditLog.actorType, "user"),
+          ),
+        ),
+      ),
+    )
+    .groupBy(tickets.id, tickets.createdAt)
+    .as("first_response_times");
+
+  const [
+    cohortRows,
+    scenarioRows,
+    draftRows,
+    activityRows,
+    firstResponseRows,
+    approvalWaitRows,
+    refundRows,
+    deliveryRows,
+    backlogRows,
+  ] = await Promise.all([
+    db
+      .select({
+        total: sql<number>`count(*)::int`,
+        resolved: sql<number>`count(*) FILTER (WHERE ${tickets.resolvedAt} IS NOT NULL)::int`,
+        merchantTakeovers: sql<number>`count(*) FILTER (WHERE ${merchantTakeover})::int`,
+        automaticEscalations: sql<number>`count(*) FILTER (WHERE ${automaticEscalation})::int`,
+        handedOff: sql<number>`count(*) FILTER (WHERE ${merchantTakeover} OR ${automaticEscalation})::int`,
+        humanHandled: sql<number>`count(*) FILTER (WHERE ${manualHandling})::int`,
+        agentAssisted: sql<number>`count(*) FILTER (
+          WHERE ${tickets.resolvedAt} IS NOT NULL AND NOT ${manualHandling}
+        )::int`,
+        unresolved: sql<number>`count(*) FILTER (
+          WHERE ${tickets.resolvedAt} IS NULL AND NOT ${manualHandling}
+        )::int`,
+        unclassified: sql<number>`count(*) FILTER (
+          WHERE nullif(${tickets.context}->>'scenarioKey', '') IS NULL
+        )::int`,
+      })
+      .from(tickets)
+      .where(cohortWhere),
+    db
+      .select({
+        scenarioKey: sql<string>`${tickets.context}->>'scenarioKey'`,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(tickets)
+      .where(
+        and(
+          cohortWhere,
+          sql`nullif(${tickets.context}->>'scenarioKey', '') IS NOT NULL`,
+        ),
+      )
+      .groupBy(sql`${tickets.context}->>'scenarioKey'`)
+      .orderBy(desc(sql`count(*)`), asc(sql`${tickets.context}->>'scenarioKey'`))
+      .limit(10),
+    db
+      .select({
+        decided: sql<number>`count(*)::int`,
+        accepted: sql<number>`count(*) FILTER (WHERE ${approvals.status} = 'approved')::int`,
+        acceptedWithoutEdit: sql<number>`count(*) FILTER (
+          WHERE ${approvals.status} = 'approved'
+            AND (${approvals.approvedInput} IS NULL OR ${approvals.approvedInput} = ${approvals.proposedInput})
+        )::int`,
+        editedThenAccepted: sql<number>`count(*) FILTER (
+          WHERE ${approvals.status} = 'approved'
+            AND ${approvals.approvedInput} IS NOT NULL
+            AND ${approvals.approvedInput} <> ${approvals.proposedInput}
+        )::int`,
+        declined: sql<number>`count(*) FILTER (WHERE ${approvals.status} = 'rejected')::int`,
+      })
+      .from(approvals)
+      .where(
+        and(
+          eq(approvals.tenantId, tenantId),
+          inArray(approvals.tool, [
+            "conversation.reply",
+            "conversation.ask_customer",
+          ]),
+          inArray(approvals.status, ["approved", "rejected"]),
+          gte(approvals.decidedAt, period.start),
+          lt(approvals.decidedAt, period.end),
+        ),
+      ),
+    db
+      .select({
+        ticketsResolved: sql<number>`count(*)::int`,
+        medianResolutionMinutes: sql<number | null>`
+          percentile_cont(0.5) WITHIN GROUP (
+            ORDER BY extract(epoch FROM (${tickets.resolvedAt} - ${tickets.createdAt})) / 60.0
+          )
+        `,
+      })
+      .from(tickets)
+      .where(
+        and(
+          eq(tickets.tenantId, tenantId),
+          gte(tickets.resolvedAt, period.start),
+          lt(tickets.resolvedAt, period.end),
+        ),
+      ),
+    db
+      .select({
+        median: sql<number | null>`
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY ${firstResponseTimes.minutes})
+        `,
+      })
+      .from(firstResponseTimes),
+    db
+      .select({
+        median: sql<number | null>`
+          percentile_cont(0.5) WITHIN GROUP (
+            ORDER BY extract(epoch FROM (${approvals.decidedAt} - ${approvals.createdAt})) / 60.0
+          )
+        `,
+      })
+      .from(approvals)
+      .where(
+        and(
+          eq(approvals.tenantId, tenantId),
+          inArray(approvals.status, ["approved", "rejected"]),
+          gte(approvals.decidedAt, period.start),
+          lt(approvals.decidedAt, period.end),
+        ),
+      ),
+    db
+      .select({
+        actorType: auditLog.actorType,
+        action: auditLog.action,
+        details: auditLog.details,
+      })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.tenantId, tenantId),
+          gte(auditLog.occurredAt, period.start),
+          lt(auditLog.occurredAt, period.end),
+          or(
+            and(
+              eq(auditLog.action, "tool.invoked"),
+              sql`${auditLog.details}->>'tool' = 'refund.create'`,
+              sql`${auditLog.details}->>'ok' = 'true'`,
+            ),
+            eq(auditLog.action, "ticket.refund_issued"),
+          ),
+        ),
+      ),
+    db
+      .select({
+        failed: sql<number>`count(*) FILTER (WHERE ${replyDeliveries.status} = 'pending' AND ${replyDeliveries.attempts} > 0)::int`,
+        abandoned: sql<number>`count(*) FILTER (WHERE ${replyDeliveries.status} = 'abandoned')::int`,
+      })
+      .from(replyDeliveries)
+      .where(
+        and(
+          eq(replyDeliveries.tenantId, tenantId),
+          gte(replyDeliveries.createdAt, period.start),
+          lt(replyDeliveries.createdAt, period.end),
+        ),
+      ),
+    db
+      .select({
+        status: tickets.status,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(tickets)
+      .where(
+        and(
+          eq(tickets.tenantId, tenantId),
+          notInArray(tickets.status, ["resolved", "archived"]),
+        ),
+      )
+      .groupBy(tickets.status)
+      .orderBy(asc(tickets.status)),
+  ]);
+
+  const cohort = cohortRows[0] ?? {
+    total: 0,
+    resolved: 0,
+    merchantTakeovers: 0,
+    automaticEscalations: 0,
+    handedOff: 0,
+    humanHandled: 0,
+    agentAssisted: 0,
+    unresolved: 0,
+    unclassified: 0,
+  };
+  const drafts = draftRows[0] ?? {
+    decided: 0,
+    accepted: 0,
+    acceptedWithoutEdit: 0,
+    editedThenAccepted: 0,
+    declined: 0,
+  };
+  const activity = activityRows[0] ?? {
+    ticketsResolved: 0,
+    medianResolutionMinutes: null,
+  };
+  const normalizeMedian = (value: number | null | undefined): number | null =>
+    value == null ? null : Math.round(Number(value) * 10) / 10;
+  const refundTotals = new Map<string, number>();
+  let issuedByAgent = 0;
+  let issuedByHuman = 0;
+  for (const row of refundRows) {
+    if (row.actorType === "agent") issuedByAgent += 1;
+    else issuedByHuman += 1;
+    const details = row.details as Record<string, unknown>;
+    const currency =
+      typeof details["currencyCode"] === "string"
+        ? details["currencyCode"].toUpperCase()
+        : null;
+    const minorUnits =
+      row.action === "ticket.refund_issued"
+        ? typeof details["amount"] === "string" &&
+          Number.isFinite(Number(details["amount"]))
+          ? Math.round(Number(details["amount"]) * 100)
+          : null
+        : typeof details["amountMinorUnits"] === "number"
+          ? Math.round(details["amountMinorUnits"])
+          : null;
+    if (currency && minorUnits !== null) {
+      refundTotals.set(currency, (refundTotals.get(currency) ?? 0) + minorUnits);
+    }
+  }
+  const delivery = deliveryRows[0] ?? { failed: 0, abandoned: 0 };
+
+  return {
+    period: {
+      start: period.start.toISOString(),
+      end: period.end.toISOString(),
+      timezone: "UTC",
+    },
+    cohort: {
+      ticketsCreated: cohort.total,
+      resolutionRate: {
+        count: cohort.resolved,
+        total: cohort.total,
+        percentage: analyticsPercentage(cohort.resolved, cohort.total),
+      },
+      handoffRate: {
+        count: cohort.handedOff,
+        total: cohort.total,
+        percentage: analyticsPercentage(cohort.handedOff, cohort.total),
+      },
+      handoffs: {
+        merchantTakeovers: cohort.merchantTakeovers,
+        automaticEscalations: cohort.automaticEscalations,
+      },
+      resolutionOwnership: {
+        agentAssisted: cohort.agentAssisted,
+        humanHandled: cohort.humanHandled,
+        unresolved: cohort.unresolved,
+      },
+      topScenarios: scenarioRows.map((row) => ({
+        scenarioKey: row.scenarioKey,
+        count: row.count,
+        percentage: analyticsPercentage(row.count, cohort.total),
+      })),
+      unclassifiedTickets: cohort.unclassified,
+    },
+    activity: {
+      ticketsResolved: activity.ticketsResolved,
+      medianFirstResponseMinutes: normalizeMedian(firstResponseRows[0]?.median),
+      medianResolutionMinutes: normalizeMedian(
+        activity.medianResolutionMinutes,
+      ),
+      medianApprovalWaitMinutes: normalizeMedian(approvalWaitRows[0]?.median),
+      drafts: {
+        decided: drafts.decided,
+        accepted: {
+          count: drafts.accepted,
+          total: drafts.decided,
+          percentage: analyticsPercentage(drafts.accepted, drafts.decided),
+        },
+        acceptedWithoutEdit: drafts.acceptedWithoutEdit,
+        editedThenAccepted: drafts.editedThenAccepted,
+        declined: drafts.declined,
+      },
+      refunds: {
+        total: refundRows.length,
+        issuedByAgent,
+        issuedByHuman,
+        valueByCurrency: [...refundTotals.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([currencyCode, amountMinorUnits]) => ({
+            currencyCode,
+            amountMinorUnits,
+          })),
+      },
+      customerReplyDeliveries: {
+        failed: delivery.failed,
+        abandoned: delivery.abandoned,
+      },
+    },
+    backlog: {
+      total: backlogRows.reduce((sum, row) => sum + row.count, 0),
+      byStatus: backlogRows,
+    },
   };
 };
 
