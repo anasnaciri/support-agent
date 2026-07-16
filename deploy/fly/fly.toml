@@ -31,7 +31,7 @@ primary_region = "cdg"               # Paris — EU-West (mad/Madrid is deprecat
 [deploy]
   # Runs once on a temporary machine with the app image + secrets BEFORE the
   # new machines roll. This is the api role's old pre-start migrate step.
-  release_command = "sh -c 'cd packages/db && pnpm db:migrate'"
+  release_command = "sh -c 'cd packages/db && pnpm db:migrate && cd /app && pnpm --filter @support-agent/api reconcile:shopify-shipments'"
   strategy = "rolling"
 
 [env]

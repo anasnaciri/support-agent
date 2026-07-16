@@ -26,9 +26,9 @@ services:
       timeout: 5s
       retries: 10
 
-  # ---- One-shot DB migration (drizzle-kit migrate) ------------------------
+  # ---- One-shot DB migration + versioned rollout reconciliation -----------
   # Not started by `up` (tools profile). Run explicitly before bringing the
-  # app up, and after every deploy that adds migrations:
+  # app up, and after every deploy that adds migrations or rollout work:
   #   docker compose ... --env-file deploy/compose/.env run --rm migrate
   migrate:
     build:

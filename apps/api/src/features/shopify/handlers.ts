@@ -78,6 +78,9 @@ import {
   shipmentPublisher,
   shopifyPolicyImportPublisher,
 } from "../../platform/pgboss.js";
+import {
+  shopifyShipmentRolloutMetadata,
+} from "./shipment-rollout-reconciliation.js";
 
 /** The deployment-wide Shopify app (SaaS path), or null in a pure-pilot
  * deployment that ships no global app (audit A6). */
@@ -699,6 +702,23 @@ export const handleShopifyCallback = async (
       kind: "shopify.backfill",
       tenantId,
     });
+    await Effect.runPromise(
+      Effect.provide(
+        ConnectorCredentialStore.pipe(
+          Effect.flatMap((store) =>
+            store.patchMetadata({
+              tenantId: TenantId(tenantId),
+              provider: "shopify",
+              shopDomain: shop,
+              metadata: shopifyShipmentRolloutMetadata(
+                fulfillmentWebhooks,
+              ),
+            }),
+          ),
+        ),
+        layer,
+      ),
+    );
   } catch (cause) {
     // eslint-disable-next-line no-console
     console.warn(

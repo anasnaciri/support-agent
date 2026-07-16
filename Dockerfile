@@ -44,5 +44,5 @@ CMD ["node", "dist/index.js"]
 # Run via `docker compose run --rm migrate`. drizzle-kit is a dev dependency,
 # so this target deliberately keeps the builder's full deps.
 FROM builder AS migrate
-WORKDIR /app/packages/db
-CMD ["pnpm", "db:migrate"]
+WORKDIR /app
+CMD ["sh", "-c", "cd packages/db && pnpm db:migrate && cd /app && pnpm --filter @support-agent/api reconcile:shopify-shipments"]

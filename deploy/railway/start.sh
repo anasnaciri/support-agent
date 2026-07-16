@@ -6,6 +6,7 @@ case "${DEPLOY_ROLE:-api}" in
     cd /app/packages/db
     pnpm db:migrate
     cd /app
+    pnpm --filter @support-agent/api reconcile:shopify-shipments
     exec node apps/api/dist/server.js
     ;;
   worker)

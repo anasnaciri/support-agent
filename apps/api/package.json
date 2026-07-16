@@ -9,6 +9,7 @@
     "build:deps": "pnpm --filter '@support-agent/api...' build",
     "clean": "tsc -b --clean",
     "start": "node dist/server.js",
+    "reconcile:shopify-shipments": "node dist/reconcile-shopify-shipments.js",
     "start:local": "node --env-file=.env.local dist/server.js",
     "start:dev": "pnpm run build:deps && node --env-file=.env.local --import tsx src/server.ts"
   },

@@ -454,6 +454,9 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     expect(fetched.scopes).toEqual(["read_orders", "read_customers"]);
     expect(fetched.apiVersion).toBe("2025-01");
     expect(fetched.metadata).toMatchObject({
+      shopifyShipmentRollout: {
+        version: "shipment-analytics-v1",
+      },
       shopifyWebhooks: {
         appUninstalled: {
           uri: "http://localhost/webhooks/shopify/app/uninstalled",

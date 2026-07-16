@@ -73,8 +73,9 @@ encrypted your existing data, or stored connector credentials won't decrypt.
 fly deploy -c deploy/fly/fly.toml --dockerfile deploy/railway/Dockerfile
 ```
 
-This builds the image, runs `pnpm db:migrate` once (the `release_command`), then
-rolls out one `api` machine and one `worker` machine.
+This builds the image, runs `pnpm db:migrate` plus the versioned Shopify
+shipment reconciliation once (the `release_command`), then rolls out one
+`api` machine and one `worker` machine.
 
 ## 4. Make sure exactly one of each is running
 
@@ -133,8 +134,9 @@ fly secrets set -c deploy/fly/fly.toml \
 
 ## Notes
 
-- **Migrations** run via `release_command` on every deploy — idempotent, no
-  manual step.
+- **Migrations and rollout reconciliation** run via `release_command` on every
+  deploy. Both are idempotent; the release fails if a pending Shopify
+  connector cannot register its webhooks or enqueue its shipment backfill.
 - **Re-deploy** after code changes: just re-run step 3.
 - **Tune memory** per group if the worker OOMs under LLM load:
   `fly scale memory 2048 --process-group worker -c deploy/fly/fly.toml`.

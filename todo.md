@@ -67,10 +67,17 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       - percentage denominators and timezone (proposed: always return counts +
         denominator; use tenant timezone once one is stored, UTC until then).
       Both read models follow these decisions.
-      - [ ] **Rollout reconciliation for Shopify connections installed before
-            this release.** Re-register the two fulfillment subscriptions and
-            enqueue one backfill per existing active Shopify connector during
-            deployment. New and reconnected stores do this automatically.
+      - [x] **Rollout reconciliation for Shopify connections installed before
+            this release** (2026-07-16). The deployment migration/release role
+            selects active Shopify connectors missing `shipment-analytics-v1`,
+            re-registers both fulfillment webhook topics, enqueues the existing
+            provider-neutral backfill, and only then writes a versioned
+            connector-metadata marker. Successful connectors are skipped on
+            later deploys; partial failures remain eligible and fail the
+            release visibly after the other connectors were attempted. Fly,
+            Railway, CLI-start, and Compose migration paths invoke it.
+            New/reconnected stores write the same marker after their callback
+            successfully enqueues the backfill.
 
 - [x] **Order agents read the real nested tracking fields and retain the
       17TRACK URL fallback** (2026-07-14). The order-status and missing-package
