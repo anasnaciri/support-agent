@@ -351,6 +351,13 @@
       "when": 1783959300000,
       "tag": "0049_forward_customer_images_to_fulfillment_operator",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1784232500000,
+      "tag": "0050_shipment_analytics_ledger",
+      "breakpoints": true
     }
   ]
 }

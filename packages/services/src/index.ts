@@ -37,6 +37,8 @@ export * from "./reply-delivery.js";
 export * from "./blob-storage.js";
 export * from "./tracking-config.js";
 export * from "./tracking-service.js";
+export * from "./shipment-store.js";
+export * from "./shipment-ingestion.js";
 export * from "./tracking-no-provider.js";
 export * from "./conversation-service.js";
 export * from "./conversation-thread-id.js";

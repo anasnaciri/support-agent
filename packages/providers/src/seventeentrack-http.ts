@@ -16,6 +16,7 @@ import type {
   TrackingScanEvent,
   TrackingStatus,
 } from "@support-agent/agent-core";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 // ============================================================
 // Errors
@@ -248,6 +249,8 @@ export interface SeventeenTrackRegisterInput {
    * set when the number is registered — which our lookup flow always does first.
    */
   readonly lang?: string;
+  /** Stable internal shipment id echoed back by 17track webhooks. */
+  readonly tag?: string;
   readonly fetchImpl?: typeof fetch;
 }
 
@@ -268,6 +271,7 @@ export const seventeenTrackRegister = async (
       number: input.trackingNumber,
       ...(input.carrier ? { carrier: input.carrier } : {}),
       lang: input.lang ?? "en",
+      ...(input.tag ? { tag: input.tag } : {}),
     },
   ];
   await post({
@@ -276,6 +280,131 @@ export const seventeenTrackRegister = async (
     body,
     ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
   });
+};
+
+export const verifySeventeenTrackWebhookSignature = (
+  rawBody: Buffer,
+  receivedSignature: string,
+  apiKey: string,
+): boolean => {
+  const expected = createHash("sha256")
+    .update(rawBody)
+    .update(`/${apiKey}`)
+    .digest();
+  let received: Buffer;
+  try {
+    received = Buffer.from(receivedSignature, "hex");
+  } catch {
+    return false;
+  }
+  return (
+    received.length === expected.length && timingSafeEqual(received, expected)
+  );
+};
+
+export interface SeventeenTrackWebhookUpdate {
+  readonly kind: "tracking_update";
+  readonly shipmentId: string;
+  readonly trackingNumber: string;
+  readonly carrier: string | null;
+  readonly status:
+    | "pending"
+    | "in_transit"
+    | "delivered"
+    | "exception"
+    | "unknown"
+    | "stopped";
+  readonly occurredAt: Date;
+  readonly lastScanAt: Date | null;
+  readonly transitDays: number | null;
+  readonly destinationCountry: string | null;
+}
+
+const validDate = (value: unknown): Date | null => {
+  if (typeof value !== "string") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+export const parseSeventeenTrackWebhook = (
+  rawBody: Buffer,
+  receivedAt = new Date(),
+): SeventeenTrackWebhookUpdate | null => {
+  let root: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(rawBody.toString("utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    root = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const event = root["event"];
+  if (event !== "TRACKING_UPDATED" && event !== "TRACKING_STOPPED") {
+    return null;
+  }
+  const data =
+    root["data"] && typeof root["data"] === "object"
+      ? (root["data"] as Record<string, unknown>)
+      : null;
+  if (!data || typeof data["tag"] !== "string") return null;
+  const info =
+    data["track_info"] && typeof data["track_info"] === "object"
+      ? (data["track_info"] as Record<string, unknown>)
+      : {};
+  const latestStatus =
+    info["latest_status"] && typeof info["latest_status"] === "object"
+      ? (info["latest_status"] as Record<string, unknown>)
+      : {};
+  const latestEvent =
+    info["latest_event"] && typeof info["latest_event"] === "object"
+      ? (info["latest_event"] as Record<string, unknown>)
+      : {};
+  const shippingInfo =
+    info["shipping_info"] && typeof info["shipping_info"] === "object"
+      ? (info["shipping_info"] as Record<string, unknown>)
+      : {};
+  const recipient =
+    shippingInfo["recipient_address"] &&
+    typeof shippingInfo["recipient_address"] === "object"
+      ? (shippingInfo["recipient_address"] as Record<string, unknown>)
+      : {};
+  const metrics =
+    info["time_metrics"] && typeof info["time_metrics"] === "object"
+      ? (info["time_metrics"] as Record<string, unknown>)
+      : {};
+  const lastScanAt =
+    validDate(latestEvent["time_iso"]) ??
+    validDate(latestEvent["time_utc"]);
+  const rawStatus =
+    typeof latestStatus["status"] === "string"
+      ? latestStatus["status"]
+      : undefined;
+
+  return {
+    kind: "tracking_update",
+    shipmentId: data["tag"],
+    trackingNumber:
+      typeof data["number"] === "string" ? data["number"] : "",
+    carrier:
+      typeof data["carrier"] === "string" ||
+      typeof data["carrier"] === "number"
+        ? String(data["carrier"])
+        : null,
+    status:
+      event === "TRACKING_STOPPED" ? "stopped" : stringToStatus(rawStatus),
+    occurredAt: lastScanAt ?? receivedAt,
+    lastScanAt,
+    transitDays:
+      typeof metrics["days_of_transit"] === "number"
+        ? metrics["days_of_transit"]
+        : typeof metrics["days_after_order"] === "number"
+          ? metrics["days_after_order"]
+          : null,
+    destinationCountry:
+      typeof recipient["country"] === "string"
+        ? recipient["country"]
+        : null,
+  };
 };
 
 export interface SeventeenTrackGetInfoInput {

@@ -24,3 +24,4 @@ export * from "./fulfillment-operator-store.js";
 export * from "./fulfillment-operator-escalation-service-live.js";
 export * from "./reply-delivery-store.js";
 export * from "./reply-delivery-service-live.js";
+export * from "./shipment-store-live.js";

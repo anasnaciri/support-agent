@@ -42,6 +42,7 @@ import type {
   TenantSettingsView,
   TodaySummary,
   SupportAnalytics,
+  DeliveryAnalytics,
   UsageDecisionRow,
   WorkspaceSummary,
   WorkspacesResponse,
@@ -426,6 +427,18 @@ export const api = {
     if (period?.end) qs.set("end", period.end);
     const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
     return okBody(`/analytics/support${suffix}`, ctx) as Promise<SupportAnalytics>;
+  },
+  deliveryAnalytics: (
+    ctx: DashboardRequestContext,
+    period?: { readonly start: string; readonly end: string },
+  ): Promise<DeliveryAnalytics> => {
+    const query = period
+      ? `?${new URLSearchParams(period).toString()}`
+      : "";
+    return okBody(
+      `/analytics/delivery${query}`,
+      ctx,
+    ) as Promise<DeliveryAnalytics>;
   },
 
   tickets: (

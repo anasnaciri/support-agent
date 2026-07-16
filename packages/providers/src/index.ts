@@ -1,5 +1,6 @@
 export * from "./llm-service-live.js";
 export * from "./shopify-service-live.js";
+export * from "./shopify-shipment-backfill.js";
 export * from "./shopify-credential-store-from-connector.js";
 export * from "./gmail-http.js";
 export * from "./gmail-token.js";

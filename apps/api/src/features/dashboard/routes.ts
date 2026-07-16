@@ -38,6 +38,7 @@ import {
   handleDashboardTakeover,
   handleDashboardToday,
   handleDashboardSupportAnalytics,
+  handleDashboardDeliveryAnalytics,
   handleDashboardUsage,
 } from "./ticket-handlers.js";
 import {
@@ -121,6 +122,12 @@ export const registerDashboardRoutes = (
     "/dashboard/analytics/support",
     "Support operations cohort and activity analytics",
     handleDashboardSupportAnalytics,
+    "tickets.view",
+  );
+  dashboardGet(
+    "/dashboard/analytics/delivery",
+    "Shipment delivery cohort and activity analytics",
+    handleDashboardDeliveryAnalytics,
     "tickets.view",
   );
   dashboardGet(

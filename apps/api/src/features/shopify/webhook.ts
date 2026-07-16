@@ -21,6 +21,57 @@ export interface UninstallPayload {
   readonly domain: string | null;
 }
 
+export interface FulfillmentShipmentPayload {
+  readonly sourceOrderId: string;
+  readonly sourceFulfillmentId: string;
+  readonly trackingNumber: string;
+  readonly carrier: string | null;
+  readonly shippedAt: Date | null;
+}
+
+export const parseFulfillmentShipmentPayload = (
+  buf: Buffer,
+): ReadonlyArray<FulfillmentShipmentPayload> => {
+  const raw = safeJson(buf);
+  if (!raw) return [];
+  const fulfillmentId = raw["id"];
+  const orderId = raw["order_id"];
+  if (
+    (typeof fulfillmentId !== "number" &&
+      typeof fulfillmentId !== "string") ||
+    (typeof orderId !== "number" && typeof orderId !== "string")
+  ) {
+    return [];
+  }
+  const values = Array.isArray(raw["tracking_numbers"])
+    ? raw["tracking_numbers"]
+    : typeof raw["tracking_number"] === "string"
+      ? [raw["tracking_number"]]
+      : [];
+  const trackingNumbers = [
+    ...new Set(
+      values
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ];
+  const shippedAtRaw =
+    typeof raw["created_at"] === "string" ? raw["created_at"] : null;
+  const shippedAt = shippedAtRaw ? new Date(shippedAtRaw) : null;
+  return trackingNumbers.map((trackingNumber) => ({
+    sourceOrderId: `gid://shopify/Order/${orderId}`,
+    sourceFulfillmentId: `gid://shopify/Fulfillment/${fulfillmentId}`,
+    trackingNumber,
+    carrier:
+      typeof raw["tracking_company"] === "string"
+        ? raw["tracking_company"]
+        : null,
+    shippedAt:
+      shippedAt && !Number.isNaN(shippedAt.getTime()) ? shippedAt : null,
+  }));
+};
+
 export const parseUninstallPayload = (buf: Buffer): UninstallPayload => {
   let raw: unknown;
   try {

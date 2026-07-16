@@ -38,6 +38,7 @@ import {
 import {
   parseCustomersDataRequest,
   parseCustomersRedact,
+  parseFulfillmentShipmentPayload,
   parseShopRedact,
   parseUninstallPayload,
 } from "./webhook.js";
@@ -48,7 +49,9 @@ import {
 } from "../account/compliance-redaction.js";
 import {
   appUninstalledWebhookUrl,
+  fulfillmentWebhookUrls,
   registerAppUninstalledWebhook,
+  registerFulfillmentWebhooks,
 } from "./webhook-registration.js";
 import {
   type ApiConfig,
@@ -71,7 +74,10 @@ import {
   tenantHasCurrentLegalAcceptance,
   sendLegalAcceptanceRequired,
 } from "../../auth/dashboard-context.js";
-import { shopifyPolicyImportPublisher } from "../../platform/pgboss.js";
+import {
+  shipmentPublisher,
+  shopifyPolicyImportPublisher,
+} from "../../platform/pgboss.js";
 
 /** The deployment-wide Shopify app (SaaS path), or null in a pure-pilot
  * deployment that ships no global app (audit A6). */
@@ -585,6 +591,19 @@ export const handleShopifyCallback = async (
     return null;
   });
   if (!appUninstalledWebhook) return;
+  const fulfillmentWebhooks = await registerFulfillmentWebhooks({
+    shop,
+    accessToken: token.accessToken,
+    apiVersion: cfg.shopify.apiVersion,
+    webhookUrls: fulfillmentWebhookUrls(cfg.shopify.callbackUrl),
+  }).catch((cause) => {
+    sendJson(res, 502, {
+      error: "webhook_registration_failed",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+    return null;
+  });
+  if (!fulfillmentWebhooks) return;
 
   const persistResult = await Effect.runPromise(
     Effect.provide(
@@ -613,6 +632,13 @@ export const handleShopifyCallback = async (
                       status: appUninstalledWebhook.status,
                       registeredAt: new Date().toISOString(),
                     },
+                    fulfillments: fulfillmentWebhooks.map((webhook) => ({
+                      topic: webhook.topic,
+                      id: webhook.id,
+                      uri: webhook.uri,
+                      status: webhook.status,
+                      registeredAt: new Date().toISOString(),
+                    })),
                   },
                 },
               });
@@ -664,6 +690,19 @@ export const handleShopifyCallback = async (
     // eslint-disable-next-line no-console
     console.warn(
       `[shopify-policy-import] enqueue failed for tenant=${tenantId}: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
+  try {
+    await shipmentPublisher(cfg.databaseUrl)({
+      kind: "shopify.backfill",
+      tenantId,
+    });
+  } catch (cause) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[shopify-shipment-backfill] enqueue failed for tenant=${tenantId}: ${
         cause instanceof Error ? cause.message : String(cause)
       }`,
     );
@@ -950,6 +989,47 @@ export const verifyComplianceWebhook = async (
     return { tenantId: null, shop, rawBody };
   }
   return { tenantId: tenantExit.value, shop, rawBody };
+};
+
+export const handleFulfillmentShipment = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  const verified = await verifyComplianceWebhook(cfg, layer, req, res);
+  if (!verified) return;
+  if (!verified.tenantId) {
+    sendJson(res, 200, { ok: true, action: "noop_unknown_shop" });
+    return;
+  }
+  const discoveries = parseFulfillmentShipmentPayload(verified.rawBody);
+  try {
+    const publish = shipmentPublisher(cfg.databaseUrl);
+    await Promise.all(
+      discoveries.map((shipment) =>
+        publish({
+          kind: "shopify.fulfillment",
+          shipment: {
+            tenantId: TenantId(verified.tenantId!),
+            source: "shopify",
+            ...shipment,
+          },
+        }),
+      ),
+    );
+  } catch (cause) {
+    req.log.error(
+      { err: cause },
+      "[shopify fulfillment webhook] enqueue failed",
+    );
+    sendJson(res, 503, { error: "shipment_enqueue_failed" });
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    action: discoveries.length > 0 ? "enqueued" : "noop_untracked",
+  });
 };
 
 /** POST /webhooks/shopify/customers/data_request */

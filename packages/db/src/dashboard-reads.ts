@@ -36,6 +36,7 @@ import {
   type TodaySummary,
   type UsageDecisionRow,
   type SupportAnalytics,
+  type DeliveryAnalytics,
 } from "@support-agent/dashboard-contracts";
 import {
   allowedManualStatusTargets,
@@ -56,6 +57,7 @@ import {
   tenantKnowledgeDocuments,
   tenants,
   replyDeliveries,
+  shipments,
 } from "./schema.js";
 import { hasOpenEscalationForTicket } from "./fulfillment-operator-store.js";
 import { getActiveReplyDeliveryForTicket } from "./reply-delivery-store.js";
@@ -100,6 +102,7 @@ export type {
   KnowledgeDocumentSummaryView,
   UsageDecisionRow,
   SupportAnalytics,
+  DeliveryAnalytics,
 } from "@support-agent/dashboard-contracts";
 
 const TOP_N = 5;
@@ -724,8 +727,29 @@ export const supportAnalytics = async (
           percentage: analyticsPercentage(drafts.accepted, drafts.decided),
         },
         acceptedWithoutEdit: drafts.acceptedWithoutEdit,
+        acceptedWithoutEditRate: {
+          count: drafts.acceptedWithoutEdit,
+          total: drafts.decided,
+          percentage: analyticsPercentage(
+            drafts.acceptedWithoutEdit,
+            drafts.decided,
+          ),
+        },
         editedThenAccepted: drafts.editedThenAccepted,
+        editedThenAcceptedRate: {
+          count: drafts.editedThenAccepted,
+          total: drafts.decided,
+          percentage: analyticsPercentage(
+            drafts.editedThenAccepted,
+            drafts.decided,
+          ),
+        },
         declined: drafts.declined,
+        declinedRate: {
+          count: drafts.declined,
+          total: drafts.decided,
+          percentage: analyticsPercentage(drafts.declined, drafts.decided),
+        },
       },
       refunds: {
         total: refundRows.length,
@@ -747,6 +771,147 @@ export const supportAnalytics = async (
       total: backlogRows.reduce((sum, row) => sum + row.count, 0),
       byStatus: backlogRows,
     },
+  };
+};
+
+export const deliveryAnalytics = async (
+  db: DrizzleDb,
+  tenantId: string,
+  period: { readonly start: Date; readonly end: Date },
+): Promise<DeliveryAnalytics> => {
+  const cohortAnchor = sql`coalesce(${shipments.shippedAt}, ${shipments.createdAt})`;
+  const cohortWhere = and(
+    eq(shipments.tenantId, tenantId),
+    sql`${cohortAnchor} >= ${period.start.toISOString()}::timestamptz`,
+    sql`${cohortAnchor} < ${period.end.toISOString()}::timestamptz`,
+  );
+  const [cohortRows, carrierRows, activityRows, currentRows] =
+    await Promise.all([
+      db
+        .select({
+          total: sql<number>`count(*)::int`,
+          delivered: sql<number>`count(*) FILTER (WHERE ${shipments.deliveredAt} IS NOT NULL)::int`,
+          exceptions: sql<number>`count(*) FILTER (WHERE ${shipments.firstExceptionAt} IS NOT NULL)::int`,
+          recovered: sql<number>`count(*) FILTER (
+            WHERE ${shipments.firstExceptionAt} IS NOT NULL
+              AND ${shipments.deliveredAt} > ${shipments.firstExceptionAt}
+          )::int`,
+        })
+        .from(shipments)
+        .where(cohortWhere),
+      db
+        .select({
+          carrier: sql<string>`coalesce(nullif(${shipments.carrier}, ''), 'Unknown')`,
+          shipments: sql<number>`count(*)::int`,
+          exceptions: sql<number>`count(*) FILTER (WHERE ${shipments.firstExceptionAt} IS NOT NULL)::int`,
+        })
+        .from(shipments)
+        .where(cohortWhere)
+        .groupBy(sql`coalesce(nullif(${shipments.carrier}, ''), 'Unknown')`)
+        .orderBy(desc(sql`count(*)`), asc(sql`coalesce(nullif(${shipments.carrier}, ''), 'Unknown')`))
+        .limit(10),
+      db
+        .select({
+          delivered: sql<number>`count(*) FILTER (
+            WHERE ${shipments.deliveredAt} >= ${period.start.toISOString()}::timestamptz
+              AND ${shipments.deliveredAt} < ${period.end.toISOString()}::timestamptz
+          )::int`,
+          exceptions: sql<number>`count(*) FILTER (
+            WHERE ${shipments.firstExceptionAt} >= ${period.start.toISOString()}::timestamptz
+              AND ${shipments.firstExceptionAt} < ${period.end.toISOString()}::timestamptz
+          )::int`,
+          stopped: sql<number>`count(*) FILTER (
+            WHERE ${shipments.trackingStoppedAt} >= ${period.start.toISOString()}::timestamptz
+              AND ${shipments.trackingStoppedAt} < ${period.end.toISOString()}::timestamptz
+          )::int`,
+          medianTransitDays: sql<number | null>`
+            percentile_cont(0.5) WITHIN GROUP (
+              ORDER BY ${shipments.transitDays}
+            ) FILTER (
+              WHERE ${shipments.deliveredAt} >= ${period.start.toISOString()}::timestamptz
+                AND ${shipments.deliveredAt} < ${period.end.toISOString()}::timestamptz
+                AND ${shipments.transitDays} IS NOT NULL
+            )
+          `,
+        })
+        .from(shipments)
+        .where(eq(shipments.tenantId, tenantId)),
+      db
+        .select({
+          total: sql<number>`count(*)::int`,
+          inTransit: sql<number>`count(*) FILTER (WHERE ${shipments.status} = 'in_transit')::int`,
+          pending: sql<number>`count(*) FILTER (WHERE ${shipments.status} IN ('pending', 'unknown'))::int`,
+          exceptions: sql<number>`count(*) FILTER (WHERE ${shipments.status} = 'exception')::int`,
+          stopped: sql<number>`count(*) FILTER (WHERE ${shipments.status} = 'stopped')::int`,
+          delivered: sql<number>`count(*) FILTER (WHERE ${shipments.status} = 'delivered')::int`,
+        })
+        .from(shipments)
+        .where(eq(shipments.tenantId, tenantId)),
+    ]);
+  const cohort = cohortRows[0] ?? {
+    total: 0,
+    delivered: 0,
+    exceptions: 0,
+    recovered: 0,
+  };
+  const activity = activityRows[0] ?? {
+    delivered: 0,
+    exceptions: 0,
+    stopped: 0,
+    medianTransitDays: null,
+  };
+  const current = currentRows[0] ?? {
+    total: 0,
+    inTransit: 0,
+    pending: 0,
+    exceptions: 0,
+    stopped: 0,
+    delivered: 0,
+  };
+  return {
+    period: {
+      start: period.start.toISOString(),
+      end: period.end.toISOString(),
+      timezone: "UTC",
+    },
+    cohort: {
+      shipmentsCreated: cohort.total,
+      deliveryRate: {
+        count: cohort.delivered,
+        total: cohort.total,
+        percentage: analyticsPercentage(cohort.delivered, cohort.total),
+      },
+      exceptionRate: {
+        count: cohort.exceptions,
+        total: cohort.total,
+        percentage: analyticsPercentage(cohort.exceptions, cohort.total),
+      },
+      exceptionRecoveryRate: {
+        count: cohort.recovered,
+        total: cohort.exceptions,
+        percentage: analyticsPercentage(cohort.recovered, cohort.exceptions),
+      },
+      topCarriers: carrierRows.map((row) => ({
+        carrier: row.carrier,
+        shipments: row.shipments,
+        exceptions: row.exceptions,
+        exceptionRate: {
+          count: row.exceptions,
+          total: row.shipments,
+          percentage: analyticsPercentage(row.exceptions, row.shipments),
+        },
+      })),
+    },
+    activity: {
+      delivered: activity.delivered,
+      exceptions: activity.exceptions,
+      trackingStopped: activity.stopped,
+      medianTransitDays:
+        activity.medianTransitDays === null
+          ? null
+          : Number(activity.medianTransitDays),
+    },
+    current,
   };
 };
 

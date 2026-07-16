@@ -62,6 +62,7 @@ import {
   resumeTicket,
   setTicketStatus,
   supportAnalytics,
+  deliveryAnalytics,
   takeOverTicket,
   todaySummary,
   usageRows,
@@ -158,6 +159,24 @@ export const handleDashboardSupportAnalytics = async (
   if (!period.ok) return sendJson(res, 400, { error: period.error });
   const result = await runWithDb(layer, (db) =>
     supportAnalytics(db, auth.tenantId, period),
+  );
+  return sendJson(res, 200, result);
+};
+
+export const handleDashboardDeliveryAnalytics = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const period = parseAnalyticsPeriod(
+    (req.query ?? {}) as Record<string, unknown>,
+  );
+  if (!period.ok) return sendJson(res, 400, { error: period.error });
+  const result = await runWithDb(layer, (db) =>
+    deliveryAnalytics(db, auth.tenantId, period),
   );
   return sendJson(res, 200, result);
 };

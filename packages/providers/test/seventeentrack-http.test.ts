@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  parseSeventeenTrackWebhook,
   SeventeenTrackHttpError,
   seventeenTrackGetInfo,
   seventeenTrackRegister,
+  verifySeventeenTrackWebhookSignature,
 } from "../src/seventeentrack-http.js";
 
 const okJson = (body: unknown): Response =>
@@ -69,6 +71,100 @@ describe("seventeenTrackRegister", () => {
       carrier: null,
       lang: "fr",
       fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+  });
+
+  it("includes the stable shipment tag used to correlate webhooks", async () => {
+    const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "[]"));
+      expect(body).toEqual([
+        {
+          number: "1Z999",
+          lang: "en",
+          tag: "shipment-123",
+        },
+      ]);
+      return okJson({});
+    });
+    await seventeenTrackRegister({
+      apiKey: "k1",
+      trackingNumber: "1Z999",
+      tag: "shipment-123",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+  });
+});
+
+describe("17track webhooks", () => {
+  it("verifies the documented SHA-256 raw-body signature", () => {
+    const rawBody = Buffer.from('{"event":"TRACKING_UPDATED"}');
+    expect(
+      verifySeventeenTrackWebhookSignature(
+        rawBody,
+        "2316478cd01bbf0f7ee6c06339368153a6d2c8b4eefda6343a7e18dce422a241",
+        "secret",
+      ),
+    ).toBe(true);
+    expect(
+      verifySeventeenTrackWebhookSignature(rawBody, "bad", "secret"),
+    ).toBe(false);
+  });
+
+  it("normalizes a tracking update using the shipment tag", () => {
+    const rawBody = Buffer.from(
+      JSON.stringify({
+        event: "TRACKING_UPDATED",
+        data: {
+          number: "1Z999",
+          carrier: 100002,
+          tag: "shipment-123",
+          track_info: {
+            latest_status: { status: "DeliveryFailure" },
+            latest_event: {
+              time_iso: "2026-07-16T10:30:00.000Z",
+              description: "Delivery exception",
+            },
+            shipping_info: {
+              recipient_address: { country: "US" },
+            },
+            time_metrics: { days_of_transit: 12 },
+          },
+        },
+      }),
+    );
+
+    expect(parseSeventeenTrackWebhook(rawBody)).toEqual({
+      kind: "tracking_update",
+      shipmentId: "shipment-123",
+      trackingNumber: "1Z999",
+      carrier: "100002",
+      status: "exception",
+      occurredAt: new Date("2026-07-16T10:30:00.000Z"),
+      lastScanAt: new Date("2026-07-16T10:30:00.000Z"),
+      transitDays: 12,
+      destinationCountry: "US",
+    });
+  });
+
+  it("normalizes tracking-stopped even when no latest event is present", () => {
+    const rawBody = Buffer.from(
+      JSON.stringify({
+        event: "TRACKING_STOPPED",
+        data: {
+          number: "EXPIRED",
+          tag: "shipment-456",
+        },
+      }),
+    );
+    const parsed = parseSeventeenTrackWebhook(
+      rawBody,
+      new Date("2026-07-16T12:00:00.000Z"),
+    );
+    expect(parsed).toMatchObject({
+      kind: "tracking_update",
+      shipmentId: "shipment-456",
+      status: "stopped",
+      occurredAt: new Date("2026-07-16T12:00:00.000Z"),
     });
   });
 });

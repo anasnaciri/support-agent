@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseCustomersDataRequest,
   parseCustomersRedact,
+  parseFulfillmentShipmentPayload,
   parseShopRedact,
   parseUninstallPayload,
 } from "../webhook.js";
@@ -51,6 +52,45 @@ describe("parseUninstallPayload", () => {
         Buffer.from(JSON.stringify({ id: "1", name: 7 }), "utf8"),
       ),
     ).toEqual({ id: null, name: null, domain: null });
+  });
+});
+
+describe("parseFulfillmentShipmentPayload", () => {
+  it("emits one provider-neutral shipment discovery per tracking number", () => {
+    const payload = Buffer.from(
+      JSON.stringify({
+        id: 987,
+        order_id: 654,
+        created_at: "2026-07-16T09:00:00-04:00",
+        tracking_company: "UPS",
+        tracking_numbers: ["1Z111", "1Z222", "1Z111", " "],
+      }),
+    );
+    expect(parseFulfillmentShipmentPayload(payload)).toEqual([
+      {
+        sourceOrderId: "gid://shopify/Order/654",
+        sourceFulfillmentId: "gid://shopify/Fulfillment/987",
+        trackingNumber: "1Z111",
+        carrier: "UPS",
+        shippedAt: new Date("2026-07-16T13:00:00.000Z"),
+      },
+      {
+        sourceOrderId: "gid://shopify/Order/654",
+        sourceFulfillmentId: "gid://shopify/Fulfillment/987",
+        trackingNumber: "1Z222",
+        carrier: "UPS",
+        shippedAt: new Date("2026-07-16T13:00:00.000Z"),
+      },
+    ]);
+  });
+
+  it("returns no discoveries for malformed or untracked fulfillments", () => {
+    expect(parseFulfillmentShipmentPayload(Buffer.from("bad"))).toEqual([]);
+    expect(
+      parseFulfillmentShipmentPayload(
+        Buffer.from(JSON.stringify({ id: 1, order_id: 2 })),
+      ),
+    ).toEqual([]);
   });
 });
 

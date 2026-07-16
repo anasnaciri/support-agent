@@ -17,8 +17,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
-- [ ] **Merchant analytics and observability — design validated; delivery
-      slice remains** (validated 2026-07-16). Implemented as two deep read
+- [x] **Merchant analytics and observability — support + delivery read models**
+      (completed 2026-07-16). Implemented as two deep read
       models rather than metric logic
       scattered through dashboard handlers:
       1. [x] **Support analytics.** `GET /dashboard/analytics/support` derives
@@ -35,13 +35,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
          stored. The Worker-safe dashboard contract and SPA API client expose
          the same response. Verified TDD through the authenticated HTTP
          endpoint against PostgreSQL, period parser tests, and `pnpm build`.
-      2. **Delivery analytics** requires a new provider-neutral shipment
+      2. [x] **Delivery analytics.** Added a provider-neutral shipment
          subscription/event ledger. 17TRACK is the first ingest adapter:
          register tracking with a stable internal shipment tag, accept signed
          `TRACKING_UPDATED` / `TRACKING_STOPPED` pushes, enqueue ingestion, and
-         persist normalized current state plus status history. Do not derive
-         fleet delivery percentages from the ticket context's last lookup
-         snapshot.
+         persist normalized current state plus status history. Shopify
+         fulfillment create/update webhooks discover every tracked fulfillment,
+         and a post-connect GraphQL backfill imports the fulfillments already
+         visible to the app. `GET /dashboard/analytics/delivery` returns cohort
+         delivery/exception/recovery rates, carrier breakdowns, lifecycle
+         activity, median transit days, and current states. Fleet percentages
+         never derive from ticket-context lookup snapshots. Verified through
+         provider parser/backfill tests, authenticated PostgreSQL endpoint and
+         ledger tests, Shopify callback/server integration, and `pnpm build`.
       Proposed v1 support measures: tickets created/resolved, resolution rate,
       tickets that entered human takeover, current backlog by status, median
       first-response and resolution time, top scenarios, approval outcomes
@@ -60,8 +66,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         every shipment, requiring Shopify fulfillment ingestion);
       - percentage denominators and timezone (proposed: always return counts +
         denominator; use tenant timezone once one is stored, UTC until then).
-      The support slice follows these decisions. Delivery ingestion and its
-      endpoint remain before this parent item can be completed.
+      Both read models follow these decisions.
+      - [ ] **Rollout reconciliation for Shopify connections installed before
+            this release.** Re-register the two fulfillment subscriptions and
+            enqueue one backfill per existing active Shopify connector during
+            deployment. New and reconnected stores do this automatically.
 
 - [x] **Order agents read the real nested tracking fields and retain the
       17TRACK URL fallback** (2026-07-14). The order-status and missing-package
@@ -3055,8 +3064,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       never use Resend.
 - [x] Pilot and SaaS modes are runtime/config variants of one repo, not forked
       source.
-- [x] 17track v1 is platform-managed and lookup-only. Proactive tracking belongs
-      to later Aftership/EasyPost style integrations.
+- [x] 17TRACK remains platform-managed, but is no longer lookup-only:
+      merchant delivery analytics uses signed push updates plus a
+      provider-neutral shipment ledger. Agent ticket lookups continue through
+      the existing `TrackingService` abstraction.
 - [x] Fulfillment Operator identity is binding-anchored and can span many merchant
       workspaces, superseding the old one-fulfillment-operator-one-workspace decision.
 - [x] Approval rows do not expire by age; email approval links remain bounded,

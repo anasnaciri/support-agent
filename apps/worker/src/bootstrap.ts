@@ -35,6 +35,7 @@ import {
   type TimerService,
   type TrackingService,
   type TransactionRunner,
+  type ShipmentStore,
   SheetsServiceTest,
   TrackingConfig,
   TrackingServiceNoProvider,
@@ -63,6 +64,7 @@ import {
   TenantRepositoryLive,
   TimerServiceLive,
   TransactionRunnerLive,
+  ShipmentStoreLive,
 } from "@support-agent/db";
 import { parseKeySet } from "@support-agent/services";
 import {
@@ -128,6 +130,7 @@ export interface WorkerBootstrap {
     | ApprovalLinkConfig
     | ConnectorCredentialStore
     | ProcessedEventStore
+    | ShipmentStore
     | DbClient,
     never,
     never
@@ -692,6 +695,7 @@ export const buildWorker = async (
     // `as Effect<…, never>` casts that hid the missing requirement were
     // removed). DbClient-backed; satisfied by the dbLayer provide below.
     connectorStoreForPermissions,
+    ShipmentStoreLive,
   );
 
   // Satisfy env's DbClient dependency.

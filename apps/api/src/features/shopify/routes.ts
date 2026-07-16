@@ -12,6 +12,7 @@ import {
   handleAppUninstalled,
   handleCustomersDataRequest,
   handleCustomersRedact,
+  handleFulfillmentShipment,
   handleInstalledPage,
   handleShopRedact,
   handleShopifyCallback,
@@ -87,6 +88,36 @@ export const registerShopifyRoutes = (
     },
     async (req, res) => {
       await handleAppUninstalled(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  app.post(
+    "/webhooks/shopify/fulfillments/create",
+    {
+      schema: {
+        tags: ["webhooks", "shopify"],
+        summary: "Shopify fulfillment created — discover shipments",
+        response: { 200: webhookAckSchema, ...errorResponses },
+      },
+    },
+    async (req, res) => {
+      await handleFulfillmentShipment(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  app.post(
+    "/webhooks/shopify/fulfillments/update",
+    {
+      schema: {
+        tags: ["webhooks", "shopify"],
+        summary: "Shopify fulfillment updated — discover shipments",
+        response: { 200: webhookAckSchema, ...errorResponses },
+      },
+    },
+    async (req, res) => {
+      await handleFulfillmentShipment(cfg, layer, req, res);
       return res;
     },
   );

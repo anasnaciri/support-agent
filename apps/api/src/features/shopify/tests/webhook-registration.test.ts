@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   appUninstalledWebhookUrl,
+  fulfillmentWebhookUrls,
   registerAppUninstalledWebhook,
+  registerFulfillmentWebhooks,
   ShopifyWebhookRegistrationError,
 } from "../webhook-registration.js";
 
@@ -121,5 +123,49 @@ describe("shopify-webhook-registration — registerAppUninstalledWebhook", () =>
         fetchImpl: fakeFetch,
       }),
     ).rejects.toBeInstanceOf(ShopifyWebhookRegistrationError);
+  });
+});
+
+describe("shopify-webhook-registration — fulfillment webhooks", () => {
+  it("registers create and update topics at distinct callback URLs", async () => {
+    const topics: string[] = [];
+    const uris: string[] = [];
+    const fakeFetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const topic = body.variables.topic as string;
+      const uri = body.variables.webhookSubscription.uri as string;
+      topics.push(topic);
+      uris.push(uri);
+      return new Response(
+        JSON.stringify({
+          data: {
+            webhookSubscriptionCreate: {
+              webhookSubscription: {
+                id: `gid://shopify/WebhookSubscription/${topics.length}`,
+                topic,
+                uri,
+              },
+              userErrors: [],
+            },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    const urls = fulfillmentWebhookUrls(
+      "https://api.example.com/shopify/auth/callback",
+    );
+
+    const result = await registerFulfillmentWebhooks({
+      shop: "acme.myshopify.com",
+      accessToken: "token",
+      apiVersion: "2026-04",
+      webhookUrls: urls,
+      fetchImpl: fakeFetch,
+    });
+
+    expect(topics).toEqual(["FULFILLMENTS_CREATE", "FULFILLMENTS_UPDATE"]);
+    expect(uris).toEqual([urls.created, urls.updated]);
+    expect(result).toHaveLength(2);
   });
 });

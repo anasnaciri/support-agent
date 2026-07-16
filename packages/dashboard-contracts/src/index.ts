@@ -138,8 +138,11 @@ export interface SupportAnalytics {
       readonly decided: number;
       readonly accepted: AnalyticsRate;
       readonly acceptedWithoutEdit: number;
+      readonly acceptedWithoutEditRate: AnalyticsRate;
       readonly editedThenAccepted: number;
+      readonly editedThenAcceptedRate: AnalyticsRate;
       readonly declined: number;
+      readonly declinedRate: AnalyticsRate;
     };
     readonly refunds: {
       readonly total: number;
@@ -161,6 +164,38 @@ export interface SupportAnalytics {
       readonly status: string;
       readonly count: number;
     }>;
+  };
+}
+
+export interface DeliveryCarrierMetric {
+  readonly carrier: string;
+  readonly shipments: number;
+  readonly exceptions: number;
+  readonly exceptionRate: AnalyticsRate;
+}
+
+export interface DeliveryAnalytics {
+  readonly period: AnalyticsPeriod;
+  readonly cohort: {
+    readonly shipmentsCreated: number;
+    readonly deliveryRate: AnalyticsRate;
+    readonly exceptionRate: AnalyticsRate;
+    readonly exceptionRecoveryRate: AnalyticsRate;
+    readonly topCarriers: ReadonlyArray<DeliveryCarrierMetric>;
+  };
+  readonly activity: {
+    readonly delivered: number;
+    readonly exceptions: number;
+    readonly trackingStopped: number;
+    readonly medianTransitDays: number | null;
+  };
+  readonly current: {
+    readonly total: number;
+    readonly inTransit: number;
+    readonly pending: number;
+    readonly exceptions: number;
+    readonly stopped: number;
+    readonly delivered: number;
   };
 }
 

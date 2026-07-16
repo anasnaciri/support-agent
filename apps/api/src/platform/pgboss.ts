@@ -7,6 +7,10 @@ import {
   makePgBossShopifyPolicyImportPublisher,
   type ShopifyPolicyImportJobData,
 } from "../features/shopify/policy-import-queue.js";
+import {
+  makePgBossShipmentPublisher,
+} from "../features/shipments/queue.js";
+import type { ShipmentIngestionJob } from "@support-agent/services";
 
 // ============================================================
 // Shared pg-boss singleton + job publishers
@@ -50,6 +54,7 @@ export const stopApprovalBoss = async (): Promise<void> => {
   }
   cachedCleanupPublisher = null;
   cachedPolicyImportPublisher = null;
+  cachedShipmentPublisher = null;
 };
 
 // Lazily-built, process-memoized publisher for the account-cleanup job
@@ -83,4 +88,18 @@ export const shopifyPolicyImportPublisher = (
     );
   }
   return cachedPolicyImportPublisher;
+};
+
+let cachedShipmentPublisher:
+  | ((data: ShipmentIngestionJob) => Promise<string | null>)
+  | null = null;
+export const shipmentPublisher = (
+  databaseUrl: string,
+): ((data: ShipmentIngestionJob) => Promise<string | null>) => {
+  if (!cachedShipmentPublisher) {
+    cachedShipmentPublisher = makePgBossShipmentPublisher(() =>
+      acquireApprovalBoss(databaseUrl),
+    );
+  }
+  return cachedShipmentPublisher;
 };

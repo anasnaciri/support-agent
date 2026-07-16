@@ -32,6 +32,7 @@ import { registerMemberRoutes } from "./features/members/routes.js";
 import { registerFulfillmentOperatorRoutes } from "./features/fulfillment-operators/routes.js";
 import { registerAdminRoutes } from "./features/admin/routes.js";
 import { registerSystemRoutes } from "./features/system/routes.js";
+import { registerShipmentRoutes } from "./features/shipments/routes.js";
 
 // Re-exported for query-params.test.ts, which exercises this query helper.
 export { strList } from "./platform/http.js";
@@ -160,6 +161,7 @@ export const startServer = async (
     opts.workosOAuthFetch ? { workosFetch: opts.workosOAuthFetch } : {},
   );
   registerShopifyRoutes(app, ctx);
+  registerShipmentRoutes(app, ctx);
   registerMailboxRoutes(app, ctx);
   registerTelegramRoutes(app, ctx);
   registerApprovalRoutes(app, ctx);

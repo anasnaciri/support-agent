@@ -804,6 +804,95 @@ export type ToolExecutionRow = typeof toolExecutions.$inferSelect;
 export type ToolExecutionInsert = typeof toolExecutions.$inferInsert;
 
 /**
+ * Provider-neutral shipment ledger. Shopify establishes shipment identity;
+ * tracking providers update its lifecycle. Analytics reads this table instead
+ * of ticket-context tracking snapshots, which only describe the last lookup on
+ * one support conversation.
+ */
+export const shipments = pgTable(
+  "shipments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    sourceOrderId: text("source_order_id").notNull(),
+    sourceFulfillmentId: text("source_fulfillment_id").notNull(),
+    trackingNumber: text("tracking_number").notNull(),
+    carrier: text("carrier"),
+    status: text("status").notNull().default("pending"),
+    shippedAt: timestamp("shipped_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    firstExceptionAt: timestamp("first_exception_at", { withTimezone: true }),
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }),
+    lastScanAt: timestamp("last_scan_at", { withTimezone: true }),
+    transitDays: integer("transit_days"),
+    destinationCountry: text("destination_country"),
+    trackingStoppedAt: timestamp("tracking_stopped_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check("shipments_source_check", sql`${t.source} IN ('shopify')`),
+    check(
+      "shipments_status_check",
+      sql`${t.status} IN ('pending','in_transit','delivered','exception','unknown','stopped')`,
+    ),
+    uniqueIndex("shipments_tenant_source_fulfillment_tracking_unique").on(
+      t.tenantId,
+      t.source,
+      t.sourceFulfillmentId,
+      t.trackingNumber,
+    ),
+    index("shipments_tenant_status_idx").on(t.tenantId, t.status),
+    index("shipments_tenant_shipped_idx").on(t.tenantId, t.shippedAt),
+  ],
+);
+
+export const shipmentEvents = pgTable(
+  "shipment_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    shipmentId: uuid("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    status: text("status").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check(
+      "shipment_events_provider_check",
+      sql`${t.provider} IN ('seventeentrack')`,
+    ),
+    check(
+      "shipment_events_status_check",
+      sql`${t.status} IN ('pending','in_transit','delivered','exception','unknown','stopped')`,
+    ),
+    uniqueIndex("shipment_events_shipment_fingerprint_unique").on(
+      t.shipmentId,
+      t.fingerprint,
+    ),
+    index("shipment_events_shipment_occurred_idx").on(
+      t.shipmentId,
+      t.occurredAt,
+    ),
+  ],
+);
+
+export type ShipmentRow = typeof shipments.$inferSelect;
+export type ShipmentEventRow = typeof shipmentEvents.$inferSelect;
+
+/**
  * Perceptual hashes of customer photo attachments — backs the damaged-
  * product duplicate-photo fraud guard. One row per uploaded image. `phash`
  * is a 64-bit dHash stored as a signed `bigint` (two's-complement bit

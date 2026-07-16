@@ -17,7 +17,10 @@ export interface RegisterAppUninstalledWebhookOptions {
 
 export interface RegisteredWebhook {
   readonly id: string | null;
-  readonly topic: "APP_UNINSTALLED";
+  readonly topic:
+    | "APP_UNINSTALLED"
+    | "FULFILLMENTS_CREATE"
+    | "FULFILLMENTS_UPDATE";
   readonly uri: string;
   readonly status: "created" | "already_exists";
 }
@@ -53,6 +56,22 @@ export const appUninstalledWebhookUrl = (shopifyCallbackUrl: string): string => 
   return new URL("/webhooks/shopify/app/uninstalled", origin).toString();
 };
 
+export const fulfillmentWebhookUrls = (
+  shopifyCallbackUrl: string,
+): { readonly created: string; readonly updated: string } => {
+  const origin = new URL(shopifyCallbackUrl).origin;
+  return {
+    created: new URL(
+      "/webhooks/shopify/fulfillments/create",
+      origin,
+    ).toString(),
+    updated: new URL(
+      "/webhooks/shopify/fulfillments/update",
+      origin,
+    ).toString(),
+  };
+};
+
 const CREATE_APP_UNINSTALLED_WEBHOOK = `
 mutation webhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
   webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
@@ -78,8 +97,10 @@ const duplicateSubscriptionError = (message: string): boolean => {
   );
 };
 
-export const registerAppUninstalledWebhook = async (
-  opts: RegisterAppUninstalledWebhookOptions,
+const registerWebhook = async (
+  opts: RegisterAppUninstalledWebhookOptions & {
+    readonly topic: RegisteredWebhook["topic"];
+  },
 ): Promise<RegisteredWebhook> => {
   const f = opts.fetchImpl ?? fetch;
   const res = await f(
@@ -93,7 +114,7 @@ export const registerAppUninstalledWebhook = async (
       body: JSON.stringify({
         query: CREATE_APP_UNINSTALLED_WEBHOOK,
         variables: {
-          topic: "APP_UNINSTALLED",
+          topic: opts.topic,
           webhookSubscription: {
             uri: opts.webhookUrl,
           },
@@ -141,7 +162,7 @@ export const registerAppUninstalledWebhook = async (
     if (messages.some(duplicateSubscriptionError)) {
       return {
         id: null,
-        topic: "APP_UNINSTALLED",
+        topic: opts.topic,
         uri: opts.webhookUrl,
         status: "already_exists",
       };
@@ -152,7 +173,7 @@ export const registerAppUninstalledWebhook = async (
   }
 
   const created = payload.webhookSubscription;
-  if (!created?.id || created.topic !== "APP_UNINSTALLED" || !created.uri) {
+  if (!created?.id || created.topic !== opts.topic || !created.uri) {
     throw new ShopifyWebhookRegistrationError(
       "Shopify webhook registration response missing subscription",
     );
@@ -160,8 +181,37 @@ export const registerAppUninstalledWebhook = async (
 
   return {
     id: created.id,
-    topic: "APP_UNINSTALLED",
+    topic: opts.topic,
     uri: created.uri,
     status: "created",
   };
 };
+
+export const registerAppUninstalledWebhook = (
+  opts: RegisterAppUninstalledWebhookOptions,
+): Promise<RegisteredWebhook> =>
+  registerWebhook({ ...opts, topic: "APP_UNINSTALLED" });
+
+export interface RegisterFulfillmentWebhooksOptions
+  extends Omit<RegisterAppUninstalledWebhookOptions, "webhookUrl"> {
+  readonly webhookUrls: {
+    readonly created: string;
+    readonly updated: string;
+  };
+}
+
+export const registerFulfillmentWebhooks = (
+  opts: RegisterFulfillmentWebhooksOptions,
+): Promise<ReadonlyArray<RegisteredWebhook>> =>
+  Promise.all([
+    registerWebhook({
+      ...opts,
+      topic: "FULFILLMENTS_CREATE",
+      webhookUrl: opts.webhookUrls.created,
+    }),
+    registerWebhook({
+      ...opts,
+      topic: "FULFILLMENTS_UPDATE",
+      webhookUrl: opts.webhookUrls.updated,
+    }),
+  ]);

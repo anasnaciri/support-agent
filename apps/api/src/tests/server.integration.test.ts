@@ -171,6 +171,7 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       if (u.endsWith("/graphql.json")) {
         const body = JSON.parse(String(init?.body)) as {
           variables?: {
+            topic?: string;
             webhookSubscription?: {
               uri?: string;
             };
@@ -182,7 +183,7 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
               webhookSubscriptionCreate: {
                 webhookSubscription: {
                   id: `gid://shopify/WebhookSubscription/${++webhookSequence}`,
-                  topic: "APP_UNINSTALLED",
+                  topic: body.variables?.topic,
                   uri: body.variables?.webhookSubscription?.uri,
                 },
                 userErrors: [],

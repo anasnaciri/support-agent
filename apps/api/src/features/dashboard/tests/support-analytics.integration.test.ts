@@ -338,8 +338,19 @@ describeIfDb("GET /dashboard/analytics/support (integration)", () => {
       decided: 3,
       accepted: { count: 2, total: 3, percentage: 66.7 },
       acceptedWithoutEdit: 1,
+      acceptedWithoutEditRate: {
+        count: 1,
+        total: 3,
+        percentage: 33.3,
+      },
       editedThenAccepted: 1,
+      editedThenAcceptedRate: {
+        count: 1,
+        total: 3,
+        percentage: 33.3,
+      },
       declined: 1,
+      declinedRate: { count: 1, total: 3, percentage: 33.3 },
     });
     expect(body.activity.ticketsResolved).toBe(2);
     expect(body.activity.medianFirstResponseMinutes).toBe(20);

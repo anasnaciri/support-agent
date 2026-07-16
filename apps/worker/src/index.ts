@@ -56,6 +56,7 @@ import {
   REPLY_DELIVERY_RETRY_QUEUE,
   registerReplyDeliveryRetrySweep,
 } from "./reply-delivery-retry-schedule.js";
+import { registerShipmentEventConsumer } from "./shipment-event-consumer.js";
 
 const main = async (): Promise<void> => {
   const { boss, runtimeLayer, credentialEncryptionKeys, shutdown } =
@@ -68,6 +69,16 @@ const main = async (): Promise<void> => {
   // dropped events. Cron schedules still take the layer (they run every
   // few minutes; per-pass rebuild is immaterial there).
   const managedRuntime = ManagedRuntime.make(runtimeLayer);
+
+  const trackingApiKey = process.env["SEVENTEENTRACK_API_KEY"];
+  const shipmentWorkerId = await registerShipmentEventConsumer({
+    boss,
+    runShipmentEffect: (effect) => managedRuntime.runPromise(effect),
+    ...(trackingApiKey ? { seventeenTrackApiKey: trackingApiKey } : {}),
+  });
+  console.log(
+    `[worker] shipment ingestion running. workerId=${shipmentWorkerId}`,
+  );
 
   // pg-boss requires the queue exist before work() will register a worker.
   // We call ensureWorkflowQueue (idempotent) inside an Effect runtime so we
