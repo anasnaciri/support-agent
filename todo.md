@@ -17,6 +17,39 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [ ] **Merchant analytics and observability — design awaiting validation**
+      (2026-07-16). Proposed as two deep read models rather than metric logic
+      scattered through dashboard handlers:
+      1. **Support analytics** derives tenant-scoped period metrics from durable
+         ticket, transition, approval, tool-execution, and audit records behind
+         one analytics query interface and one dashboard endpoint.
+      2. **Delivery analytics** requires a new provider-neutral shipment
+         subscription/event ledger. 17TRACK is the first ingest adapter:
+         register tracking with a stable internal shipment tag, accept signed
+         `TRACKING_UPDATED` / `TRACKING_STOPPED` pushes, enqueue ingestion, and
+         persist normalized current state plus status history. Do not derive
+         fleet delivery percentages from the ticket context's last lookup
+         snapshot.
+      Proposed v1 support measures: tickets created/resolved, resolution rate,
+      tickets that entered human takeover, current backlog by status, median
+      first-response and resolution time, top scenarios, approval outcomes
+      (accepted unchanged / edited then accepted / declined), resolution owner
+      (agent-assisted vs human-closed), successful refunds and value by
+      currency, failed customer-reply deliveries, and approval wait time.
+      Semantic decisions still to validate before TDD/implementation:
+      - period cohort: tickets created during the range vs events occurring in
+        the range;
+      - whether an agent draft accepted by a manager counts as agent-assisted
+        or human-handled (proposed: agent-assisted);
+      - whether automatic safety escalations and explicit merchant takeovers
+        are one handoff rate or separate measures (proposed: separate);
+      - whether delivery analytics covers every connected-store shipment or
+        only shipments first encountered through support tickets (proposed:
+        every shipment, requiring Shopify fulfillment ingestion);
+      - percentage denominators and timezone (proposed: always return counts +
+        denominator; use tenant timezone once one is stored, UTC until then).
+      No implementation was retained before merchant validation.
+
 - [x] **Order agents read the real nested tracking fields and retain the
       17TRACK URL fallback** (2026-07-14). The order-status and missing-package
       prompts now read `fulfillments[].tracking.numbers[]` and
