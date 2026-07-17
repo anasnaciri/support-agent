@@ -35,6 +35,18 @@ describe("support-triage agent config", () => {
     expect(supportTriage.promptTemplate).toContain("refund_request");
   });
 
+  it("requires context notes to stay short and operational", () => {
+    expect(supportTriage.promptTemplate).toContain(
+      "`notes`: 25 words maximum",
+    );
+    expect(supportTriage.promptTemplate).toContain(
+      "customer's request and the key constraint",
+    );
+    expect(supportTriage.promptTemplate).toContain(
+      "Do not include reasoning, a timeline, or repeated details",
+    );
+  });
+
   it("does not declare any tools outside the triage-allowed set", () => {
     // Defensive — keeps the agent's scope honest. Adding real tools
     // (Shopify, email) belongs on a specialist agent, reached via

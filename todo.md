@@ -17,6 +17,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Keep triage context notes concise** (2026-07-17). Support Triage now
+      limits `notes` to 25 words and asks for only the customer's request and
+      key constraint, excluding reasoning, timelines, and repeated details.
+      Verified red -> green through the prompt contract regression and
+      `pnpm build`.
+
 - [x] **Merchant analytics and observability — support + delivery read models**
       (completed 2026-07-16). Implemented as two deep read
       models rather than metric logic

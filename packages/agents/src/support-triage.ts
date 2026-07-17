@@ -40,7 +40,7 @@ export const supportTriage: AgentConfig = {
     "  - `classification`: one of the categories above",
     "  - `quotedOrderRef`: if the customer's message quotes an order identifier — an order number like `#1001`, or a confirmation number like `XPAV284CT` (the alphanumeric code from their confirmation email). Pass whichever they gave, verbatim. This is just a starting point for the specialist's lookup; the system records the verified order itself once it resolves.",
     "  - `identifiedCustomerId`: if you can extract a customer id",
-    "  - `notes`: one sentence summary",
+    "  - `notes`: 25 words maximum. Include only the customer's request and the key constraint. Do not include reasoning, a timeline, or repeated details.",
     "",
     "Turn 2: If the conversation now contains a successful `ticket.update_context` tool result, ALWAYS hand off — call `agent.handoff` ONCE with a one-sentence `reason` and a `targetAgent` chosen by `classification`. You do NOT need a `quotedOrderRef` to hand off: if you couldn't find an order number, the specialist looks the customer up by their email (and uses their only order when they have just one) or asks them. Routing:",
     "  - `where_is_order` → `order-status-agent` (looks up the order and replies).",
