@@ -220,7 +220,8 @@ describe("platformCapabilitiesForProvider", () => {
     const caps = platformCapabilitiesForProvider("shopify");
     // Restock needs write_inventory (no tool claims it); policy/page import
     // needs both read_legal_policies and read_online_store_pages; fulfillmentOperator
-    // tracking edits need fulfillment-order write scopes.
+    // tracking edits need fulfillment-order write scopes; shipment analytics
+    // needs read_fulfillments for its create/update webhooks.
     expect(caps.map((c) => c.scopes)).toEqual([
       ["write_inventory"],
       ["read_legal_policies", "read_online_store_pages"],
@@ -228,7 +229,12 @@ describe("platformCapabilitiesForProvider", () => {
         "write_merchant_managed_fulfillment_orders",
         "write_third_party_fulfillment_orders",
       ],
+      ["read_fulfillments"],
     ]);
+    expect(caps.at(-1)).toMatchObject({
+      tool: "platform:shopify.shipment_analytics",
+      label: "Track shipments for delivery analytics",
+    });
   });
 
   it("returns nothing for providers without platform-only scopes", () => {

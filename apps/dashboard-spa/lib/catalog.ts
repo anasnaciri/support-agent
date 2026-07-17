@@ -196,6 +196,8 @@ export const capabilitiesForProvider = (
  *    (shipping/refund policies) and `read_online_store_pages` (About/Contact/FAQ).
  *  - Fulfillment partner portal tracking edits call `fulfillmentTrackingInfoUpdate`,
  *    which needs fulfillment-order write scopes.
+ *  - Shipment analytics subscribes to fulfillment create/update webhooks,
+ *    which require `read_fulfillments`.
  */
 const PLATFORM_CAPABILITIES: Readonly<
   Record<string, ReadonlyArray<ConnectorCapability>>
@@ -215,6 +217,11 @@ const PLATFORM_CAPABILITIES: Readonly<
       tool: "platform:shopify.fulfillment_operator_tracking",
       label: "Update shipment tracking from fulfillment partner portal",
       scopes: SHOPIFY_FULFILLMENT_TRACKING_SCOPES,
+    },
+    {
+      tool: "platform:shopify.shipment_analytics",
+      label: "Track shipments for delivery analytics",
+      scopes: ["read_fulfillments"],
     },
   ],
 };
