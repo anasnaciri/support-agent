@@ -111,6 +111,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
             formatting, populated-page DOM, and navigation regressions; the
             dashboard production build; the full suite (2,878 passed / 497
             environment-gated skips); `git diff --check`; and `pnpm build`.
+            - [ ] **Label ranked analytics rows with their unit and
+                  denominator.** The compact `102 · 54%` presentation can be
+                  mistaken for `102%`; render the equivalent of `102 tickets ·
+                  54% of 189` while preserving the read model's existing
+                  all-created-tickets denominator.
 
 - [x] **Order agents read the real nested tracking fields and retain the
       17TRACK URL fallback** (2026-07-14). The order-status and missing-package
