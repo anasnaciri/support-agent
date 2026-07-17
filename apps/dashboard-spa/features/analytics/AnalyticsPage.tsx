@@ -324,6 +324,7 @@ function AnalyticsContent({
                       key={scenario.scenarioKey}
                       label={formatAnalyticsLabel(scenario.scenarioKey)}
                       count={scenario.count}
+                      total={support.cohort.ticketsCreated}
                       percentage={scenario.percentage}
                     />
                   ))}
@@ -793,10 +794,12 @@ function TimingStat({
 function RankedBar({
   label,
   count,
+  total,
   percentage,
 }: {
   readonly label: string;
   readonly count: number;
+  readonly total: number;
   readonly percentage: number;
 }) {
   return (
@@ -804,7 +807,10 @@ function RankedBar({
       <div className="mb-1.5 flex items-center justify-between gap-4 text-sm">
         <span className="min-w-0 truncate font-medium">{label}</span>
         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-          {number.format(count)} · {formatAnalyticsPercentage(percentage)}
+          {number.format(count)} tickets ·{" "}
+          {formatAnalyticsPercentage(percentage)}
+          {" of "}
+          {number.format(total)}
         </span>
       </div>
       <div

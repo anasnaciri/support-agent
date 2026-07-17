@@ -164,6 +164,7 @@ describe("analytics page", () => {
     expect(container.textContent).toContain("75%");
     expect(container.textContent).toContain("60 of 80 tickets");
     expect(container.textContent).toContain("Order status");
+    expect(container.textContent).toContain("32 tickets · 40% of 80");
     expect(container.textContent).toContain("85%");
     expect(container.textContent).toContain("34 of 40 decided drafts");
     expect(container.textContent).toContain("14 in transit");
