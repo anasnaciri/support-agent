@@ -30,6 +30,7 @@ import {
   gmailSendMessage,
 } from "./gmail-http.js";
 import { refreshGmailToken } from "./gmail-token.js";
+import { reportConnectorHealth } from "./connector-health.js";
 
 // ============================================================
 // Provider config (boot-time)
@@ -178,6 +179,9 @@ export const makeGmailConversation = (
               Effect.logDebug?.(`[gmail] refreshed token (exp ${tok.expiresAt.toISOString()})`) ??
               Effect.void,
             ),
+            Effect.tapError(() =>
+              reportConnectorHealth(store, conn, "broken", "auth_failed"),
+            ),
           );
           const patched = yield* store
             .patchTokens({
@@ -214,7 +218,14 @@ export const makeGmailConversation = (
                 ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
               }),
             catch: (cause) => mapHttpError(cause, { tenantId, threadId }),
-          });
+          }).pipe(
+            Effect.tap(() => reportConnectorHealth(store, conn, "ok", null)),
+            Effect.tapError((error) =>
+              error instanceof ConversationAuthFailed
+                ? reportConnectorHealth(store, conn, "broken", "auth_failed")
+                : Effect.void,
+            ),
+          );
           return {
             id: thread.id,
             subject: thread.subject,
@@ -263,7 +274,15 @@ export const makeGmailConversation = (
                 threadId: draft.threadId,
                 draftId: draft.draftId,
               }),
-          }).pipe(Effect.either);
+          }).pipe(
+            Effect.tap(() => reportConnectorHealth(store, conn, "ok", null)),
+            Effect.tapError((error) =>
+              error instanceof ConversationAuthFailed
+                ? reportConnectorHealth(store, conn, "broken", "auth_failed")
+                : Effect.void,
+            ),
+            Effect.either,
+          );
           if (threadEither._tag === "Left") {
             if (threadNeeded) {
               return yield* Effect.fail(threadEither.left);
@@ -328,7 +347,14 @@ export const makeGmailConversation = (
                 threadId: draft.threadId,
                 draftId: draft.draftId,
               }),
-          });
+          }).pipe(
+            Effect.tap(() => reportConnectorHealth(store, conn, "ok", null)),
+            Effect.tapError((error) =>
+              error instanceof ConversationAuthFailed
+                ? reportConnectorHealth(store, conn, "broken", "auth_failed")
+                : Effect.void,
+            ),
+          );
           return {
             id: result.messageId,
             threadId: draft.threadId,

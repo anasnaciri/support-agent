@@ -345,4 +345,29 @@ describe("handleGmailPushNotification history-cursor safety", () => {
     expect(published).toHaveLength(1);
     expect(metadataPatches).toEqual([{ historyId: "200" }]);
   });
+
+  it("marks Gmail broken when an expired webhook token cannot refresh", async () => {
+    const expired = {
+      ...makeConnection(),
+      tokenExpiresAt: new Date(Date.now() - 1_000),
+    };
+    const { layer, metadataPatches } = makeRecordingStoreLayer(expired);
+
+    await handleGmailPushNotification({
+      tenantId,
+      rawBody: makeEnvelope({ emailAddress: mailbox, historyId: "205" }),
+      layer: Layer.mergeAll(layer, BlobStorageTest({})),
+      google,
+      fetchImpl: (async () =>
+        errorResponse(400)) as unknown as typeof fetch,
+      publish: async () => {},
+    });
+
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
+  });
 });

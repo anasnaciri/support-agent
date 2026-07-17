@@ -18,6 +18,7 @@ import {
   TenantId,
 } from "@support-agent/agent-core";
 import {
+  ShopifyCredentialStore,
   ShopifyCredentialStoreAny,
   ShopifyService,
 } from "@support-agent/services";
@@ -1506,8 +1507,26 @@ describe("ShopifyServiceLive — error mapping", () => {
 
   it("401 → ShopifyAuthFailed", async () => {
     reset();
-    const layer = buildLayer(
-      httpFromSequence([() => respond(401, "unauthorized")]),
+    const healthEvents: string[] = [];
+    const credentialLayer = Layer.succeed(
+      ShopifyCredentialStore,
+      ShopifyCredentialStore.of({
+        get: () => Effect.succeed(creds),
+        reportHealth: (_tenantId: unknown, state: string) =>
+          Effect.sync(() => {
+            healthEvents.push(state);
+          }),
+      } as never),
+    );
+    const layer = ShopifyServiceLive.pipe(
+      Layer.provide(
+        Layer.merge(
+          ShopifyHttpFromFn(
+            httpFromSequence([() => respond(401, "unauthorized")]),
+          ),
+          credentialLayer,
+        ),
+      ),
     );
     const exit = await callOrder(layer);
     expect(Exit.isFailure(exit)).toBe(true);
@@ -1515,6 +1534,7 @@ describe("ShopifyServiceLive — error mapping", () => {
       const err = (exit.cause as { error: unknown }).error;
       expect(err).toBeInstanceOf(ShopifyAuthFailed);
     }
+    expect(healthEvents).toContain("broken");
   });
 
   it("429 → ShopifyRateLimited", async () => {

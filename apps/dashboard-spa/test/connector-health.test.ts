@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   connectorHealth,
+  connectorHealthRefetchInterval,
   connectorHealthReasonLabel,
 } from "../lib/connector-health";
 
@@ -126,5 +127,11 @@ describe("connectorHealthReasonLabel", () => {
     expect(connectorHealthReasonLabel("")).toBe(
       "This connection needs reconnecting.",
     );
+  });
+});
+
+describe("connectorHealthRefetchInterval", () => {
+  it("keeps an open integrations page synchronized without rapid polling", () => {
+    expect(connectorHealthRefetchInterval()).toBe(30_000);
   });
 });

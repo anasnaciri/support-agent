@@ -23,6 +23,12 @@ export class ShopifyCredentialStore extends Context.Tag(
     readonly get: (
       tenantId: TenantId,
     ) => Effect.Effect<ShopifyCredentials, ShopifyAuthMissing>;
+    /** Optional health feedback supplied by connector-backed adapters. */
+    readonly reportHealth?: (
+      tenantId: TenantId,
+      state: "ok" | "broken",
+      reason: "auth_failed" | null,
+    ) => Effect.Effect<void, never>;
   }
 >() {}
 

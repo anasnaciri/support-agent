@@ -17,6 +17,7 @@ import {
   BlobStorage,
   ConnectorCredentialStore,
   ConversationService,
+  type ConnectorConnection,
   type ConversationServiceShape,
 } from "@support-agent/services";
 import {
@@ -30,6 +31,7 @@ import {
 } from "./graph-http.js";
 import { resolveOutboundAttachments } from "./outbound-attachments.js";
 import { refreshGraphToken } from "./graph-token.js";
+import { reportConnectorHealth } from "./connector-health.js";
 
 // ============================================================
 // Provider config (boot-time)
@@ -108,6 +110,19 @@ export const makeGraphConversation = (
     const blob = yield* BlobStorage;
     const skew = cfg.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS;
 
+    const observeProviderCall = <A, R>(
+      conn: ConnectorConnection,
+      operation: Effect.Effect<A, ConversationError, R>,
+    ): Effect.Effect<A, ConversationError, R> =>
+      operation.pipe(
+        Effect.tap(() => reportConnectorHealth(store, conn, "ok", null)),
+        Effect.tapError((error) =>
+          error instanceof ConversationAuthFailed
+            ? reportConnectorHealth(store, conn, "broken", "auth_failed")
+            : Effect.void,
+        ),
+      );
+
     // Freshest access token + the connection record (for the mailbox address).
     const resolveToken = (tenantId: TenantId, mailbox?: string) =>
       Effect.gen(function* () {
@@ -138,7 +153,11 @@ export const makeGraphConversation = (
             }),
           catch: (): ConversationError =>
             new ConversationAuthFailed({ tenantId, provider: "outlook" }),
-        });
+        }).pipe(
+          Effect.tapError(() =>
+            reportConnectorHealth(store, conn, "broken", "auth_failed"),
+          ),
+        );
         const patched = yield* store
           .patchTokens({
             tenantId,
@@ -168,7 +187,7 @@ export const makeGraphConversation = (
     ): Effect.Effect<ConversationThread, ConversationError> =>
       Effect.gen(function* () {
         const conn = yield* resolveToken(tenantId, mailbox);
-        const thread = yield* Effect.tryPromise({
+        const thread = yield* observeProviderCall(conn, Effect.tryPromise({
           try: () =>
             graphGetConversation({
               token: conn.accessToken,
@@ -177,7 +196,7 @@ export const makeGraphConversation = (
               ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
             }),
           catch: (cause) => mapHttpError(cause, { tenantId, threadId }),
-        });
+        }));
         if (thread.messages.length === 0) {
           return yield* Effect.fail(new ThreadNotFound({ threadId, tenantId }));
         }
@@ -194,7 +213,7 @@ export const makeGraphConversation = (
     ): Effect.Effect<SentMessage, ConversationError> =>
       Effect.gen(function* () {
         const conn = yield* resolveToken(tenantId, draft.mailbox);
-        const thread = yield* Effect.tryPromise({
+        const thread = yield* observeProviderCall(conn, Effect.tryPromise({
           try: () =>
             graphGetConversation({
               token: conn.accessToken,
@@ -208,7 +227,7 @@ export const makeGraphConversation = (
               threadId: draft.threadId,
               draftId: draft.draftId,
             }),
-        });
+        }));
         const latestInbound = thread.messages.slice().reverse().find(
           (message) => message.direction === "inbound",
         );
@@ -220,7 +239,7 @@ export const makeGraphConversation = (
             }),
           );
         }
-        const created = yield* Effect.tryPromise({
+        const created = yield* observeProviderCall(conn, Effect.tryPromise({
           try: () =>
             graphCreateReplyDraft({
               token: conn.accessToken,
@@ -229,8 +248,8 @@ export const makeGraphConversation = (
             }),
           catch: (cause) =>
             mapHttpError(cause, { tenantId, threadId: draft.threadId, draftId: draft.draftId }),
-        });
-        yield* Effect.tryPromise({
+        }));
+        yield* observeProviderCall(conn, Effect.tryPromise({
           try: () =>
             graphUpdateDraftBody({
               token: conn.accessToken,
@@ -242,7 +261,7 @@ export const makeGraphConversation = (
             }),
           catch: (cause) =>
             mapHttpError(cause, { tenantId, threadId: draft.threadId, draftId: draft.draftId }),
-        });
+        }));
         // Attachments go on the draft BEFORE the send — resolve every blob
         // first so a missing one fails the send without a half-attached draft
         // going out.
@@ -252,7 +271,7 @@ export const makeGraphConversation = (
           draft.draftId,
         );
         yield* Effect.forEach(attachments, (attachment) =>
-          Effect.tryPromise({
+          observeProviderCall(conn, Effect.tryPromise({
             try: () =>
               graphAddDraftAttachment({
                 token: conn.accessToken,
@@ -264,9 +283,9 @@ export const makeGraphConversation = (
               }),
             catch: (cause) =>
               mapHttpError(cause, { tenantId, threadId: draft.threadId, draftId: draft.draftId }),
-          }),
+          })),
         );
-        yield* Effect.tryPromise({
+        yield* observeProviderCall(conn, Effect.tryPromise({
           try: () =>
             graphSendDraft({
               token: conn.accessToken,
@@ -275,7 +294,7 @@ export const makeGraphConversation = (
             }),
           catch: (cause) =>
             mapHttpError(cause, { tenantId, threadId: draft.threadId, draftId: draft.draftId }),
-        });
+        }));
         // The draft id dies with the draft: Graph mints a new id when the item
         // lands in Sent Items, and `buildThread` filters drafts out. Resolve
         // the sent copy so callers get an id that actually appears in the

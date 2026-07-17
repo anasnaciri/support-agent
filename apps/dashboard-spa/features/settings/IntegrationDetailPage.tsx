@@ -17,6 +17,7 @@ import {
 } from "@/lib/catalog";
 import {
   connectorHealth,
+  connectorHealthRefetchInterval,
   connectorHealthReasonLabel,
 } from "@/lib/connector-health";
 import { formatRelativeTime } from "@/lib/format";
@@ -850,6 +851,8 @@ export function IntegrationDetailPage() {
     queryKey: qk.connections(ctx.workspaceId),
     queryFn: () => api.connections(ctx),
     enabled: allowed,
+    refetchInterval: connectorHealthRefetchInterval(),
+    refetchIntervalInBackground: false,
   });
   const catalogQ = useQuery({
     queryKey: qk.catalog(ctx.workspaceId),

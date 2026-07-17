@@ -37,6 +37,9 @@ const fail = (status: number, body = ""): Response =>
 const seededStore = (overrides?: {
   readonly tokenExpiresAt?: Date | null;
   readonly refreshToken?: string | null;
+  readonly onMetadataPatch?: (
+    metadata: Readonly<Record<string, unknown>>,
+  ) => void;
 }) =>
   Layer.sync(ConnectorCredentialStore, () => {
     const row = {
@@ -69,7 +72,13 @@ const seededStore = (overrides?: {
           accessToken: input.accessToken,
           tokenExpiresAt: input.tokenExpiresAt,
         }),
-      patchMetadata: () => Effect.die("unused"),
+      patchMetadata: (input) => {
+        overrides?.onMetadataPatch?.(input.metadata);
+        return Effect.succeed({
+          ...row,
+          metadata: { ...row.metadata, ...input.metadata },
+        });
+      },
     });
   });
 
@@ -169,6 +178,43 @@ describe("SheetsServiceLive", () => {
     expect(firstUrl).toBe("https://oauth2.googleapis.com/token");
   });
 
+  it("marks Sheets broken when an expired token cannot refresh", async () => {
+    const metadataPatches: Readonly<Record<string, unknown>>[] = [];
+    const layer = SheetsServiceLive({
+      clientId: "cid",
+      clientSecret: "csecret",
+      fetchImpl: (async () => fail(400, "invalid_grant")) as unknown as typeof fetch,
+    }).pipe(
+      Layer.provide(
+        seededStore({
+          tokenExpiresAt: new Date(Date.now() - 1_000),
+          onMetadataPatch: (patch) => metadataPatches.push(patch),
+        }),
+      ),
+    );
+
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(SheetsService, (service) =>
+          service.appendRow(tenantId, {
+            spreadsheetId: "sheet-1",
+            range: "Sheet1!A:C",
+            values: ["a"],
+          }),
+        ),
+        layer,
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
+  });
+
   it("appendRow maps 404 to SheetsNotFound", async () => {
     const fetchImpl = vi.fn(async () => fail(404, "not found"));
     const layer = SheetsServiceLive({
@@ -237,12 +283,19 @@ describe("SheetsServiceLive", () => {
   });
 
   it("appendRow maps 401 to SheetsAuthFailed", async () => {
+    const metadataPatches: Readonly<Record<string, unknown>>[] = [];
     const fetchImpl = vi.fn(async () => fail(401, "unauthorized"));
     const layer = SheetsServiceLive({
       clientId: "cid",
       clientSecret: "csecret",
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).pipe(Layer.provide(seededStore()));
+    }).pipe(
+      Layer.provide(
+        seededStore({
+          onMetadataPatch: (patch) => metadataPatches.push(patch),
+        }),
+      ),
+    );
 
     const exit = await Effect.runPromiseExit(
       Effect.provide(
@@ -262,6 +315,12 @@ describe("SheetsServiceLive", () => {
     } else {
       throw new Error("expected Fail cause");
     }
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
   });
 
   it("appendRow fails with SheetsAuthMissing when no connector row exists", async () => {
@@ -388,12 +447,20 @@ describe("SheetsServiceLive", () => {
   });
 
   it("appendRow fails with SheetsAuthMissing when the connector has no refresh token", async () => {
+    const metadataPatches: Readonly<Record<string, unknown>>[] = [];
     const fetchImpl = vi.fn(async () => okJson({}));
     const layer = SheetsServiceLive({
       clientId: "cid",
       clientSecret: "csecret",
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).pipe(Layer.provide(seededStore({ refreshToken: null })));
+    }).pipe(
+      Layer.provide(
+        seededStore({
+          refreshToken: null,
+          onMetadataPatch: (patch) => metadataPatches.push(patch),
+        }),
+      ),
+    );
 
     const exit = await Effect.runPromiseExit(
       Effect.provide(
@@ -413,5 +480,12 @@ describe("SheetsServiceLive", () => {
     } else {
       throw new Error("expected Fail cause");
     }
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
   });
 });

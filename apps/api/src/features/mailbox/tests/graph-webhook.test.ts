@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { Effect, Layer } from "effect";
 import {
+  ConnectorCredentialStore,
   ConnectorCredentialStoreTest,
   type ConnectorConnection,
 } from "@support-agent/services";
@@ -188,6 +190,53 @@ describe("handleGraphNotification", () => {
     });
     expect(result.rejectedClientState).toBe(1);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("marks Outlook broken when an expired webhook token cannot refresh", async () => {
+    const expiredConn: ConnectorConnection = {
+      ...outlookConn,
+      tokenExpiresAt: new Date(Date.now() - 60_000),
+    };
+    const metadataPatches: Array<Record<string, unknown>> = [];
+    const layer = Layer.succeed(ConnectorCredentialStore, {
+      put: () => Effect.die("put not expected"),
+      get: () => Effect.succeed(expiredConn),
+      revoke: () => Effect.die("revoke not expected"),
+      listForTenant: () => Effect.succeed([expiredConn]),
+      patchTokens: () => Effect.die("patchTokens not expected"),
+      patchMetadata: (input) =>
+        Effect.sync(() => {
+          metadataPatches.push({ ...input.metadata });
+          return {
+            ...expiredConn,
+            metadata: { ...expiredConn.metadata, ...input.metadata },
+          };
+        }),
+    });
+    const failedRefresh = ({
+      ok: false,
+      status: 400,
+      text: async () => "invalid_grant",
+      json: async () => ({}),
+      headers: new Headers(),
+    } as unknown) as Response;
+
+    const result = await handleGraphNotification({
+      tenantId,
+      notifications: [notification],
+      layer: layer as unknown as ApiLayer,
+      microsoft,
+      fetchImpl: (async () => failedRefresh) as unknown as typeof fetch,
+      publish: async () => {},
+    });
+
+    expect(result.failed).toBe(1);
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
   });
 
   it("skips a message the mailbox itself sent (outbound)", async () => {

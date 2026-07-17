@@ -42,7 +42,11 @@ const b64url = (s: string) =>
 
 const tenantId = TenantId("11111111-1111-1111-1111-111111111111");
 
-const seededStore = () =>
+const seededStore = (
+  onMetadataPatch?: (metadata: Readonly<Record<string, unknown>>) => void,
+  metadata: Readonly<Record<string, unknown>> = {},
+  tokenExpiresAt: Date = new Date(Date.now() + 60 * 60_000),
+) =>
   Layer.sync(ConnectorCredentialStore, () => {
     const row = {
       tenantId,
@@ -50,8 +54,8 @@ const seededStore = () =>
       shopDomain: "support@merchant.com",
       accessToken: "live-token",
       refreshToken: "refresh-token",
-      tokenExpiresAt: new Date(Date.now() + 60 * 60_000),
-      metadata: {} as Readonly<Record<string, unknown>>,
+      tokenExpiresAt,
+      metadata,
       scopes: [] as ReadonlyArray<string>,
       apiVersion: null,
       installedAt: new Date(),
@@ -68,11 +72,13 @@ const seededStore = () =>
           accessToken: input.accessToken,
           tokenExpiresAt: input.tokenExpiresAt,
         }),
-      patchMetadata: (input) =>
-        Effect.succeed({
+      patchMetadata: (input) => {
+        onMetadataPatch?.(input.metadata);
+        return Effect.succeed({
           ...row,
           metadata: { ...row.metadata, ...input.metadata },
-        }),
+        });
+      },
     });
   });
 
@@ -177,6 +183,42 @@ describe("GmailConversationLive — fetchThread", () => {
     expect(thread.messages[0]!.bodyText).toBe("Hello support");
   });
 
+  it("heals broken connector health after an authenticated Gmail call succeeds", async () => {
+    const metadataPatches: Readonly<Record<string, unknown>>[] = [];
+    const layer = GmailConversationLive({
+      clientId: "cid",
+      clientSecret: "csec",
+      fetchImpl: (async () =>
+        okJson({ id: "t-1", messages: [] })) as unknown as typeof fetch,
+    }).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          seededStore(
+            (patch) => metadataPatches.push(patch),
+            { connectorHealth: "broken" },
+          ),
+          BlobStorageTest({}),
+        ),
+      ),
+    );
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (service) =>
+          service.fetchThread(tenantId, ThreadId("t-1")),
+        ),
+        layer,
+      ),
+    );
+
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "ok",
+        connectorHealthReason: null,
+      }),
+    );
+  });
+
   it("maps a missing connection to ConversationAuthMissing", async () => {
     const fetchImpl = vi.fn(async () => fail(500));
     const layer = GmailConversationLive({
@@ -196,6 +238,43 @@ describe("GmailConversationLive — fetchThread", () => {
     if (exit._tag !== "Failure") return;
     const err = (exit.cause as { error?: unknown }).error;
     expect(err).toBeInstanceOf(ConversationAuthMissing);
+  });
+
+  it("marks the connection broken when an expired Gmail token cannot refresh", async () => {
+    const metadataPatches: Readonly<Record<string, unknown>>[] = [];
+    const layer = GmailConversationLive({
+      clientId: "cid",
+      clientSecret: "csec",
+      fetchImpl: (async () => fail(400, "invalid_grant")) as unknown as typeof fetch,
+    }).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          seededStore(
+            (patch) => metadataPatches.push(patch),
+            {},
+            new Date(Date.now() - 1_000),
+          ),
+          BlobStorageTest({}),
+        ),
+      ),
+    );
+
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (service) =>
+          service.fetchThread(tenantId, ThreadId("t-1")),
+        ),
+        layer,
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
   });
 });
 
@@ -553,12 +632,20 @@ describe("GmailConversationLive — reply", () => {
   });
 
   it("maps a 401 from Gmail onto ConversationAuthFailed", async () => {
+    const metadataPatches: Readonly<Record<string, unknown>>[] = [];
     const fetchImpl = vi.fn(async () => fail(401, "unauthorized"));
     const layer = GmailConversationLive({
       clientId: "cid",
       clientSecret: "csec",
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({}))));
+    }).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          seededStore((patch) => metadataPatches.push(patch)),
+          BlobStorageTest({}),
+        ),
+      ),
+    );
     const exit = await Effect.runPromiseExit(
       Effect.provide(
         Effect.flatMap(ConversationService, (s) =>
@@ -580,5 +667,11 @@ describe("GmailConversationLive — reply", () => {
     if (exit._tag !== "Failure") return;
     const err = (exit.cause as { error?: unknown }).error;
     expect(err).toBeInstanceOf(ConversationAuthFailed);
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
   });
 });

@@ -9,6 +9,7 @@ import { useWorkspaceCtx } from "@/lib/session-context";
 import { useRequirePermission } from "@/lib/require-permission";
 import {
   connectorHealth,
+  connectorHealthRefetchInterval,
   connectorHealthReasonLabel,
 } from "@/lib/connector-health";
 import { integrationStatusVariant } from "@/lib/status-variants";
@@ -275,6 +276,8 @@ export function IntegrationsPage() {
     queryKey: qk.connections(ctx.workspaceId),
     queryFn: () => api.connections(ctx),
     enabled: allowed,
+    refetchInterval: connectorHealthRefetchInterval(),
+    refetchIntervalInBackground: false,
   });
   const settingsQ = useQuery({
     queryKey: qk.settings(ctx.workspaceId),

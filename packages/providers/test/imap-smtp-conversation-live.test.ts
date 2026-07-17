@@ -11,6 +11,7 @@ import {
 import { Layer } from "effect";
 import {
   BlobStorageTest,
+  ConnectorCredentialStore,
   ConnectorCredentialStoreTest,
   type BlobGetResult,
   type ConnectorConnection,
@@ -212,6 +213,42 @@ describe("makeImapSmtpConversation — reply / askCustomer", () => {
     );
     expect(exit._tag).toBe("Failure");
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("marks IMAP/SMTP broken when a manual reply is rejected at login", async () => {
+    const ops = fakeOps({
+      send: vi.fn(async () => {
+        throw new Error("Invalid login: 535 Authentication failed");
+      }),
+    });
+    const exit = await Effect.runPromise(
+      makeImapSmtpConversation({ opsFactory: () => ops }).pipe(
+        Effect.flatMap((service) =>
+          Effect.gen(function* () {
+            const result = yield* service
+              .reply(tenantId, reply)
+              .pipe(Effect.either);
+            const store = yield* ConnectorCredentialStore;
+            const rows = yield* store.listForTenant(tenantId);
+            return { result, connection: rows[0] };
+          }),
+        ),
+        Effect.provide(
+          Layer.mergeAll(
+            ConnectorCredentialStoreTest([conn()]),
+            BlobStorageTest({}),
+          ),
+        ),
+      ),
+    );
+
+    expect(exit.result._tag).toBe("Left");
+    expect(exit.connection?.metadata).toEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
   });
 
   it("skips the pre-send read when the subject is already provided", async () => {

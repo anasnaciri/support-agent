@@ -23,6 +23,10 @@ export interface ConnectorHealthResult {
   readonly at: string | null;
 }
 
+/** Poll slowly enough for settings UI, but quickly enough to reflect a live
+ * provider failure without requiring navigation or a manual refresh. */
+export const connectorHealthRefetchInterval = (): number => 30_000;
+
 const HEALTHY: ConnectorHealthResult = {
   state: "ok",
   reason: null,

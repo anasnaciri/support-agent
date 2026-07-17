@@ -8,6 +8,7 @@ import {
   ShopifyCredentialStore,
   type ShopifyCredentials,
 } from "@support-agent/services";
+import { reportConnectorHealth } from "./connector-health.js";
 
 /**
  * Resolves a tenant's Shopify credentials via the DB-backed
@@ -45,6 +46,13 @@ export const ShopifyCredentialStoreFromConnector = (opts: {
               }),
             ),
             Effect.mapError(() => new ShopifyAuthMissing({ tenantId })),
+          ),
+        reportHealth: (tenantId, state, reason) =>
+          store.get(tenantId, "shopify").pipe(
+            Effect.flatMap((connection) =>
+              reportConnectorHealth(store, connection, state, reason),
+            ),
+            Effect.catchAll(() => Effect.void),
           ),
       });
     }),

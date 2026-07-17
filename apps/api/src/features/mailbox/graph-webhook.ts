@@ -14,6 +14,7 @@ import {
 } from "@support-agent/agent-core";
 import {
   graphGetMessage,
+  reportConnectorHealth,
   refreshGraphToken,
   toInboundMessage,
 } from "@support-agent/providers";
@@ -210,6 +211,14 @@ export const handleGraphNotification = async (
     if (!conn.refreshToken) {
       // eslint-disable-next-line no-console
       console.warn(`[outlook webhook] no refresh token for tenant=${opts.tenantId}`);
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.flatMap(ConnectorCredentialStore, (store) =>
+            reportConnectorHealth(store, conn, "broken", "auth_failed"),
+          ),
+          opts.layer,
+        ),
+      );
       return { published: 0, skippedOutbound: 0, rejectedClientState, failed: authenticated.length };
     }
     try {
@@ -247,6 +256,14 @@ export const handleGraphNotification = async (
     } catch (cause) {
       // eslint-disable-next-line no-console
       console.error("[outlook webhook] refresh failed:", cause);
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.flatMap(ConnectorCredentialStore, (store) =>
+            reportConnectorHealth(store, conn, "broken", "auth_failed"),
+          ),
+          opts.layer,
+        ),
+      );
       return { published: 0, skippedOutbound: 0, rejectedClientState, failed: authenticated.length };
     }
   }

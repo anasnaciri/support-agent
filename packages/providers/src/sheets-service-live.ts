@@ -21,6 +21,7 @@ import {
   sheetsAppendRow,
   sheetsGetValues,
 } from "./sheets-http.js";
+import { reportConnectorHealth } from "./connector-health.js";
 
 // ============================================================
 // Provider config
@@ -123,6 +124,12 @@ export const SheetsServiceLive = (
               ),
             );
           if (!conn.refreshToken) {
+            yield* reportConnectorHealth(
+              store,
+              conn,
+              "broken",
+              "auth_failed",
+            );
             return yield* Effect.fail(new SheetsAuthMissing({ tenantId }));
           }
           const expiresAt = conn.tokenExpiresAt;
@@ -140,7 +147,11 @@ export const SheetsServiceLive = (
                 ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
               }),
             catch: (): SheetsError => new SheetsAuthFailed({ tenantId }),
-          });
+          }).pipe(
+            Effect.tapError(() =>
+              reportConnectorHealth(store, conn, "broken", "auth_failed"),
+            ),
+          );
           const patched = yield* store
             .patchTokens({
               tenantId,
@@ -179,7 +190,14 @@ export const SheetsServiceLive = (
                 range: input.range,
                 op: "append",
               }),
-          });
+          }).pipe(
+            Effect.tap(() => reportConnectorHealth(store, conn, "ok", null)),
+            Effect.tapError((error) =>
+              error instanceof SheetsAuthFailed
+                ? reportConnectorHealth(store, conn, "broken", "auth_failed")
+                : Effect.void,
+            ),
+          );
           return {
             updatedRange: result.updatedRange,
             updatedRows: result.updatedRows,
@@ -215,7 +233,14 @@ export const SheetsServiceLive = (
                 range: headerRange,
                 op: "read",
               }),
-          });
+          }).pipe(
+            Effect.tap(() => reportConnectorHealth(store, conn, "ok", null)),
+            Effect.tapError((error) =>
+              error instanceof SheetsAuthFailed
+                ? reportConnectorHealth(store, conn, "broken", "auth_failed")
+                : Effect.void,
+            ),
+          );
           const first = rows[0] ?? [];
           // Coerce each cell to a trimmed string; blanks stay "".
           return first.map((cell) =>

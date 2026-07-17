@@ -1305,7 +1305,20 @@ export const ShopifyServiceLive = Layer.effect(
       tenantId: TenantId,
       fn: (creds: ShopifyCredentials) => Effect.Effect<T, ShopifyError>,
     ): Effect.Effect<T, ShopifyError> =>
-      Effect.flatMap(store.get(tenantId), fn);
+      Effect.flatMap(store.get(tenantId), (creds) =>
+        fn(creds).pipe(
+          Effect.tap(() => store.reportHealth?.(tenantId, "ok", null) ?? Effect.void),
+          Effect.tapError((error) =>
+            error instanceof ShopifyAuthFailed
+              ? (store.reportHealth?.(
+                  tenantId,
+                  "broken",
+                  "auth_failed",
+                ) ?? Effect.void)
+              : Effect.void,
+          ),
+        ),
+      );
 
     return ShopifyService.of({
       getOrder: (tenantId, orderId) =>

@@ -23,6 +23,7 @@ import {
   gmailListInboxMessageIds,
   gmailMarkMessageRead,
   processGmailImageAttachments,
+  reportConnectorHealth,
   refreshGmailToken,
   toInboundMessage,
 } from "@support-agent/providers";
@@ -432,6 +433,14 @@ export const handleGmailPushNotification = async (
       console.warn(
         `[gmail webhook] no refresh token for tenant=${opts.tenantId} mailbox=${payload.emailAddress}`,
       );
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.flatMap(ConnectorCredentialStore, (store) =>
+            reportConnectorHealth(store, conn, "broken", "auth_failed"),
+          ),
+          opts.layer,
+        ),
+      );
       return;
     }
     try {
@@ -468,6 +477,14 @@ export const handleGmailPushNotification = async (
     } catch (cause) {
       // eslint-disable-next-line no-console
       console.error("[gmail webhook] refresh failed:", cause);
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.flatMap(ConnectorCredentialStore, (store) =>
+            reportConnectorHealth(store, conn, "broken", "auth_failed"),
+          ),
+          opts.layer,
+        ),
+      );
       return;
     }
   }

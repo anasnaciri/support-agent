@@ -16,6 +16,7 @@ import {
   BlobStorage,
   ConnectorCredentialStore,
   ConversationService,
+  type ConnectorConnection,
   type ConversationServiceShape,
 } from "@support-agent/services";
 import {
@@ -28,6 +29,7 @@ import {
   type RawImapMessage,
 } from "./imap-smtp.js";
 import { resolveOutboundAttachments } from "./outbound-attachments.js";
+import { reportConnectorHealth } from "./connector-health.js";
 
 // ============================================================
 // Provider config (boot-time)
@@ -45,6 +47,18 @@ const replySubject = (subject: string): string => {
   const trimmed = subject.trim();
   if (!trimmed) return "Re: support";
   return /^re:/iu.test(trimmed) ? trimmed : `Re: ${trimmed}`;
+};
+
+const isAuthenticationFailure = (cause: unknown): boolean => {
+  const reason =
+    typeof cause === "object" && cause !== null && "reason" in cause
+      ? String((cause as { readonly reason?: unknown }).reason ?? "")
+      : cause instanceof Error
+        ? cause.message
+        : String(cause);
+  return /auth(?:entication)? failed|invalid (?:login|credentials)|bad credentials|\b535\b/iu.test(
+    reason,
+  );
 };
 
 // ============================================================
@@ -73,7 +87,10 @@ export const makeImapSmtpConversation = (
     const resolve = (
       tenantId: TenantId,
       mailbox?: string,
-    ): Effect.Effect<{ ops: ImapSmtpOps; mailbox: string }, ConversationError> =>
+    ): Effect.Effect<
+      { ops: ImapSmtpOps; mailbox: string; connection: ConnectorConnection },
+      ConversationError
+    > =>
       Effect.gen(function* () {
         const conn = yield* store.get(tenantId, "imap", mailbox).pipe(
           Effect.mapError(
@@ -87,7 +104,11 @@ export const makeImapSmtpConversation = (
             new ConversationAuthMissing({ tenantId, provider: "imap" }),
           );
         }
-        return { ops: opsFactory(config), mailbox: conn.shopDomain };
+        return {
+          ops: opsFactory(config),
+          mailbox: conn.shopDomain,
+          connection: conn,
+        };
       });
 
     const fetchThread = (
@@ -113,7 +134,10 @@ export const makeImapSmtpConversation = (
       draft: ConversationReply | AskCustomerDraft,
     ): Effect.Effect<SentMessage, ConversationError> =>
       Effect.gen(function* () {
-        const { ops, mailbox } = yield* resolve(tenantId, draft.mailbox);
+        const { ops, mailbox, connection } = yield* resolve(
+          tenantId,
+          draft.mailbox,
+        );
         const root = String(draft.threadId);
         let subject = draft.subject;
         let inReplyTo =
@@ -178,7 +202,21 @@ export const makeImapSmtpConversation = (
               draftId: draft.draftId,
               reason: cause instanceof Error ? cause.message : String(cause),
             }),
-        });
+        }).pipe(
+          Effect.tap(() =>
+            reportConnectorHealth(store, connection, "ok", null),
+          ),
+          Effect.tapError((error) =>
+            isAuthenticationFailure(error)
+              ? reportConnectorHealth(
+                  store,
+                  connection,
+                  "broken",
+                  "auth_failed",
+                )
+              : Effect.void,
+          ),
+        );
         return {
           id: sent.messageId,
           threadId: draft.threadId,

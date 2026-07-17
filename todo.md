@@ -17,6 +17,24 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Integration health follows live provider authentication failures**
+      (2026-07-17). `connector_connections.status = active` remains the
+      administrative "not disconnected" state, but the five merchant-facing
+      integrations now write operational health whenever they have fresh
+      evidence: Gmail, Outlook, and Google Sheets stamp broken health when an
+      expired access token cannot refresh or a live provider call rejects
+      authorization; the Gmail/Graph webhook refresh paths do the same; IMAP /
+      SMTP stamps a definitive login rejection; and Shopify reports 401/403
+      through its connector-backed credential adapter. A later successful
+      authenticated operation heals an already-broken connection. Transient
+      provider/network failures do not falsely demand reconnection, and ordinary
+      access-token expiry remains healthy when refresh succeeds. The integrations
+      overview and detail queries refetch every 30 seconds while visible, so the
+      existing Needs attention treatment converges without navigation. Verified
+      red -> green at each provider/public-service or webhook seam (160 affected
+      tests), the root TypeScript build, the dashboard SPA production build, and
+      `git diff --check`.
+
 - [x] **Keep triage context notes concise** (2026-07-17). Support Triage now
       limits `notes` to 25 words and asks for only the customer's request and
       key constraint, excluding reasoning, timelines, and repeated details.
@@ -1999,8 +2017,17 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       no-reply detection.)
 - [ ] Surface dropped blocked-sender mail to the merchant (counter or audit
       trail) — v1 only writes a worker log line for each drop.
-- [ ] Improve connector-health surfacing when live thread load or manual reply
-      detects revoked credentials.
+- [ ] **Harden integration health beyond the live-auth synchronization fix.**
+      Add low-cost scheduled probes for otherwise-idle Shopify and Sheets
+      connections (mailbox renewal/poll jobs already reconcile Gmail, Outlook,
+      and IMAP). Retry one refresh + provider call before classifying an
+      unexpected access-token 401/403 as reconnect-required. Persist a
+      structured reason, `lastVerifiedAt`, and observation time with a
+      conditional update so an older cron result cannot overwrite newer live
+      evidence; add a degraded/consecutive-failure state for transient failures.
+      Move the derived display state into the dashboard contract/API and preserve
+      once-per healthy -> broken alerts when the first failure was observed by a
+      live API/provider process rather than the worker.
 - [ ] Tighten API rate-limit keying so limits are per actor, not per proxy or
       server egress IP.
 - [ ] Improve internal admin API auth diagnostics: `apps/admin` currently throws
@@ -2711,8 +2738,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       no-reply, bounce, or automated addresses.
 - [ ] Preserve automated-mail headers across Gmail, Outlook, and IMAP inbound
       payloads where connectors expose them.
-- [ ] Stamp connector health as broken when ticket-thread load or manual reply
-      sees auth failure.
+- [x] Stamp connector health when live conversation, Sheets, Shopify, or webhook
+      token-refresh paths see definitive authentication failure (2026-07-17).
+      Scheduled idle-provider probing and observation ordering remain in the
+      hardening item above.
 - [ ] Explain old revoked-IMAP tickets clearly when the active mailbox is now
       Gmail and cannot fetch old provider thread ids.
 - [ ] Deepen IMAP thread view to use indexed message ids instead of a single

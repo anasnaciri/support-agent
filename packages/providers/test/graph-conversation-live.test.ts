@@ -44,7 +44,10 @@ const fail = (status: number, body = ""): Response =>
 const tenantId = TenantId("11111111-1111-1111-1111-111111111111");
 const mailbox = "support@merchant.com";
 
-const seededStore = (tokenExpiresAt?: Date) =>
+const seededStore = (
+  tokenExpiresAt?: Date,
+  onMetadataPatch?: (metadata: Readonly<Record<string, unknown>>) => void,
+) =>
   Layer.sync(ConnectorCredentialStore, () => {
     const row = {
       tenantId,
@@ -72,8 +75,13 @@ const seededStore = (tokenExpiresAt?: Date) =>
           refreshToken:
             input.refreshToken !== undefined ? input.refreshToken : row.refreshToken,
         }),
-      patchMetadata: (input) =>
-        Effect.succeed({ ...row, metadata: { ...row.metadata, ...input.metadata } }),
+      patchMetadata: (input) => {
+        onMetadataPatch?.(input.metadata);
+        return Effect.succeed({
+          ...row,
+          metadata: { ...row.metadata, ...input.metadata },
+        });
+      },
     });
   });
 
@@ -193,6 +201,24 @@ describe("GraphConversationLive — fetchThread", () => {
     );
   });
 
+  it("marks the Outlook connection broken when Graph rejects its token", async () => {
+    const metadataPatches: Readonly<Record<string, unknown>>[] = [];
+    const fetchImpl = vi.fn(async () => fail(401, "unauthorized"));
+
+    const exit = await runFetchThread(
+      fetchImpl as unknown as typeof fetch,
+      seededStore(undefined, (patch) => metadataPatches.push(patch)),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
+  });
+
   it("refreshes an expired access token (and uses the rotated one)", async () => {
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes("login.microsoftonline.com")) {
@@ -217,9 +243,72 @@ describe("GraphConversationLive — fetchThread", () => {
       expect.anything(),
     );
   });
+
+  it("marks Outlook broken when an expired token cannot refresh", async () => {
+    const metadataPatches: Readonly<Record<string, unknown>>[] = [];
+    const fetchImpl = vi.fn(async () => fail(400, "invalid_grant"));
+
+    const exit = await runFetchThread(
+      fetchImpl as unknown as typeof fetch,
+      seededStore(
+        new Date(Date.now() - 1_000),
+        (patch) => metadataPatches.push(patch),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
+  });
 });
 
 describe("GraphConversationLive — reply", () => {
+  it("marks Outlook broken when a manual reply sees an auth failure", async () => {
+    const metadataPatches: Readonly<Record<string, unknown>>[] = [];
+    const input: ConversationReply = {
+      threadId: ThreadId("conv-1"),
+      to: [{ name: "Jane", email: "jane@example.com" }],
+      subject: "Re: order",
+      bodyText: "An update.",
+      bodyHtml: null,
+      attachments: [],
+      inReplyToMessageId: null,
+      draftId: "d-auth",
+    };
+
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (service) =>
+          service.reply(tenantId, input),
+        ),
+        GraphConversationLive({
+          clientId: "cid",
+          clientSecret: "csec",
+          fetchImpl: (async () => fail(401, "unauthorized")) as unknown as typeof fetch,
+        }).pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              seededStore(undefined, (patch) => metadataPatches.push(patch)),
+              BlobStorageTest({}),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(metadataPatches).toContainEqual(
+      expect.objectContaining({
+        connectorHealth: "broken",
+        connectorHealthReason: "auth_failed",
+      }),
+    );
+  });
+
   it("replies to the latest inbound message and explicitly sets customer recipients", async () => {
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET";
