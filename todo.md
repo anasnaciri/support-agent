@@ -60,7 +60,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       Follow-up correction (2026-07-18): all camera overshoot/back easing was
       removed in favor of ease-out curves. Customer, order, and tracking card
       reframes now use gentler quadratic ease-out moves lasting 0.8s, 0.7s,
-      and 0.7s respectively.
+      and 0.7s respectively. Follow-up camera correction (2026-07-18): removed
+      the intermediate full-dashboard zoom-out after the opening message. The
+      camera now eases directly into a tighter 1.55x right-rail crop, then
+      travels downward through the Customer, Order, and Tracking empty-to-full
+      reveals without exposing canvas around those sidebar shots.
 - [ ] **Tighten the HyperFrames animation after the current-motion review**
       (reviewed 2026-07-18 against a fresh 360-frame, 8fps Chrome proxy of the
       current composition; no runtime errors were observed).

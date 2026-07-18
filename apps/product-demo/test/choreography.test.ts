@@ -67,22 +67,49 @@ describe("product-demo choreography", () => {
     ).toBe(true);
   });
 
+  it("moves directly from the message close-up into the ticket context", () => {
+    const sidebarArrival = cameraAt(4.65);
+    expect(sidebarArrival).toMatchObject({ x: -520, y: 280, scale: 1.55 });
+
+    const movingToSidebar = cameraAt(4.1);
+    expect(movingToSidebar.x).toBeLessThan(728);
+    expect(movingToSidebar.x).toBeGreaterThan(-520);
+    expect(movingToSidebar.scale).toBeGreaterThanOrEqual(1.5);
+
+    expect(
+      cameraFrames.some(
+        (frame) =>
+          frame.time > 3.55 && frame.time < 4.65 && frame.scale === 1,
+      ),
+    ).toBe(false);
+
+    for (const time of [4.65, 8.35, 10.35]) {
+      const camera = cameraAt(time);
+      const topLeft = dashboardPointToScreen({ x: 0, y: 0 }, camera);
+      const bottomRight = dashboardPointToScreen(
+        { x: 1920, y: 1080 },
+        camera,
+      );
+      expect(topLeft.x).toBeLessThanOrEqual(0);
+      expect(topLeft.y).toBeLessThanOrEqual(0);
+      expect(bottomRight.x).toBeGreaterThanOrEqual(1920);
+      expect(bottomRight.y).toBeGreaterThanOrEqual(1080);
+    }
+  });
+
   it("uses smooth ease-out camera moves without spring-like overshoot", () => {
-    expect(cameraAt(4.85).x).toBe(0);
-    expect(cameraAt(5.25).x).toBeLessThan(0);
-    expect(cameraAt(5.25).x).toBeGreaterThan(-650);
-    expect(cameraAt(5.65).x).toBe(-650);
+    expect(cameraAt(4.65).x).toBe(-520);
 
     expect(cameraAt(8).y).toBeLessThan(120);
-    expect(cameraAt(8).y).toBeGreaterThan(10);
-    expect(cameraAt(8.35).y).toBe(10);
+    expect(cameraAt(8).y).toBeGreaterThan(0);
+    expect(cameraAt(8.35).y).toBe(0);
 
-    expect(cameraAt(9.9).y).toBeLessThan(10);
-    expect(cameraAt(9.9).y).toBeGreaterThan(-125);
-    expect(cameraAt(10.35).y).toBe(-125);
+    expect(cameraAt(9.9).y).toBeLessThan(0);
+    expect(cameraAt(9.9).y).toBeGreaterThan(-290);
+    expect(cameraAt(10.35).y).toBe(-290);
     expect(
       cameraFrames
-        .filter((frame) => [5.65, 8.35, 10.35].includes(frame.time))
+        .filter((frame) => [4.65, 8.35, 10.35].includes(frame.time))
         .map((frame) => frame.ease),
     ).toEqual(["easeOutQuad", "easeOutQuad", "easeOutQuad"]);
 
