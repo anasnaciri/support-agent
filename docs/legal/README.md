@@ -12,14 +12,18 @@ These drafts reflect Support Agent's current product and deployment model:
 - [`saas-terms-of-service.md`](./saas-terms-of-service.md) is the standard
   merchant agreement for the hosted multi-tenant service and the Shopify
   public-app path.
+- [`data-processing-addendum.md`](./data-processing-addendum.md) is the full
+  processor/service-provider agreement. Its five schedules cover processing
+  details, technical and organizational measures, subprocessors, restricted
+  transfers, and dedicated-deployment responsibility allocation.
 - [`dedicated-deployment-agreement.md`](./dedicated-deployment-agreement.md) is
   a negotiated object-code license, deployment, support, and responsibility
   agreement. It is not a lightly edited SaaS clickwrap.
 
-The existing public `/legal/data-processing` page is a short Data Processing
-Notice and DPA. It is not a substitute for the public privacy policy or either
-commercial agreement, and its DPA terms need counsel review and expansion
-before serving GDPR/UK GDPR or CCPA-regulated customers.
+The existing public `/legal/data-processing` page still serves the old short
+Data Processing Notice and DPA. The full draft is not yet wired into that
+acceptance flow, and neither version should be treated as launch-ready before
+the placeholders and production facts below are finalized with counsel.
 
 ## Recommended publication model
 
@@ -52,9 +56,10 @@ before serving GDPR/UK GDPR or CCPA-regulated customers.
 
 ## Material product/legal follow-ups
 
-- Replace the short DPA with a full processor agreement covering instructions,
-  confidentiality, security, subprocessors, rights requests, incidents,
-  audits, deletion/return, international transfers, and processing details.
+- Finalize the full DPA, attach or validly incorporate any official transfer
+  mechanisms, publish it, bump `DPA_VERSION`, and require acceptance through
+  the existing legal flow; do not leave the old two-paragraph DPA as the
+  operative production agreement.
 - Publish and operationally maintain a deployment-specific subprocessor list.
 - Reconcile every provider's no-training and retention configuration,
   especially platform-paid LLM inference, with the promises in these drafts

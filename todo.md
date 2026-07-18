@@ -1986,16 +1986,33 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       retention periods as explicit placeholders rather than inventing them.
       Verified with placeholder inventory, `git diff --check`, and
       `pnpm build`.
+- [x] **Draft the full Data Processing Addendum** (2026-07-18).
+      [`docs/legal/data-processing-addendum.md`](./docs/legal/data-processing-addendum.md)
+      now covers documented instructions, role allocation (including
+      processor-to-subprocessor and customer-hosted cases), purpose and
+      AI-training limits, confidentiality, technical/organizational measures,
+      subprocessor authorization/change objections, rights requests,
+      government demands, breach notice, DPIA/regulator assistance, audits,
+      deletion/return, EU/UK/Swiss/Moroccan transfers, CCPA service-provider
+      terms, and Shopify-specific restrictions. Its five execution schedules
+      capture processing details, security measures, the deployment-specific
+      provider inventory, SCC/UK transfer selections, and a dedicated-hosting
+      responsibility matrix. This is deliberately not wired to the public
+      acceptance flow: legal identity, processor locations, provider legal
+      entities, retention, transfer selections, and counsel review remain
+      launch blockers. Verified with a clause/schedule inventory, placeholder
+      inventory, whitespace checks, `git diff --check`, and `pnpm build`.
 - [ ] **Finalize the legal launch set with qualified counsel and production
       facts.** Complete the identity/contact, billing/renewal, governing-law,
       liability/indemnity, hosting-region, log/backup/account-retention, and
-      request-channel decisions in `docs/legal`; replace the current short DPA
-      with a complete processor/service-provider agreement; publish the
-      deployment-specific subprocessor appendix; confirm provider no-training
-      and retention settings (especially platform-paid LLM inference); and
-      complete any applicable Moroccan CNDP declaration/authorization and
-      foreign-transfer filings. Publishing a policy does not complete those
-      operational or regulatory steps.
+      request-channel decisions in `docs/legal`; finalize and publish the full
+      DPA in place of the current short public text, bump `DPA_VERSION`, and
+      route acceptance to it; publish the deployment-specific subprocessor
+      appendix; confirm provider no-training and retention settings (especially
+      platform-paid LLM inference); attach/execute required EU SCC or UK
+      transfer instruments; and complete any applicable Moroccan CNDP
+      declaration/authorization and foreign-transfer filings. Publishing a
+      policy does not complete those operational or regulatory steps.
 - [ ] Consider extracting the subprocessor list to a standalone page/appendix
       referenced from the DPA with a notify-of-changes clause, so future
       connector additions don't re-version the whole notice.
