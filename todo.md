@@ -2500,6 +2500,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       production-image hardening, merchant responsibility allocation, and
       versioned per-action Automatic consent/audit requirements. It is a
       product/engineering direction and counsel brief, not final legal terms.
+      Dedicated identity is now explicitly one provisioned customer account
+      per deployment, containing one or more workspaces up to the signed
+      entitlement. Public registration and additional account/organization
+      creation are disabled server-side; the initial owner is provisioned, and
+      every subsequent workspace member or fulfillment partner is invite-only
+      with scoped, auditable, revocable access. An unlimited workspace
+      entitlement does not enable a multi-account/MSP model (2026-07-19).
       It now also records the indicative provider-key-excluded infrastructure
       envelope: roughly USD 10–30/month for one low/moderate-volume workspace,
       USD 20–60 for several moderate workspaces, and materially more when high
@@ -2513,11 +2520,18 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       with `git diff --check` and `pnpm build`.
 - [ ] **Define and implement a dedicated licensed-workspace deployment profile.**
       Keep the tenant row, `tenantId` scoping, state-machine/audit invariants,
-      and one source tree; a dedicated deployment is one permitted workspace
-      per database/deploy, not a tenancy-free fork. Add a single configuration
-      seam that resolves the deployment's workspace and capabilities, then use
-      it to disable workspace create/switch/delete, self-service signup,
-      platform tenant administration, and SaaS billing where appropriate.
+      and one source tree; a standard dedicated deployment is one customer
+      account per database/deploy containing one or more permitted workspaces
+      up to its signed limit, not a tenancy-free fork or a private multi-account
+      SaaS instance. Add a single configuration seam that resolves the
+      deployment's account, workspace entitlement, and capabilities, then use
+      it to disable public registration, additional account/organization
+      creation, SaaS billing, and workspace creation beyond the entitlement.
+      Provision the initial owner during installation; make all later workspace
+      members and fulfillment partners invite-only with scoped, expiring,
+      auditable, revocable server-enforced access. Keep workspace switching for
+      multi-workspace editions and allow authorized workspace creation only
+      through the atomic entitlement seam.
       Document which settings are (a) deploy-wide env/secrets, (b) seeded
       workspace configuration that remains in Postgres, and (c) connector
       credentials/tokens that remain encrypted records. Cover dedicated

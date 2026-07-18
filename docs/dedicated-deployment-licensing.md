@@ -1,7 +1,7 @@
 # Dedicated Deployment and Perpetual Licensing
 
 Status: proposed product, architecture, and contract direction  
-Last updated: 2026-07-15
+Last updated: 2026-07-19
 
 > This document records product and engineering intent. It is not legal advice
 > or a substitute for a software-licensing lawyer reviewing the final agreement
@@ -36,6 +36,14 @@ The standard dedicated editions are expected to be:
 | Dedicated 5 | 5 | Several internal brands or stores |
 | Dedicated Unlimited | Unlimited | Internal operations of the licensee and controlled affiliates |
 | MSP/Reseller | Contract-specific | Serving unrelated third-party businesses |
+
+Every standard dedicated deployment contains exactly one customer account (the
+licensee's organization). That account may contain one or more workspaces, up
+to the purchased workspace entitlement. It is not a private SaaS instance in
+which visitors can register additional customer accounts. The initial account
+and owner are provisioned as part of installation; every other user, including
+fulfillment partners, joins only through an invitation from an authorized
+member.
 
 The customer license is non-exclusive. The Licensor keeps all ownership and
 may continue developing, hosting, selling, and licensing the product, including
@@ -141,11 +149,45 @@ Each deployment should have its own:
 - Customer-owned third-party accounts wherever independence is required.
 
 Dedicated mode should use a single deployment profile to disable or alter
-capabilities such as public self-service signup, platform-wide tenant admin,
-SaaS billing, and unlicensed workspace creation. Workspace switching remains
-available for editions with more than one workspace.
+capabilities such as public self-service signup, account/organization creation,
+platform-wide tenant admin, SaaS billing, and unlicensed workspace creation.
+Workspace switching remains available for editions with more than one
+workspace.
 
-### 5.1 Indicative infrastructure cost
+### 5.1 Account, identity, and invitation model
+
+A standard dedicated deployment has one customer account representing the
+named licensee. Installation or an authorized operator provisions that account,
+its initial owner, and its first workspace. There is no public registration or
+self-service account-creation path. Sign-in may remain publicly reachable, but
+an identity may gain application access only by accepting a valid invitation
+or through the documented break-glass administrator path.
+
+The customer account may contain as many workspaces as its signed entitlement
+allows. Authorized account members may create additional workspaces through the
+single entitlement-enforced creation seam; doing so does not create another
+customer account. The application must reject attempts to create a second
+account or organization regardless of whether they come from the dashboard, an
+API call, an identity-provider callback, an import, or an administrative tool.
+
+All people after the initial owner are invite-only:
+
+- Workspace members are invited to explicit workspaces and receive only their
+  assigned roles.
+- Fulfillment partners are invited to the fulfillment-partner experience and
+  only the workspaces, tickets, and operations assigned to them; an invitation
+  must not grant general merchant-dashboard access.
+- An invitation is scoped, expiring, auditable, and revocable. Accepting it may
+  create or link the person's login identity, but never creates another
+  customer account or bypasses the licensed workspace limit.
+- Membership and partner access remain server-enforced. Hiding registration or
+  workspace controls in the dashboard is not sufficient.
+
+The MSP/reseller edition may define a different account model by contract and
+deployment profile. That exception must be explicit; it is not enabled merely
+by purchasing an unlimited workspace entitlement.
+
+### 5.2 Indicative infrastructure cost
 
 Excluding LLM inference and all connector/provider charges, the current
 single-host Compose topology (API, worker, Postgres/pg-boss, and Caddy) should
@@ -177,7 +219,7 @@ infrastructure and support labor remain Licensor costs and must not be confused
 with hosting. A cheap single VPS has a single point of failure; it should never
 be marketed with high-availability guarantees.
 
-### 5.2 Database and storage capacity model
+### 5.3 Database and storage capacity model
 
 The app does not mirror a merchant's Shopify order catalog. It stores support
 tickets that may reference an order and fetches order data on demand. Capacity
@@ -382,8 +424,8 @@ implementation must:
 
 Every path must use that seam:
 
-- First-workspace onboarding.
-- Additional workspace creation.
+- Deployment bootstrap of the first workspace.
+- Additional workspace creation by an authorized account member or operator.
 - Admin/operator provisioning.
 - Installation and import tools.
 - Future automation.
@@ -1064,7 +1106,8 @@ sequence is:
 9. Build and verify a production-only self-hosted image.
 10. Create the install, observability, backup, restore, upgrade, rollback, and
     fleet-inventory bundle described in section 16.
-11. Test 1, 5, unlimited, invalid-signature, concurrent-create, restore, and
+11. Test 1, 5, unlimited, invalid-signature, concurrent-create, blocked public
+    registration/account creation, invitation scope/revocation, restore, and
     version-upgrade cases.
 12. Pilot the complete install and recovery flow in a disposable
     customer-shaped environment before delivering it.
