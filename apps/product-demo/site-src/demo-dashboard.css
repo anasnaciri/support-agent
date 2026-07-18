@@ -1,0 +1,13 @@
+/* The SPA is imported from outside this Vite root. Point Tailwind at the real
+   dashboard source tree so this build emits the exact same utility classes. */
+@import "../../dashboard-spa/app.css";
+@source "../../dashboard-spa";
+
+/* The production SPA serves this absolute URL from its own public root. The
+   HyperFrames composition mounts the SPA one level down, so let Vite bundle
+   the same source font and rewrite its URL for this self-contained build. */
+@font-face {
+  font-family: "Climate Crisis";
+  src: url("../../dashboard-spa/public/fonts/ClimateCrisis.ttf") format("truetype");
+  font-display: swap;
+}

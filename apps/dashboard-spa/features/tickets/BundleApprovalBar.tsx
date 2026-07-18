@@ -8,6 +8,7 @@ import { Files, Layers, Paperclip, X } from "lucide-react";
 
 import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
+import { handleCurrentPlatformSendShortcut } from "@/lib/send-shortcut";
 import { useApprovalDecision, useBundleDecision } from "@/lib/use-ticket-mutation";
 import {
   attachmentPickerState,
@@ -253,6 +254,13 @@ function BundleRow({
             id={`reply-${approval.id}`}
             value={bodyText}
             onChange={(e) => setBodyText(e.target.value)}
+            onKeyDown={(event) =>
+              handleCurrentPlatformSendShortcut(
+                event,
+                acceptM.isPending,
+                () => acceptM.mutate(),
+              )
+            }
             rows={5}
           />
           {attachments.length > 0 ? (

@@ -31,6 +31,7 @@ import {
 import type { ReplyProjectionActions } from "@/lib/reply-projection";
 import { useApprovalDecision, useTicketMutation } from "@/lib/use-ticket-mutation";
 import { composerBeam } from "@/lib/composer-beam";
+import { handleCurrentPlatformSendShortcut } from "@/lib/send-shortcut";
 import { useSystemPrefersDark, useThemePreference } from "@/lib/theme-store";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -531,9 +532,21 @@ export function ChatComposer({
             ref={textareaRef}
             value={text}
             onChange={(e) => {
-            setText(e.target.value);
-            noteTyping();
-          }}
+              setText(e.target.value);
+              noteTyping();
+            }}
+            onKeyDown={(event) =>
+              handleCurrentPlatformSendShortcut(
+                event,
+                mode.kind === "approval"
+                  ? busy
+                  : empty || sendM.isPending || uploading,
+                () =>
+                  mode.kind === "approval"
+                    ? approveM.mutate()
+                    : sendM.mutate(),
+              )
+            }
             placeholder={placeholder}
             className="min-h-[64px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           />

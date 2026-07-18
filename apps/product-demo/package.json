@@ -1,0 +1,22 @@
+{
+  "name": "@support-agent/product-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --root ../.. apps/product-demo/test",
+    "build:dashboard": "vite build --config vite.dashboard.config.ts",
+    "lint": "hyperframes lint . --json",
+    "inspect": "hyperframes inspect . --json",
+    "preview": "hyperframes preview . --no-open",
+    "render": "pnpm build:dashboard && hyperframes render . --output dist/support-resolution-demo.mp4 --fps 60 --strict"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "hyperframes": "0.7.63",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "vite": "^6.4.3"
+  }
+}

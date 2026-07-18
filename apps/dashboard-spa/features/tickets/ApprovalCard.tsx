@@ -8,6 +8,7 @@ import { formatRelativeTime } from "@/lib/format";
 import { toolActionLabel } from "@/lib/labels";
 import { riskVariant } from "@/lib/status-variants";
 import { draftStaleness } from "@/lib/draft-staleness";
+import { handleCurrentPlatformSendShortcut } from "@/lib/send-shortcut";
 import {
   RECOMMENDATION_LABEL,
   recommendationVariant,
@@ -266,6 +267,13 @@ export function ApprovalCard({
                 id="bodyText"
                 value={bodyText}
                 onChange={(e) => setBodyText(e.target.value)}
+                onKeyDown={(event) =>
+                  handleCurrentPlatformSendShortcut(
+                    event,
+                    approveM.isPending,
+                    () => approveM.mutate(),
+                  )
+                }
                 rows={6}
                 className="bg-card"
               />

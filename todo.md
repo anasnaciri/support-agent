@@ -17,6 +17,36 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Build the HyperFrames support-resolution demo from the actual dashboard
+      surfaces** (2026-07-18). The 45-second detect -> investigate -> approve ->
+      resolve -> delight composition now embeds production-built instances of
+      the real merchant ticket route and fulfillment-partner list/detail routes;
+      it no longer recreates either interface by hand. A fetch-level fixture
+      supplies synthetic Maya Chen / order #1048 data and deterministic ticket,
+      approval, escalation, reshipment, tracking, delivered, and customer-
+      delight states. HyperFrames owns only camera, cursor, crossfade, typing,
+      beam, and time-jump choreography. Verified with seven fixture/composition
+      tests, the embedded dashboard production build, HyperFrames lint, strict
+      runtime/layout/contrast checks at six beats, an 11-frame visual acceptance
+      sheet covering both portals, `git diff --check`, and `pnpm build`.
+- [ ] **Export the final HyperFrames MP4.** Run `pnpm --filter
+      @support-agent/product-demo render`. Because the composition deliberately
+      embeds the exact dashboard in iframes, HyperFrames uses screenshot capture
+      for all 2,700 1080p/60fps frames. The export was smoke-tested through
+      browser download, calibration, iframe fallback, and streaming frame
+      capture, then stopped after 426 frames because this machine estimated
+      roughly one hour. No complete MP4 was left behind; the deterministic
+      composition and validated acceptance frames are ready.
+
+- [x] **Send customer emails from the keyboard** (2026-07-18). Every live
+      customer-reply editor now sends with Command+Enter on macOS and
+      Control+Enter on other platforms: manual ticket replies, inline reply
+      approvals, bundled reply approvals, and the standalone approval detail.
+      Plain Enter and the other platform's modifier still edit the multiline
+      draft, and shortcuts honor the same empty/pending guards as their send
+      buttons. Verified red -> green with focused platform/guard regressions,
+      the dashboard SPA production build, `git diff --check`, and `pnpm build`.
+
 - [x] **Integration health follows live provider authentication failures**
       (2026-07-17). `connector_connections.status = active` remains the
       administrative "not disconnected" state, but the five merchant-facing
@@ -678,6 +708,17 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           (`lib/tracking-panel-data.ts`, unit-tested) suppresses the on-ticket
           stamp fallback when the live order tracks under a different number,
           so even the endpoint-unavailable path can't render the old number.
+          - [x] **Keep destination-mismatched tracking visible for human
+                review** (2026-07-18). A saved stamp carrying
+                `tracking_destination_mismatch` now remains visible when the
+                resolved Shopify order has no fulfillment tracking, so it no
+                longer flashes and disappears as the order query settles. The
+                card labels the mismatch explicitly. An order with a different
+                current tracking number still suppresses the old stamp, so the
+                canonical-order guard remains intact. Verified red -> green
+                through the production-shaped stamp reconciliation and rendered
+                warning regressions (18 focused tests), all 686 dashboard SPA
+                tests, the SPA production build, and `pnpm build`.
         - **Runtime heal on order reads (added 2026-07-13, user request):**
           the agent now heals the stamp too. The get_order /
           find_customer_order context fold (the same place

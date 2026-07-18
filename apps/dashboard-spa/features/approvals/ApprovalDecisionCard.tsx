@@ -4,6 +4,7 @@ import type { ApprovalDetail } from "@support-agent/dashboard-contracts";
 import { api } from "@/lib/api-client";
 import { useApprovalDecision } from "@/lib/use-ticket-mutation";
 import { useAppNavigate } from "@/lib/navigation";
+import { handleCurrentPlatformSendShortcut } from "@/lib/send-shortcut";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -97,6 +98,13 @@ export function ApprovalDecisionCard({
                 id="bodyText"
                 value={bodyText}
                 onChange={(e) => setBodyText(e.target.value)}
+                onKeyDown={(event) =>
+                  handleCurrentPlatformSendShortcut(
+                    event,
+                    approveM.isPending,
+                    () => approveM.mutate(),
+                  )
+                }
                 rows={8}
               />
             </div>
