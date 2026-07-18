@@ -715,6 +715,7 @@ export function TicketDetailPage() {
   ];
   // Lights the composer's border beam and the status chip's shimmer.
   const processing = isTicketProcessing(ticketRow.status);
+  const resolved = ticketRow.status === "resolved";
   const composerMode =
     singleApproval && singleApprovalDraft !== null
       ? {
@@ -865,7 +866,9 @@ export function TicketDetailPage() {
             details column. */}
         <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <ChatScrollArea
-            bottomKey={threadKey}
+            // The working indicator and resolved banner render below the last
+            // bubble, so their appearance re-pins the scroll too.
+            bottomKey={`${threadKey}:${processing ? "w" : ""}:${resolved ? "r" : ""}`}
             className="no-scrollbar min-w-0 flex-1 overflow-y-auto px-4 py-6"
           >
             <div className="mx-auto w-full max-w-3xl">
@@ -878,6 +881,8 @@ export function TicketDetailPage() {
                 }
                 workspaceId={ctx.workspaceId}
                 ticketId={id}
+                processing={processing}
+                resolved={resolved}
               />
             </div>
           </ChatScrollArea>

@@ -2853,6 +2853,24 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Dashboard And SPA
 
+- [x] Chat-thread motion (2026-07-18): new bubbles rise into place
+      (`msg-rise`, 0.35s translateY+fade); optimistic replies render translucent
+      (`opacity-60`, "Sending…", pulse removed) and the confirmed reply that
+      replaces one "settles" (`msg-settle`, opacity-only — no second rise).
+      Pure classifier `lib/chat-entrance.ts` (`classifyEntrances`: prev-ids vs
+      current, optimistic-swap detection) is unit-tested in
+      `test/chat-entrance.test.ts`; initial render never animates the backlog.
+      In-thread "Agent is working" indicator (staggered `typing-dot` dots) while
+      `isTicketProcessing`, and a green "Ticket resolved" banner that rises +
+      halo-pulses (`resolved-pop`) only when the status flips live — all driven
+      by the existing 2.5s `TicketLiveBoundary` poll, no long-lived connection.
+      All new animations stilled under `prefers-reduced-motion`.
+- [ ] Optional: pop the header status chip (scale-in) when the status changes
+      live, mirroring the same live-transition tracking the resolved banner
+      uses.
+- [ ] Optional: an in-thread "actions" card (what the agent did, from curated
+      audit events) could mirror the right-panel Timeline for resolved-live
+      moments — decide if the duplication is worth it before building.
 - [x] Context card no longer flashes the "Customer-quoted order" heads-up on
       mount: `buildContextCardRows` order arg is tri-state (`"loading"` while
       the Shopify fetch is pending renders the slot as a skeleton row; `null` =

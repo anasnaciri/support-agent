@@ -381,6 +381,81 @@
   }
 }
 
+/* Chat-thread motion. New bubbles rise from just below their resting spot,
+   like a message landing in a chat app. The real reply that replaces a
+   confirmed optimistic placeholder instead "settles": it occupies the exact
+   spot the translucent placeholder held, so it only fades to full opacity —
+   rising again would replay an entrance the user already watched. Both are
+   one-shot mount animations; refetches that keep a bubble's id never replay
+   them (classifyEntrances in lib/chat-entrance.ts decides which one applies). */
+@keyframes msg-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+.msg-rise {
+  animation: msg-rise 0.35s cubic-bezier(0.2, 0, 0, 1) both;
+}
+@keyframes msg-settle {
+  from {
+    opacity: 0.55;
+  }
+}
+.msg-settle {
+  animation: msg-settle 0.3s ease-out both;
+}
+
+/* The in-thread "agent is working" indicator's three dots, blinking in a
+   staggered wave while the ticket is in a processing status. */
+@keyframes typing-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.typing-dot {
+  animation: typing-dot 1s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* The resolved banner arriving live (status flipped while the page was open):
+   the same rise as a bubble plus one soft green halo pulse once it lands.
+   Already-resolved tickets render the banner statically — no class, no halo. */
+@keyframes resolved-halo {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 35%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+.resolved-pop {
+  animation:
+    msg-rise 0.35s cubic-bezier(0.2, 0, 0, 1) both,
+    resolved-halo 0.9s ease-out 0.35s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-rise,
+  .msg-settle,
+  .resolved-pop {
+    animation: none;
+  }
+  .typing-dot {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 /* Brand display font (Guidezilla wordmark). In the Next app this was wired via
    next/font/local; in the SPA it's a plain @font-face exposed as the same CSS
    variable the IconRail reads: font-[family-name:var(--font-climate-crisis)]. */
