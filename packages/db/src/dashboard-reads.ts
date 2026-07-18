@@ -10,6 +10,7 @@ import {
   inArray,
   like,
   lt,
+  ne,
   notInArray,
   or,
   sql,
@@ -956,6 +957,10 @@ export const ticketsList = async (
   }
   if (filter.status?.length) {
     whereParts.push(inArray(tickets.status, [...filter.status]));
+  } else {
+    // Archiving is a soft delete: archived tickets surface only when the
+    // status filter asks for them explicitly.
+    whereParts.push(ne(tickets.status, "archived"));
   }
   if (filter.excludeStatus?.length) {
     whereParts.push(notInArray(tickets.status, [...filter.excludeStatus]));

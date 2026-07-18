@@ -277,3 +277,68 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
     expect(detail?.ticket.scenarioKey).toBe("delivery_issue");
   });
 });
+
+// Archiving is a soft delete: archived tickets stay out of the tickets list
+// unless the status filter explicitly asks for them.
+describeIfDb("apps/api — ticketsList archived exclusion (integration)", () => {
+  const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
+  const tenantId = randomUUID();
+  const openTicketId = randomUUID();
+  const archivedTicketId = randomUUID();
+
+  beforeAll(async () => {
+    if (!raw) return;
+    await raw.db.insert(tenants).values({
+      id: tenantId,
+      name: "archived-exclusion-test",
+      workosOrganizationId: `org_${randomUUID().slice(0, 8)}`,
+    });
+    await raw.db.insert(tickets).values([
+      {
+        id: openTicketId,
+        tenantId,
+        channel: "email",
+        status: "in_progress",
+        currentAgentId: "support-triage",
+        subject: "Missing invoice",
+      },
+      {
+        id: archivedTicketId,
+        tenantId,
+        channel: "email",
+        status: "archived",
+        currentAgentId: "support-triage",
+        subject: "Old archived thread",
+        archivedAt: new Date(),
+      },
+    ]);
+  });
+
+  afterAll(async () => {
+    if (!raw) return;
+    await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${tenantId}`);
+    await raw.db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
+    await raw.close();
+  });
+
+  it("hides archived tickets from the unfiltered list", async () => {
+    if (!raw) return;
+    const page = await ticketsList(raw.db, tenantId, {}, 1, 50);
+    const ids = page.rows.map((r) => r.id);
+    expect(ids).toContain(openTicketId);
+    expect(ids).not.toContain(archivedTicketId);
+    expect(page.totalRows).toBe(1);
+  });
+
+  it("returns archived tickets when the status filter includes them", async () => {
+    if (!raw) return;
+    const page = await ticketsList(
+      raw.db,
+      tenantId,
+      { status: ["archived"] },
+      1,
+      50,
+    );
+    expect(page.rows.map((r) => r.id)).toEqual([archivedTicketId]);
+  });
+});

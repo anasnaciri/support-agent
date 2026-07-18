@@ -17,6 +17,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Hide archived tickets from default ticket listings** (2026-07-19).
+      Archiving is a soft delete, but `ticketsList` returned archived rows
+      whenever no status filter was passed, so they showed on the Tickets page
+      and the sidebar's "All" mode. The query now default-excludes `archived`
+      unless the status filter explicitly includes it; the Tickets page's
+      existing "Archived" status option is the way back in. Verified red ->
+      green with two new `reads.integration.test.ts` cases, the full dashboard
+      integration suite (357 tests), and `pnpm build`. Note: the Tickets page
+      "Any status" placeholder now effectively means "any except archived" —
+      copy tweak only if it ever confuses.
 - [x] **Build the HyperFrames support-resolution demo from the actual dashboard
       surfaces** (2026-07-18). The 45-second detect -> investigate -> approve ->
       resolve -> delight composition now embeds production-built instances of
