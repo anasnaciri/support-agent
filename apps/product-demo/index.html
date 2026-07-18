@@ -1,56 +1,205 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Support resolution demo</title>
-    <link rel="stylesheet" href="./composition.css">
+    <link rel="stylesheet" href="./composition.css" />
   </head>
   <body>
-    <main data-hf-id="hf-olwe" class="stage" data-composition-id="support-resolution-demo" data-start="0" data-duration="45" data-fps="60" data-width="1920" data-height="1080">
+    <main
+      data-hf-id="hf-olwe"
+      class="stage"
+      data-composition-id="support-resolution-demo"
+      data-start="0"
+      data-duration="45"
+      data-fps="60"
+      data-width="1920"
+      data-height="1080"
+    >
       <div data-hf-id="hf-y59a" class="camera" data-camera="">
-        <section data-hf-id="hf-fl05" class="dashboard-plate" data-portal="merchant" data-plate="customer-message">
-          <iframe data-hf-id="hf-n7hk" data-dashboard-state="customer-message" title="Merchant actual dashboard — customer message" src="./site/index.html?surface=merchant&state=customer-message"></iframe>
+        <section
+          data-hf-id="hf-fl05"
+          class="dashboard-plate"
+          data-portal="merchant"
+          data-plate="customer-message"
+        >
+          <iframe
+            data-hf-id="hf-n7hk"
+            data-dashboard-state="customer-message"
+            title="Merchant actual dashboard — customer message"
+            src="./site/index.html?surface=merchant&state=customer-message"
+          ></iframe>
         </section>
-        <section data-hf-id="hf-lxxv" class="dashboard-plate" data-portal="merchant" data-plate="agent-investigation">
-          <iframe data-hf-id="hf-ty7m" data-dashboard-state="agent-investigation" title="Merchant actual dashboard — agent investigation" src="./site/index.html?surface=merchant&state=agent-investigation"></iframe>
+        <section
+          data-hf-id="hf-ie01"
+          class="dashboard-plate"
+          data-portal="merchant"
+          data-plate="agent-investigation-empty"
+        >
+          <iframe
+            data-hf-id="hf-ie02"
+            data-dashboard-state="agent-investigation-empty"
+            title="Merchant actual dashboard — empty investigation context"
+            src="./site/index.html?surface=merchant&state=agent-investigation-empty"
+          ></iframe>
         </section>
-        <section data-hf-id="hf-20j1" class="dashboard-plate" data-portal="merchant" data-plate="merchant-approval">
-          <iframe data-hf-id="hf-77qo" data-dashboard-state="merchant-approval" title="Merchant actual dashboard — approval bundle" src="./site/index.html?surface=merchant&state=merchant-approval"></iframe>
+        <section
+          data-hf-id="hf-ic01"
+          class="dashboard-plate"
+          data-portal="merchant"
+          data-plate="agent-investigation-customer"
+        >
+          <iframe
+            data-hf-id="hf-ic02"
+            data-dashboard-state="agent-investigation-customer"
+            title="Merchant actual dashboard — customer context found"
+            src="./site/index.html?surface=merchant&state=agent-investigation-customer"
+          ></iframe>
         </section>
-        <section data-hf-id="hf-t2d5" class="dashboard-plate" data-portal="fulfillment-operator" data-plate="partner-inbox">
-          <iframe data-hf-id="hf-q63o" data-dashboard-state="fulfillment-resolution" title="Fulfillment actual dashboard — escalation inbox" src="./site/index.html?surface=fulfillment&view=list&state=fulfillment-resolution"></iframe>
+        <section
+          data-hf-id="hf-io01"
+          class="dashboard-plate"
+          data-portal="merchant"
+          data-plate="agent-investigation-order"
+        >
+          <iframe
+            data-hf-id="hf-io02"
+            data-dashboard-state="agent-investigation-order"
+            title="Merchant actual dashboard — order context found"
+            src="./site/index.html?surface=merchant&state=agent-investigation-order"
+          ></iframe>
         </section>
-        <section data-hf-id="hf-0hcj" class="dashboard-plate" data-portal="fulfillment-operator" data-plate="fulfillment-resolution">
-          <iframe data-hf-id="hf-tbeo" data-dashboard-state="fulfillment-resolution" title="Fulfillment actual dashboard — escalation detail" src="./site/index.html?surface=fulfillment&view=detail&state=fulfillment-resolution"></iframe>
+        <section
+          data-hf-id="hf-lxxv"
+          class="dashboard-plate"
+          data-portal="merchant"
+          data-plate="agent-investigation"
+        >
+          <iframe
+            data-hf-id="hf-ty7m"
+            data-dashboard-state="agent-investigation"
+            title="Merchant actual dashboard — agent investigation"
+            src="./site/index.html?surface=merchant&state=agent-investigation"
+          ></iframe>
         </section>
-        <section data-hf-id="hf-qxer" class="dashboard-plate" data-portal="merchant" data-plate="customer-update">
-          <iframe data-hf-id="hf-fart" data-dashboard-state="customer-update" title="Merchant actual dashboard — customer update draft" src="./site/index.html?surface=merchant&state=customer-update"></iframe>
+        <section
+          data-hf-id="hf-20j1"
+          class="dashboard-plate"
+          data-portal="merchant"
+          data-plate="merchant-approval"
+        >
+          <iframe
+            data-hf-id="hf-77qo"
+            data-dashboard-state="merchant-approval"
+            title="Merchant actual dashboard — approval bundle"
+            src="./site/index.html?surface=merchant&state=merchant-approval"
+          ></iframe>
         </section>
-        <section data-hf-id="hf-om01" class="dashboard-plate" data-portal="merchant" data-plate="sent-update">
-          <iframe data-hf-id="hf-cnto" data-dashboard-state="sent-update" title="Merchant actual dashboard — update sent" src="./site/index.html?surface=merchant&state=sent-update"></iframe>
+        <section
+          data-hf-id="hf-t2d5"
+          class="dashboard-plate"
+          data-portal="fulfillment-operator"
+          data-plate="partner-inbox"
+        >
+          <iframe
+            data-hf-id="hf-q63o"
+            data-dashboard-state="fulfillment-resolution"
+            title="Fulfillment actual dashboard — escalation inbox"
+            src="./site/index.html?surface=fulfillment&view=list&state=fulfillment-resolution"
+          ></iframe>
         </section>
-        <section data-hf-id="hf-yo8p" class="dashboard-plate" data-portal="merchant" data-plate="delivered-delight">
-          <iframe data-hf-id="hf-h8ek" data-dashboard-state="delivered-delight" title="Merchant actual dashboard — delivered and delighted" src="./site/index.html?surface=merchant&state=delivered-delight"></iframe>
+        <section
+          data-hf-id="hf-0hcj"
+          class="dashboard-plate"
+          data-portal="fulfillment-operator"
+          data-plate="fulfillment-resolution"
+        >
+          <iframe
+            data-hf-id="hf-tbeo"
+            data-dashboard-state="fulfillment-resolution"
+            title="Fulfillment actual dashboard — escalation detail"
+            src="./site/index.html?surface=fulfillment&view=detail&state=fulfillment-resolution"
+          ></iframe>
+        </section>
+        <section
+          data-hf-id="hf-qxer"
+          class="dashboard-plate"
+          data-portal="merchant"
+          data-plate="customer-update"
+        >
+          <iframe
+            data-hf-id="hf-fart"
+            data-dashboard-state="customer-update"
+            title="Merchant actual dashboard — customer update draft"
+            src="./site/index.html?surface=merchant&state=customer-update"
+          ></iframe>
+        </section>
+        <section
+          data-hf-id="hf-om01"
+          class="dashboard-plate"
+          data-portal="merchant"
+          data-plate="sent-update"
+        >
+          <iframe
+            data-hf-id="hf-cnto"
+            data-dashboard-state="sent-update"
+            title="Merchant actual dashboard — update sent"
+            src="./site/index.html?surface=merchant&state=sent-update"
+          ></iframe>
+        </section>
+        <section
+          data-hf-id="hf-yo8p"
+          class="dashboard-plate"
+          data-portal="merchant"
+          data-plate="delivered-delight"
+        >
+          <iframe
+            data-hf-id="hf-h8ek"
+            data-dashboard-state="delivered-delight"
+            title="Merchant actual dashboard — delivered and delighted"
+            src="./site/index.html?surface=merchant&state=delivered-delight"
+          ></iframe>
         </section>
       </div>
 
-      <div data-hf-id="hf-6uk5" class="composer-beam" data-composer-beam="" aria-hidden="true"></div>
-      <div data-hf-id="hf-nvjl" class="time-jump" data-shot="time-jump" aria-hidden="true">
+      <div
+        data-hf-id="hf-6uk5"
+        class="composer-beam"
+        data-composer-beam=""
+        aria-hidden="true"
+      ></div>
+      <div
+        data-hf-id="hf-nvjl"
+        class="time-jump"
+        data-shot="time-jump"
+        aria-hidden="true"
+      >
         <span data-hf-id="hf-lnpb">A few days later</span>
       </div>
-      <div data-hf-id="hf-bamx" class="cursor" data-cursor-shell aria-hidden="true">
+      <div
+        data-hf-id="hf-bamx"
+        class="cursor"
+        data-cursor-shell
+        aria-hidden="true"
+      >
         <img data-demo-cursor src="./assets/macos-default.svg" alt="" />
         <span data-hf-id="hf-z7ht" data-cursor-click=""></span>
       </div>
 
       <div data-hf-id="hf-ni1n" class="shot-markers" aria-hidden="true">
-        <i data-hf-id="hf-ux5x" data-shot="customer-message"></i><i data-hf-id="hf-pacd" data-shot="processing-status"></i>
-        <i data-hf-id="hf-azo9" data-shot="customer-context"></i><i data-hf-id="hf-188v" data-shot="order-context"></i>
-        <i data-hf-id="hf-f26a" data-shot="tracking-context"></i><i data-hf-id="hf-kxe7" data-shot="approval-bundle"></i>
-        <i data-hf-id="hf-t0i7" data-shot="fulfillment-escalation"></i><i data-hf-id="hf-65gz" data-shot="partner-update"></i>
-        <i data-hf-id="hf-a2bd" data-shot="tracking-edit"></i><i data-hf-id="hf-32qb" data-shot="customer-update"></i>
-        <i data-hf-id="hf-l3ss" data-shot="delivered-status"></i><i data-hf-id="hf-9tyc" data-shot="happy-reply"></i>
+        <i data-hf-id="hf-ux5x" data-shot="customer-message"></i
+        ><i data-hf-id="hf-pacd" data-shot="processing-status"></i>
+        <i data-hf-id="hf-azo9" data-shot="customer-context"></i
+        ><i data-hf-id="hf-188v" data-shot="order-context"></i>
+        <i data-hf-id="hf-f26a" data-shot="tracking-context"></i
+        ><i data-hf-id="hf-kxe7" data-shot="approval-bundle"></i>
+        <i data-hf-id="hf-t0i7" data-shot="fulfillment-escalation"></i
+        ><i data-hf-id="hf-65gz" data-shot="partner-update"></i>
+        <i data-hf-id="hf-a2bd" data-shot="tracking-edit"></i
+        ><i data-hf-id="hf-32qb" data-shot="customer-update"></i>
+        <i data-hf-id="hf-l3ss" data-shot="delivered-status"></i
+        ><i data-hf-id="hf-9tyc" data-shot="happy-reply"></i>
       </div>
     </main>
     <script>
@@ -63,8 +212,12 @@
           window.__supportDemoSeek?.(window.__supportDemoTime);
           return this;
         },
-        play() { return this; },
-        pause() { return this; },
+        play() {
+          return this;
+        },
+        pause() {
+          return this;
+        },
       };
     </script>
     <script type="module" src="./composition.js"></script>

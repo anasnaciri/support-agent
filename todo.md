@@ -27,18 +27,29 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       delight states. HyperFrames owns only camera, cursor, crossfade, typing,
       beam, and time-jump choreography. The cursor overlay uses the supplied
       black macOS `Default.svg` asset rather than the earlier white Windows-like
-      drawing. Verified with seven fixture/composition
-      tests, the embedded dashboard production build, HyperFrames lint, strict
-      runtime/layout/contrast checks at six beats, an 11-frame visual acceptance
-      sheet covering both portals, `git diff --check`, and `pnpm build`.
+      drawing. Follow-up motion pass (2026-07-18): the video now opens already
+      framed tightly around the empty conversation position, then seeks the
+      incoming bubble through the SPA's exact 350ms `msg-rise` animation.
+      Customer, order, and tracking context no longer appear with the first
+      message; three deterministic real-dashboard plates reveal them one at a
+      time from the actual empty Customer / Order states while Tracking remains
+      absent until its lookup beat. Camera moves use short quint/expo whips and
+      back-ease overshoot with decisive holds instead of one slow smoothstep,
+      and every cursor click resolves the live target element's bounds plus the
+      supplied SVG's 2px hotspot instead of relying on screen coordinates.
+      Verified with 12 fixture/composition/choreography tests, the embedded
+      dashboard production build, HyperFrames lint, direct 1920x1080 Chrome
+      acceptance frames across 17 beats (including all five corrected cursor
+      targets), `git diff --check`, and `pnpm build`.
 - [ ] **Export the final HyperFrames MP4.** Run `pnpm --filter
       @support-agent/product-demo render`. Because the composition deliberately
       embeds the exact dashboard in iframes, HyperFrames uses screenshot capture
       for all 2,700 1080p/60fps frames. The export was smoke-tested through
       browser download, calibration, iframe fallback, and streaming frame
       capture, then stopped after 426 frames because this machine estimated
-      roughly one hour. No complete MP4 was left behind; the deterministic
-      composition and validated acceptance frames are ready.
+      roughly one hour. A complete 45-second draft MP4 now exists in the ignored
+      `dist/` directory, but it predates the latest staged-context and camera
+      pass and must be replaced before delivery.
 
 - [x] **Send customer emails from the keyboard** (2026-07-18). Every live
       customer-reply editor now sends with Command+Enter on macOS and

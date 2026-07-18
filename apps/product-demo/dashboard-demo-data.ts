@@ -1,5 +1,8 @@
 export type DashboardDemoState =
   | "customer-message"
+  | "agent-investigation-empty"
+  | "agent-investigation-customer"
+  | "agent-investigation-order"
   | "agent-investigation"
   | "merchant-approval"
   | "fulfillment-resolution"
@@ -24,9 +27,16 @@ const escalation =
 const customerUpdate =
   "Good news—your order has been reshipped. Your new tracking number is DEMO-1Z84-2048. We'll keep an eye on it until it arrives.";
 
+const investigationStates: ReadonlySet<DashboardDemoState> = new Set([
+  "agent-investigation-empty",
+  "agent-investigation-customer",
+  "agent-investigation-order",
+  "agent-investigation",
+]);
+
 const ticketStatusFor = (state: DashboardDemoState): string => {
   if (state === "customer-message") return "new";
-  if (state === "agent-investigation") return "in_progress";
+  if (investigationStates.has(state)) return "in_progress";
   if (state === "merchant-approval" || state === "customer-update") {
     return "waiting_for_approval";
   }
@@ -35,11 +45,7 @@ const ticketStatusFor = (state: DashboardDemoState): string => {
   return "waiting_for_fulfillment_operator";
 };
 
-const approval = (
-  id: string,
-  tool: string,
-  proposedInput: unknown,
-) => ({
+const approval = (id: string, tool: string, proposedInput: unknown) => ({
   id,
   ticketId: "demo-ticket",
   agentId: "order-status-agent",
@@ -80,6 +86,25 @@ const approvalsFor = (state: DashboardDemoState) => {
   return [];
 };
 
+const ticketContextFor = (state: DashboardDemoState) => {
+  if (state === "customer-message" || state === "agent-investigation-empty") {
+    return {};
+  }
+  if (state === "agent-investigation-customer") {
+    return {
+      customerEmail: "maya@example.test",
+      customerName: "Maya Chen",
+    };
+  }
+  return {
+    customerEmail: "maya@example.test",
+    customerName: "Maya Chen",
+    quotedOrderRef: "#1048",
+    identifiedOrderId: "#1048",
+    notes: "Customer is asking for an update on order #1048.",
+  };
+};
+
 const ticketDetail = (state: DashboardDemoState) => ({
   ticket: {
     id: "demo-ticket",
@@ -89,13 +114,7 @@ const ticketDetail = (state: DashboardDemoState) => ({
     currentAgentId: "order-status-agent",
     priority: "normal",
     summary: "Customer is asking for an update on order #1048.",
-    context: {
-      customerEmail: "maya@example.test",
-      customerName: "Maya Chen",
-      quotedOrderRef: "#1048",
-      identifiedOrderId: "#1048",
-      notes: "Customer is asking for an update on order #1048.",
-    },
+    context: ticketContextFor(state),
     createdAt: customerMessageAt,
     updatedAt: state === "delivered-delight" ? deliveredAt : now,
     resolvedAt: state === "delivered-delight" ? deliveredAt : null,
@@ -133,52 +152,69 @@ const customer = {
 };
 
 const shopifyPanels = (state: DashboardDemoState) => {
-  const reshipped = ["customer-update", "sent-update", "delivered-delight"].includes(
-    state,
-  );
+  const reshipped = [
+    "customer-update",
+    "sent-update",
+    "delivered-delight",
+  ].includes(state);
   const delivered = state === "delivered-delight";
   const tracking = reshipped ? "DEMO-1Z84-2048" : "DEMO-9400-1048";
+  const order = {
+    id: "gid://shopify/Order/1048",
+    name: "#1048",
+    confirmationNumber: "DEMO1048",
+    email: "maya@example.test",
+    customerId: customer.id,
+    fulfillmentStatus: delivered
+      ? "delivered"
+      : reshipped
+        ? "in_transit"
+        : "fulfilled",
+    financialStatus: "paid",
+    cancelledAt: null,
+    totalPrice: { amount: "119.00", currencyCode: "USD" },
+    shippingAddress: customer.defaultAddress,
+    lineItems: [
+      {
+        id: "gid://shopify/LineItem/1048",
+        title: "CloudKnit Throw",
+        quantity: 1,
+        sku: "CKT-SAND",
+        variantTitle: "Sand",
+        unitPrice: { amount: "119.00", currencyCode: "USD" },
+        productId: "gid://shopify/Product/1048",
+        imageUrl: null,
+      },
+    ],
+    fulfillments: [
+      {
+        id: "gid://shopify/Fulfillment/1048",
+        status: delivered
+          ? "delivered"
+          : reshipped
+            ? "in_transit"
+            : "fulfilled",
+        trackingCompany: "UPS",
+        trackingNumbers: [tracking],
+        trackingUrls: [`https://example.test/track/${tracking}`],
+        estimatedDeliveryAt: delivered ? null : "2026-07-21T18:00:00.000Z",
+        deliveredAt: delivered ? deliveredAt : null,
+        createdAt: "2026-07-09T09:00:00.000Z",
+        updatedAt: delivered ? deliveredAt : now,
+      },
+    ],
+    createdAt: "2026-07-08T15:20:00.000Z",
+    updatedAt: delivered ? deliveredAt : now,
+  };
+  const revealCustomer =
+    state !== "customer-message" && state !== "agent-investigation-empty";
+  const revealOrder =
+    state !== "customer-message" &&
+    state !== "agent-investigation-empty" &&
+    state !== "agent-investigation-customer";
   return {
-    customer,
-    order: {
-      id: "gid://shopify/Order/1048",
-      name: "#1048",
-      confirmationNumber: "DEMO1048",
-      email: "maya@example.test",
-      customerId: customer.id,
-      fulfillmentStatus: delivered ? "delivered" : reshipped ? "in_transit" : "fulfilled",
-      financialStatus: "paid",
-      cancelledAt: null,
-      totalPrice: { amount: "119.00", currencyCode: "USD" },
-      shippingAddress: customer.defaultAddress,
-      lineItems: [
-        {
-          id: "gid://shopify/LineItem/1048",
-          title: "CloudKnit Throw",
-          quantity: 1,
-          sku: "CKT-SAND",
-          variantTitle: "Sand",
-          unitPrice: { amount: "119.00", currencyCode: "USD" },
-          productId: "gid://shopify/Product/1048",
-          imageUrl: null,
-        },
-      ],
-      fulfillments: [
-        {
-          id: "gid://shopify/Fulfillment/1048",
-          status: delivered ? "delivered" : reshipped ? "in_transit" : "fulfilled",
-          trackingCompany: "UPS",
-          trackingNumbers: [tracking],
-          trackingUrls: [`https://example.test/track/${tracking}`],
-          estimatedDeliveryAt: delivered ? null : "2026-07-21T18:00:00.000Z",
-          deliveredAt: delivered ? deliveredAt : null,
-          createdAt: "2026-07-09T09:00:00.000Z",
-          updatedAt: delivered ? deliveredAt : now,
-        },
-      ],
-      createdAt: "2026-07-08T15:20:00.000Z",
-      updatedAt: delivered ? deliveredAt : now,
-    },
+    customer: revealCustomer ? customer : null,
+    order: revealOrder ? order : null,
     shopDomain: "northstar-demo.myshopify.com",
     addressUpdateAfterFulfillment: false,
   };
@@ -242,9 +278,19 @@ const threadFor = (state: DashboardDemoState) => {
 };
 
 const trackingFor = (state: DashboardDemoState) => {
-  const reshipped = ["customer-update", "sent-update", "delivered-delight"].includes(
-    state,
-  );
+  if (
+    state === "customer-message" ||
+    state === "agent-investigation-empty" ||
+    state === "agent-investigation-customer" ||
+    state === "agent-investigation-order"
+  ) {
+    return { kind: "not_found" };
+  }
+  const reshipped = [
+    "customer-update",
+    "sent-update",
+    "delivered-delight",
+  ].includes(state);
   const delivered = state === "delivered-delight";
   return {
     kind: "ok",
@@ -317,7 +363,12 @@ export const dashboardDemoPayload = (
     return json({
       organizationId: "demo-organization",
       userId: "demo-manager",
-      user: { id: "demo-manager", email: "manager@northstar.example", firstName: "Alex", lastName: "Morgan" },
+      user: {
+        id: "demo-manager",
+        email: "manager@northstar.example",
+        firstName: "Alex",
+        lastName: "Morgan",
+      },
     });
   }
   if (path === "/dashboard/workspaces") {
@@ -348,7 +399,10 @@ export const dashboardDemoPayload = (
       defaultWorkspaceId: "demo-partner",
     });
   }
-  if (path === "/dashboard/me/session" || path === "/dashboard/fulfillment-operator/session") {
+  if (
+    path === "/dashboard/me/session" ||
+    path === "/dashboard/fulfillment-operator/session"
+  ) {
     return json({
       isOwner: true,
       assigned: true,
@@ -364,7 +418,9 @@ export const dashboardDemoPayload = (
     });
   }
   if (path === "/dashboard/tenant") {
-    return json({ tenant: { tenantId: "demo-merchant", name: "Northstar Supply" } });
+    return json({
+      tenant: { tenantId: "demo-merchant", name: "Northstar Supply" },
+    });
   }
   if (path === "/dashboard/llm") {
     return json({
@@ -375,25 +431,43 @@ export const dashboardDemoPayload = (
   }
   if (path === "/dashboard/connections") {
     return json({
-      connections: [{
-        id: "demo-gmail",
-        provider: "gmail",
-        shopDomain: null,
-        status: "active",
-        scopes: [],
-        metadata: {},
-        installedAt: now,
-        revokedAt: null,
-        updatedAt: now,
-      }],
+      connections: [
+        {
+          id: "demo-gmail",
+          provider: "gmail",
+          shopDomain: null,
+          status: "active",
+          scopes: [],
+          metadata: {},
+          installedAt: now,
+          revokedAt: null,
+          updatedAt: now,
+        },
+      ],
     });
   }
   if (path === "/dashboard/tickets") {
     return json({
       rows: [
         ticketRow(state),
-        { ...ticketRow(state), id: "demo-ticket-2", subject: "Exchange request", customerEmail: "jamie@example.test", orderRef: "#1041", preview: "Can I exchange this for another size?", status: "waiting_for_customer" },
-        { ...ticketRow(state), id: "demo-ticket-3", subject: "Damaged item", customerEmail: "ravi@example.test", orderRef: "#1037", preview: "The box arrived damaged.", status: "human_takeover" },
+        {
+          ...ticketRow(state),
+          id: "demo-ticket-2",
+          subject: "Exchange request",
+          customerEmail: "jamie@example.test",
+          orderRef: "#1041",
+          preview: "Can I exchange this for another size?",
+          status: "waiting_for_customer",
+        },
+        {
+          ...ticketRow(state),
+          id: "demo-ticket-3",
+          subject: "Damaged item",
+          customerEmail: "ravi@example.test",
+          orderRef: "#1037",
+          preview: "The box arrived damaged.",
+          status: "human_takeover",
+        },
       ],
       page: 1,
       limit: 50,
@@ -401,7 +475,8 @@ export const dashboardDemoPayload = (
       totalPages: 1,
     });
   }
-  if (path === "/dashboard/tickets/demo-ticket") return json(ticketDetail(state));
+  if (path === "/dashboard/tickets/demo-ticket")
+    return json(ticketDetail(state));
   if (path === "/dashboard/tickets/demo-ticket/conversation-thread") {
     return json(threadFor(state));
   }
@@ -411,12 +486,18 @@ export const dashboardDemoPayload = (
   if (path === "/dashboard/tickets/demo-ticket/tracking") {
     return json(trackingFor(state));
   }
-  if (path === "/dashboard/tickets/demo-ticket/events") return json({ events: [] });
+  if (path === "/dashboard/tickets/demo-ticket/events")
+    return json({ events: [] });
   if (path === "/dashboard/tickets/demo-ticket/attachments") {
     return json({ attachments: [] });
   }
   if (path === "/dashboard/models") {
-    return json({ connected: true, provider: "openrouter", entries: [], error: null });
+    return json({
+      connected: true,
+      provider: "openrouter",
+      entries: [],
+      error: null,
+    });
   }
   if (path === "/dashboard/fulfillment-operator/tickets") {
     return json({ tickets: [fulfillmentDetail] });

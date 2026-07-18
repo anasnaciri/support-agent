@@ -29,22 +29,33 @@ describe("HyperFrames support-resolution composition", () => {
       document.querySelector("[data-portal='fulfillment-operator']"),
     ).not.toBeNull();
 
-    const plates = [...document.querySelectorAll<HTMLIFrameElement>(
-      "iframe[data-dashboard-state]",
-    )];
-    expect(plates).toHaveLength(8);
+    const plates = [
+      ...document.querySelectorAll<HTMLIFrameElement>(
+        "iframe[data-dashboard-state]",
+      ),
+    ];
+    expect(plates).toHaveLength(11);
     expect(
       plates.every((plate) => plate.src.includes("./site/index.html?")),
     ).toBe(true);
     expect(
       plates.every((plate) => plate.title.includes("actual dashboard")),
     ).toBe(true);
+    expect(plates.some((plate) => plate.src.includes("view=list"))).toBe(true);
+    expect(plates.some((plate) => plate.src.includes("view=detail"))).toBe(
+      true,
+    );
     expect(
-      plates.some((plate) => plate.src.includes("view=list")),
-    ).toBe(true);
-    expect(
-      plates.some((plate) => plate.src.includes("view=detail")),
-    ).toBe(true);
+      plates
+        .map((plate) => plate.getAttribute("data-dashboard-state"))
+        .slice(0, 5),
+    ).toEqual([
+      "customer-message",
+      "agent-investigation-empty",
+      "agent-investigation-customer",
+      "agent-investigation-order",
+      "agent-investigation",
+    ]);
   });
 
   it("contains every visible state in the merchant-to-fulfillment story", async () => {
