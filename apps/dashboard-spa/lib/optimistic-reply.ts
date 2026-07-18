@@ -3,12 +3,11 @@ import type {
   DashboardConversationThread,
 } from "@support-agent/dashboard-contracts";
 
-// Optimistic outbound replies are pinned into page state the moment the
-// manager hits Send (lib/pinned-replies.ts), so the bubble shows immediately
-// — translucent — instead of waiting for the round-trip. The id prefix is the
-// marker the chat thread reads to render the "sending…" state; on confirmation
-// the pin swaps to the real provider message id (or is dropped if the send
-// fails).
+// Optimistic outbound replies enter the ticket-scoped reply projection the
+// moment the manager hits Send, so the bubble shows immediately — translucent
+// — instead of waiting for the round-trip. The id prefix marks the "sending…"
+// state; the projection keeps its UI identity stable when the provider id
+// arrives or drops it if the send fails.
 export const OPTIMISTIC_MESSAGE_ID_PREFIX = "optimistic:";
 
 export const isOptimisticMessage = (message: {

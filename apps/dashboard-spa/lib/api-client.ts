@@ -1416,9 +1416,9 @@ export const api = {
     attachmentIds: ReadonlyArray<string> = [],
   ): Promise<{
     readonly kind: string;
-    /** On kind "sent": the provider message id — the SAME id the thread
-        read-back reports later, which lets the composer's optimistic bubble
-        hand off to the real message without a remount. */
+    /** On kind "sent": the provider's best-known message id. Gmail and IMAP
+        return the durable read-back id; Graph can briefly return a draft id
+        while Sent Items is eventually consistent. */
     readonly messageId?: string;
     /** On kind "sent": ISO-8601 send time from the connector. */
     readonly sentAt?: string;

@@ -28,7 +28,7 @@ import {
   OPTIMISTIC_MESSAGE_ID_PREFIX,
   buildOptimisticOutboundMessage,
 } from "@/lib/optimistic-reply";
-import type { ReplyPinHandlers } from "@/lib/pinned-replies";
+import type { ReplyProjectionActions } from "@/lib/reply-projection";
 import { useApprovalDecision, useTicketMutation } from "@/lib/use-ticket-mutation";
 import { composerBeam } from "@/lib/composer-beam";
 import { useSystemPrefersDark, useThemePreference } from "@/lib/theme-store";
@@ -65,8 +65,8 @@ interface ChatComposerProps {
   readonly mode: ComposerMode;
   /** True while the agent is actively working the ticket — lights the beam. */
   readonly processing: boolean;
-  /** Reply-pin lifecycle (owned by the ticket page, merged into the thread). */
-  readonly replyPins: ReplyPinHandlers;
+  /** Optimistic reply lifecycle owned by the ticket-scoped projection. */
+  readonly replies: ReplyProjectionActions;
 }
 
 // The composer input grows with its content but is capped — past the cap it
@@ -249,7 +249,7 @@ export function ChatComposer({
   models,
   mode,
   processing,
-  replyPins,
+  replies,
 }: ChatComposerProps) {
   const ctx = { workspaceId };
   const qc = useQueryClient();
@@ -319,13 +319,9 @@ export function ChatComposer({
   const systemPrefersDark = useSystemPrefersDark();
   const approvalId = mode.kind === "approval" ? mode.approvalId : "";
 
-  // Optimistic send, via reply pins (page state merged into the thread at
-  // render time — see lib/pinned-replies.ts). The pin lives OUTSIDE the query
-  // cache, so the refetches that race the send (the success invalidation, the
-  // 2.5s live poll) can never clobber the bubble mid-flight. On success the
-  // pin swaps to the real provider message id — the bubble settles to full
-  // opacity, and when the thread read-back catches up the identical id makes
-  // the hand-off render nothing at all.
+  // The ticket-scoped projection keeps this reply outside the server cache and
+  // gives it a stable render identity. Stale refetches cannot remove it, and
+  // confirmation/read-back update the same mounted bubble.
   const sendM = useTicketMutation<
     void,
     DashboardConversationMessage,
@@ -346,26 +342,25 @@ export function ChatComposer({
         qk.ticketThread(workspaceId, ticketId),
       );
       const optimistic = buildOptimisticOutboundMessage({
-        id: `${OPTIMISTIC_MESSAGE_ID_PREFIX}${Date.now()}`,
+        id: `${OPTIMISTIC_MESSAGE_ID_PREFIX}${crypto.randomUUID()}`,
         bodyText: text,
         customerEmail,
         thread: previous?.status === "available" ? previous.thread : null,
         sentAt: new Date().toISOString(),
       });
-      replyPins.start(optimistic);
+      replies.start(optimistic);
       return optimistic;
     },
     onError: (optimistic) => {
-      if (optimistic) replyPins.fail(optimistic.id);
+      if (optimistic) replies.fail(optimistic.id);
     },
     onDone: (kind, result, optimistic) => {
       if (kind === "sent") {
         if (optimistic) {
-          replyPins.confirm(optimistic.id, {
+          replies.confirm(optimistic.id, {
             ...optimistic,
-            // Fall back to a synthetic id if the response somehow lacks one —
-            // the bubble still settles; only the seamless read-back hand-off
-            // is lost.
+            // A malformed success still settles visually. The projection's
+            // content/time reconciliation can absorb the later read-back.
             id: result.messageId ?? `sent:${optimistic.id}`,
             sentAt: result.sentAt ?? optimistic.sentAt,
           });
@@ -376,7 +371,7 @@ export function ChatComposer({
       }
       // Guarded outcomes (not_in_takeover, no_thread, …): nothing was sent,
       // the toast explains — don't leave a phantom bubble behind.
-      if (optimistic) replyPins.fail(optimistic.id);
+      if (optimistic) replies.fail(optimistic.id);
     },
   });
 

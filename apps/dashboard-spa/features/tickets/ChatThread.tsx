@@ -103,12 +103,15 @@ const Bubble = ({
  */
 export const ChatThread = ({
   result,
+  messageKey,
   workspaceId,
   ticketId,
   processing,
   resolved,
 }: {
   readonly result: TicketConversationThreadResult;
+  /** Stable UI identity, independent from the connector message id. */
+  readonly messageKey: (message: DashboardConversationMessage) => string;
   readonly workspaceId: string;
   readonly ticketId: string;
   /** True while the agent is actively working — shows the in-thread
@@ -179,7 +182,7 @@ export const ChatThread = ({
     <div className="flex flex-col gap-4">
       {messages.map((message) => (
         <Bubble
-          key={message.id}
+          key={messageKey(message)}
           message={message}
           workspaceId={workspaceId}
           ticketId={ticketId}

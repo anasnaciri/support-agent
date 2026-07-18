@@ -2865,20 +2865,21 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       halo-pulses (`resolved-pop`) only when the status flips live — all driven
       by the existing 2.5s `TicketLiveBoundary` poll, no long-lived connection.
       All new animations stilled under `prefers-reduced-motion`.
-- [x] Reply pins fix the optimistic-send glitch (2026-07-18): the optimistic
-      bubble now lives in page state (`lib/pinned-replies.ts`), merged into the
-      thread at render time — never in the query cache, where the send's own
-      success invalidation raced the 2.5s live poll and could vanish/re-rise
-      the bubble. Lifecycle: `start` (translucent pin) → `confirm` swaps the
-      pin to the REAL provider message id from the reply response (Gmail
-      message id / IMAP RFC Message-ID — the same id the thread read-back
-      reports, verified in both connectors) so the bubble settles with no
-      remount and the eventual read-back absorbs the pin with an identical
-      React key → `fail`/guarded outcomes drop the pin. `sendReply` client type
-      now surfaces `messageId`/`sentAt`; `useTicketMutation.onDone` passes
-      `(kind, result, ctx)`; `appendOptimisticReply` (cache path) deleted.
-      Pins reset on ticket switch; absorbed pins prune with a same-reference
-      bail so no render loop.
+- [x] Stable reply projection fixes the optimistic-send glitch (2026-07-18).
+      `useReplyProjection` owns transient replies outside the server query
+      cache, so success invalidation and the 2.5s live poll cannot make a
+      bubble vanish and re-rise. Client render identity is separate from the
+      connector message id: the same mounted bubble survives optimistic send,
+      stale refetch, confirmation, and canonical read-back. Gmail/IMAP
+      reconcile by durable provider id; Outlook also reconciles the eventual
+      Sent Items copy when Graph initially returns its transient draft id.
+      Projection state is synchronously scoped to workspace + ticket, and stale
+      completions from a previously viewed ticket are ignored. The hook runs
+      before the detail page's loading/not-found returns, preserving React hook
+      order. Verified with a jsdom regression asserting DOM-node identity and
+      single-bubble rendering across the whole lifecycle, ticket-switch and
+      Outlook regressions, all 678 dashboard tests, the dashboard production
+      build, `git diff --check`, and `pnpm build`.
 - [ ] Optional: pop the header status chip (scale-in) when the status changes
       live, mirroring the same live-transition tracking the resolved banner
       uses.
