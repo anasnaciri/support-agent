@@ -1972,6 +1972,30 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       2026-07-04 → 2026-07-07, so existing tenants must re-accept before new
       connector writes (`legalAcceptanceIsCurrent`). DPA version unchanged.
       Verified with `pnpm build` and the legal + tenant-repository tests.
+- [x] **Draft the public privacy policy and deployment-specific commercial
+      terms** (2026-07-18). Added a counsel-ready working set under
+      [`docs/legal`](./docs/legal): one canonical privacy policy that explains
+      the controller/processor split and shared SaaS, Licensor-hosted
+      dedicated, and customer-hosted dedicated data flows; B2B SaaS Terms with
+      Shopify-required merchant notices and AI/Automatic-action allocation;
+      and a separately structured Dedicated Deployment Software License and
+      Services Agreement covering perpetual object-code entitlements,
+      customer-owned infrastructure, maintenance, support access, telemetry,
+      data responsibility, and no remote kill switch. The drafts leave legal
+      entity, governing law, commercial numbers, hosting region, and unsettled
+      retention periods as explicit placeholders rather than inventing them.
+      Verified with placeholder inventory, `git diff --check`, and
+      `pnpm build`.
+- [ ] **Finalize the legal launch set with qualified counsel and production
+      facts.** Complete the identity/contact, billing/renewal, governing-law,
+      liability/indemnity, hosting-region, log/backup/account-retention, and
+      request-channel decisions in `docs/legal`; replace the current short DPA
+      with a complete processor/service-provider agreement; publish the
+      deployment-specific subprocessor appendix; confirm provider no-training
+      and retention settings (especially platform-paid LLM inference); and
+      complete any applicable Moroccan CNDP declaration/authorization and
+      foreign-transfer filings. Publishing a policy does not complete those
+      operational or regulatory steps.
 - [ ] Consider extracting the subprocessor list to a standalone page/appendix
       referenced from the DPA with a notify-of-changes clause, so future
       connector additions don't re-version the whole notice.
