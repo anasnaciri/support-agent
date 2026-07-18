@@ -125,15 +125,24 @@ export const parseLiveTracking = (value: unknown): ParsedTracking | null => {
  * re-label, a Shopify-admin edit) the snapshot is superseded and rendering it
  * would show the old number and its stale scans as this order's status.
  * A resolved order is canonical even when all tracking was removed. When the
- * order could not be resolved, the stamp remains as a fail-open fallback.
+ * order could not be resolved, the stamp remains as a fail-open fallback. A
+ * destination-mismatch stamp remains visible for human review when the order
+ * has no tracking of its own; a different current order number still wins.
  */
 export const dropSupersededStamp = (
   stamp: ParsedTracking | null,
   orderTrackingNumbers: ReadonlyArray<string>,
   orderResolved = orderTrackingNumbers.length > 0,
+  riskFlags: ReadonlyArray<string> = [],
 ): ParsedTracking | null => {
   if (!stamp?.trackingNumber) return stamp;
   if (!orderResolved) return stamp;
+  if (
+    orderTrackingNumbers.length === 0 &&
+    riskFlags.includes("tracking_destination_mismatch")
+  ) {
+    return stamp;
+  }
   return orderTrackingNumbers.includes(stamp.trackingNumber) ? stamp : null;
 };
 

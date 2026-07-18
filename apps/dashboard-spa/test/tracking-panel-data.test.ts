@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
+import { TrackingPanel } from "../features/tickets/TrackingPanel";
 import {
   daysBetween,
   dropSupersededStamp,
@@ -138,6 +141,22 @@ describe("dropSupersededStamp", () => {
     expect(dropSupersededStamp(stamp, [], true)).toBeNull();
   });
 
+  it("keeps a disputed stamp visible when the order has no tracking numbers", () => {
+    expect(
+      dropSupersededStamp(stamp, [], true, [
+        "tracking_destination_mismatch",
+      ]),
+    ).toBe(stamp);
+  });
+
+  it("still drops a disputed stamp when the order has a different number", () => {
+    expect(
+      dropSupersededStamp(stamp, ["NEW456"], true, [
+        "tracking_destination_mismatch",
+      ]),
+    ).toBeNull();
+  });
+
   it("keeps the stamp when the order could not be resolved", () => {
     expect(dropSupersededStamp(stamp, [], false)).toBe(stamp);
   });
@@ -153,6 +172,30 @@ describe("dropSupersededStamp", () => {
 
   it("passes null through", () => {
     expect(dropSupersededStamp(null, ["NEW456"])).toBeNull();
+  });
+});
+
+describe("TrackingPanel", () => {
+  it("warns when the displayed tracking may belong to another order", () => {
+    const tracking = parseLiveTracking({
+      kind: "live",
+      status: "delivered",
+      carrier: "191047",
+      trackingNumber: "1ST04211945613",
+      destinationCountry: "DE",
+    });
+    expect(tracking).not.toBeNull();
+
+    const html = renderToStaticMarkup(
+      createElement(TrackingPanel, {
+        tracking: tracking!,
+        destinationCountry: "United States",
+        orderPlacedAt: null,
+        destinationMismatch: true,
+      }),
+    );
+
+    expect(html).toContain("Tracking may belong to a different order");
   });
 });
 

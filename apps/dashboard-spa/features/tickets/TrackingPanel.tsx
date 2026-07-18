@@ -1,4 +1,4 @@
-import { ExternalLink, Truck } from "lucide-react";
+import { AlertTriangle, ExternalLink, Truck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +18,8 @@ interface Props {
   readonly destinationCountry: string | null;
   /** Order placed-at — drives the "in transit N days" hint. */
   readonly orderPlacedAt: string | Date | null;
+  /** The carrier destination conflicts with the order's ship-to country. */
+  readonly destinationMismatch?: boolean;
 }
 
 const dateTime = (iso: string): string => iso.slice(0, 16).replace("T", " ");
@@ -51,6 +53,7 @@ export const TrackingPanel = ({
   tracking,
   destinationCountry,
   orderPlacedAt,
+  destinationMismatch = false,
 }: Props) => {
   const url = trackingUrlFor(tracking);
   // Prefer the carrier's own transit-days metric; fall back to days since the
@@ -80,6 +83,18 @@ export const TrackingPanel = ({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 p-4 pt-0 2xl:p-6 2xl:pt-0">
+        {destinationMismatch ? (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2.5 text-xs text-warning"
+          >
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            <span className="text-pretty">
+              Tracking may belong to a different order
+            </span>
+          </div>
+        ) : null}
+
         <div className="flex items-center justify-between gap-2">
           <code className="break-all font-mono text-sm">
             {tracking.trackingNumber ?? "—"}

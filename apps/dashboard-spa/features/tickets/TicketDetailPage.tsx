@@ -562,6 +562,7 @@ export function TicketDetailPage() {
       parseLiveTracking(context["liveTrackingStatus"]),
       orderTrackingNumbers,
       order !== null,
+      riskFlags,
     );
 
   // The conversation's display name: the linked Shopify customer, else the
@@ -1080,6 +1081,9 @@ export function TicketDetailPage() {
               tracking={tracking}
               destinationCountry={order?.shippingAddress?.country ?? null}
               orderPlacedAt={order?.createdAt ?? null}
+              destinationMismatch={riskFlags.includes(
+                "tracking_destination_mismatch",
+              )}
             />
           ) : null}
 
