@@ -24,7 +24,6 @@ const plates = [...document.querySelectorAll("[data-plate]")];
 const frameFor = (plate) => plate.querySelector("iframe");
 const camera = document.querySelector("[data-camera]");
 const cursor = document.querySelector("[data-cursor-shell]");
-const composerBeam = document.querySelector("[data-composer-beam]");
 const portalHandoff = document.querySelector("[data-portal-handoff]");
 const partnerViewLabel = document.querySelector("[data-partner-view-label]");
 const deliveryStatus = document.querySelector("[data-delivery-status]");
@@ -148,22 +147,6 @@ const editLiveFrames = (time) => {
   );
 };
 
-const positionComposerBeam = (cameraFrame) => {
-  const merchant = frameFor(plateFor("customer-update"))?.contentDocument;
-  const textarea = findCustomerComposer(merchant);
-  const composer = textarea?.parentElement ?? textarea;
-  if (!composer) return;
-  const rect = composer.getBoundingClientRect();
-  const topLeft = dashboardPointToScreen(
-    { x: rect.left, y: rect.top },
-    cameraFrame,
-  );
-  composerBeam.style.left = `${topLeft.x - 8}px`;
-  composerBeam.style.top = `${topLeft.y - 8}px`;
-  composerBeam.style.width = `${rect.width * cameraFrame.scale + 16}px`;
-  composerBeam.style.height = `${rect.height * cameraFrame.scale + 16}px`;
-};
-
 const renderStoryOverlays = (time) => {
   const handoff =
     smooth(progress(time, 17.15, 17.45)) *
@@ -219,10 +202,6 @@ export const renderAt = (rawTime) => {
   cursor.style.opacity = String(cursorFrame.opacity);
   cursor.style.transform = `translate3d(${cursorFrame.x - 2}px, ${cursorFrame.y - 2}px, 0) scale(${mix(1, 0.96, cursorFrame.click)})`;
 
-  const beam = progress(time, 28.4, 29) * (1 - progress(time, 33.8, 34.4));
-  composerBeam.style.opacity = String(smooth(beam));
-  composerBeam.style.setProperty("--beam-x", `${(time * 70) % 220}%`);
-  positionComposerBeam(cameraFrame);
   renderStoryOverlays(time);
   const jump =
     smooth(progress(time, 37, 37.6)) * (1 - smooth(progress(time, 38.4, 39)));

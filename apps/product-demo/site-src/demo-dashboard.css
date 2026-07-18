@@ -13,9 +13,12 @@
   font-display: swap;
 }
 
-/* HyperFrames supplies its own high-contrast composer beam. Keep the exact
-   controls, but remove the nested blue focus rings that compete with it in the
-   light-mode marketing capture. */
+/* The marketing capture uses the dashboard's native BorderBeam at its maximum
+   supported strength. Remove only the nested focus rings that compete with it. */
+[data-beam] {
+  --beam-strength: 1 !important;
+}
+
 .focus-within\:ring-2:focus-within,
 .focus-visible\:ring-2:focus-visible {
   --tw-ring-shadow: 0 0 #0000 !important;

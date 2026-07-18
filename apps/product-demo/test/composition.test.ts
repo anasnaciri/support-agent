@@ -9,6 +9,9 @@ const compositionPath = fileURLToPath(
 const compositionCssPath = fileURLToPath(
   new URL("../composition.css", import.meta.url),
 );
+const compositionJsPath = fileURLToPath(
+  new URL("../composition.js", import.meta.url),
+);
 const dashboardCssPath = fileURLToPath(
   new URL("../site-src/demo-dashboard.css", import.meta.url),
 );
@@ -100,22 +103,25 @@ describe("HyperFrames support-resolution composition", () => {
       "img[data-demo-cursor]",
     );
     expect(cursor?.getAttribute("src")).toBe("./assets/macos-default.svg");
-    expect(document.querySelector("[data-composer-beam]")).not.toBeNull();
+    expect(document.querySelector("[data-composer-beam]")).toBeNull();
     expect(document.querySelector("[data-portal-handoff]")).not.toBeNull();
     expect(document.querySelector("[data-partner-view-label]")).not.toBeNull();
     expect(document.querySelector("[data-delivery-status]")).not.toBeNull();
     expect(document.querySelector("[data-cursor-click]")).toBeNull();
   });
 
-  it("uses a high-contrast beam and suppresses demo-only focus rings", async () => {
-    const [compositionCss, dashboardCss] = await Promise.all([
+  it("maxes the native beam without drawing a second ring", async () => {
+    const [compositionCss, compositionJs, dashboardCss] = await Promise.all([
       readFile(compositionCssPath, "utf8"),
+      readFile(compositionJsPath, "utf8"),
       readFile(dashboardCssPath, "utf8"),
     ]);
 
-    expect(compositionCss).toContain("--beam-strength: 1");
-    expect(compositionCss).toContain("0 0 64px");
+    expect(compositionCss).not.toContain(".composer-beam");
+    expect(compositionJs).not.toContain("data-composer-beam");
     expect(compositionCss).not.toContain(".cursor span");
+    expect(dashboardCss).toContain("[data-beam]");
+    expect(dashboardCss).toContain("--beam-strength: 1 !important");
     expect(dashboardCss).toContain("focus-within\\:ring-2:focus-within");
     expect(dashboardCss).toContain("focus-visible\\:ring-2:focus-visible");
     expect(dashboardCss).toContain("--tw-ring-shadow: 0 0 #0000");
