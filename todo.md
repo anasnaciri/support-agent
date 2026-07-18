@@ -50,12 +50,17 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       a high-contrast delivery-status progression overlay. The customer-update
       draft targets the actual approval composer and streams through an
       iframe-realm `InputEvent`, so React owns every visible partial value; the
-      strongest light-safe beam follows live composer bounds. Demo-only focus
-      rings and the blue cursor click ring were removed. Verified red -> green
+      real dashboard `BorderBeam` runs at its maximum supported strength of 1
+      in the demo build. The separate composition-level outline, demo-only
+      focus rings, and blue cursor click ring were removed. Verified red -> green
       with 17 product-demo tests, the embedded dashboard production build,
       HyperFrames lint, and direct Chrome frames across reassurance, handoff,
       partner, drafting, in-transit, and delivered beats; the focused composer
       reported only transparent shadows and the browser reported no errors.
+      Follow-up correction (2026-07-18): all camera overshoot/back easing was
+      removed in favor of ease-out curves. Customer, order, and tracking card
+      reframes now use gentler quadratic ease-out moves lasting 0.8s, 0.7s,
+      and 0.7s respectively.
 - [ ] **Tighten the HyperFrames animation after the current-motion review**
       (reviewed 2026-07-18 against a fresh 360-frame, 8fps Chrome proxy of the
       current composition; no runtime errors were observed).

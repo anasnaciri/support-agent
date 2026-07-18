@@ -7,18 +7,9 @@ const easing = {
     value < 0.5
       ? 4 * value * value * value
       : 1 - Math.pow(-2 * value + 2, 3) / 2,
-  easeInOutQuint: (value) =>
-    value < 0.5 ? 16 * Math.pow(value, 5) : 1 - Math.pow(-2 * value + 2, 5) / 2,
+  easeOutQuad: (value) => 1 - Math.pow(1 - value, 2),
+  easeOutCubic: (value) => 1 - Math.pow(1 - value, 3),
   easeOutExpo: (value) => (value === 1 ? 1 : 1 - Math.pow(2, -10 * value)),
-  easeOutBack: (value) => {
-    const overshoot = 1.70158;
-    const shifted = value - 1;
-    return (
-      1 +
-      (overshoot + 1) * Math.pow(shifted, 3) +
-      overshoot * Math.pow(shifted, 2)
-    );
-  },
 };
 
 export const segments = [
@@ -39,24 +30,24 @@ export const segments = [
 export const cameraFrames = [
   { time: 0, x: 728, y: 593, scale: 1.5 },
   { time: 3.55, x: 728, y: 593, scale: 1.5 },
-  { time: 4.15, x: 0, y: 0, scale: 1, ease: "easeInOutQuint" },
+  { time: 4.15, x: 0, y: 0, scale: 1, ease: "easeOutCubic" },
   { time: 4.85, x: 0, y: 0, scale: 1 },
-  { time: 5.35, x: -650, y: 120, scale: 1.18, ease: "easeOutBack" },
-  { time: 7.45, x: -650, y: 120, scale: 1.18 },
-  { time: 7.85, x: -650, y: 10, scale: 1.18, ease: "easeOutExpo" },
-  { time: 9.25, x: -650, y: 10, scale: 1.18 },
-  { time: 9.7, x: -650, y: -125, scale: 1.18, ease: "easeOutBack" },
+  { time: 5.65, x: -650, y: 120, scale: 1.18, ease: "easeOutQuad" },
+  { time: 7.65, x: -650, y: 120, scale: 1.18 },
+  { time: 8.35, x: -650, y: 10, scale: 1.18, ease: "easeOutQuad" },
+  { time: 9.65, x: -650, y: 10, scale: 1.18 },
+  { time: 10.35, x: -650, y: -125, scale: 1.18, ease: "easeOutQuad" },
   { time: 12.35, x: -650, y: -125, scale: 1.18 },
-  { time: 13.05, x: 45, y: -95, scale: 1.12, ease: "easeInOutQuint" },
+  { time: 13.05, x: 45, y: -95, scale: 1.12, ease: "easeOutCubic" },
   { time: 15.9, x: 45, y: -95, scale: 1.12 },
   { time: 16.25, x: 0, y: 0, scale: 1, ease: "easeOutExpo" },
   { time: 17.55, x: 0, y: 0, scale: 1 },
   { time: 18.1, x: 0, y: 0, scale: 1, ease: "easeOutExpo" },
   { time: 21.1, x: 0, y: 0, scale: 1 },
-  { time: 21.55, x: -110, y: -80, scale: 1.12, ease: "easeOutBack" },
+  { time: 21.55, x: -110, y: -80, scale: 1.12, ease: "easeOutCubic" },
   { time: 27.55, x: -110, y: -80, scale: 1.12 },
-  { time: 28.15, x: 0, y: 0, scale: 1, ease: "easeInOutQuint" },
-  { time: 29.2, x: 25, y: -118, scale: 1.15, ease: "easeOutBack" },
+  { time: 28.15, x: 0, y: 0, scale: 1, ease: "easeOutCubic" },
+  { time: 29.2, x: 25, y: -118, scale: 1.15, ease: "easeOutCubic" },
   { time: 35.1, x: 25, y: -118, scale: 1.15 },
   { time: 35.55, x: 0, y: 0, scale: 1, ease: "easeOutExpo" },
   { time: 45, x: 0, y: 0, scale: 1 },

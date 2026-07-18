@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   cameraAt,
+  cameraFrames,
   cueProgress,
   dashboardPointToScreen,
   deliveryStatusAt,
@@ -66,10 +67,37 @@ describe("product-demo choreography", () => {
     ).toBe(true);
   });
 
-  it("uses punchy overshoot and fast cursor easing instead of linear-feeling pans", () => {
+  it("uses smooth ease-out camera moves without spring-like overshoot", () => {
     expect(cameraAt(4.85).x).toBe(0);
-    expect(cameraAt(5.1).x).toBeLessThan(-650);
-    expect(cameraAt(5.35).x).toBe(-650);
+    expect(cameraAt(5.25).x).toBeLessThan(0);
+    expect(cameraAt(5.25).x).toBeGreaterThan(-650);
+    expect(cameraAt(5.65).x).toBe(-650);
+
+    expect(cameraAt(8).y).toBeLessThan(120);
+    expect(cameraAt(8).y).toBeGreaterThan(10);
+    expect(cameraAt(8.35).y).toBe(10);
+
+    expect(cameraAt(9.9).y).toBeLessThan(10);
+    expect(cameraAt(9.9).y).toBeGreaterThan(-125);
+    expect(cameraAt(10.35).y).toBe(-125);
+    expect(
+      cameraFrames
+        .filter((frame) => [5.65, 8.35, 10.35].includes(frame.time))
+        .map((frame) => frame.ease),
+    ).toEqual(["easeOutQuad", "easeOutQuad", "easeOutQuad"]);
+
+    const movingFrames = cameraFrames.filter((frame, index) => {
+      const previous = cameraFrames[index - 1];
+      return (
+        previous &&
+        (frame.x !== previous.x ||
+          frame.y !== previous.y ||
+          frame.scale !== previous.scale)
+      );
+    });
+    expect(
+      movingFrames.every((frame) => frame.ease?.startsWith("easeOut")),
+    ).toBe(true);
 
     const approveCue = visibleCursorCues[0];
     const halfway = (approveCue.start + approveCue.arrive) / 2;
