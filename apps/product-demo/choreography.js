@@ -27,7 +27,8 @@ export const segments = [
   { start: 6, end: 7.8, plate: "agent-investigation-customer" },
   { start: 7.8, end: 9.8, plate: "agent-investigation-order" },
   { start: 9.8, end: 13, plate: "agent-investigation" },
-  { start: 13, end: 18, plate: "merchant-approval" },
+  { start: 13, end: 16, plate: "merchant-approval" },
+  { start: 16, end: 18, plate: "reassurance-sent" },
   { start: 18, end: 21, plate: "partner-inbox" },
   { start: 21, end: 28, plate: "fulfillment-resolution" },
   { start: 28, end: 35, plate: "customer-update" },
@@ -47,7 +48,9 @@ export const cameraFrames = [
   { time: 9.7, x: -650, y: -125, scale: 1.18, ease: "easeOutBack" },
   { time: 12.35, x: -650, y: -125, scale: 1.18 },
   { time: 13.05, x: 45, y: -95, scale: 1.12, ease: "easeInOutQuint" },
-  { time: 17.55, x: 45, y: -95, scale: 1.12 },
+  { time: 15.9, x: 45, y: -95, scale: 1.12 },
+  { time: 16.25, x: 0, y: 0, scale: 1, ease: "easeOutExpo" },
+  { time: 17.55, x: 0, y: 0, scale: 1 },
   { time: 18.1, x: 0, y: 0, scale: 1, ease: "easeOutExpo" },
   { time: 21.1, x: 0, y: 0, scale: 1 },
   { time: 21.55, x: -110, y: -80, scale: 1.12, ease: "easeOutBack" },
@@ -133,6 +136,34 @@ export const cameraAt = (time) => sampleFrames(time, cameraFrames);
 export const plateAt = (time) =>
   segments.find(({ start, end }) => time >= start && time < end)?.plate ??
   segments.at(-1).plate;
+
+const deliveryStatuses = [
+  {
+    start: 9.8,
+    end: 13,
+    key: "undelivered",
+    label: "Undelivered",
+    detail: "Original shipment stalled",
+  },
+  {
+    start: 35,
+    end: 37,
+    key: "in-transit",
+    label: "In transit",
+    detail: "Replacement is moving",
+  },
+  {
+    start: 39,
+    end: 43,
+    key: "delivered",
+    label: "Delivered",
+    detail: "Package reached Maya",
+  },
+];
+
+export const deliveryStatusAt = (time) =>
+  deliveryStatuses.find(({ start, end }) => time >= start && time < end) ??
+  null;
 
 export const dashboardPointToScreen = (
   point,

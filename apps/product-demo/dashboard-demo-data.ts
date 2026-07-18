@@ -5,6 +5,7 @@ export type DashboardDemoState =
   | "agent-investigation-order"
   | "agent-investigation"
   | "merchant-approval"
+  | "reassurance-sent"
   | "fulfillment-resolution"
   | "customer-update"
   | "sent-update"
@@ -18,6 +19,7 @@ interface DemoPayload {
 const now = "2026-07-18T10:54:00.000Z";
 const customerMessageAt = "2026-07-18T10:42:00.000Z";
 const operatorEscalationAt = "2026-07-18T10:49:00.000Z";
+const reassuranceSentAt = "2026-07-18T10:50:00.000Z";
 const deliveredAt = "2026-07-21T14:18:00.000Z";
 
 const reassurance =
@@ -234,6 +236,28 @@ const threadFor = (state: DashboardDemoState) => {
       attachments: [],
     },
   ];
+
+  const reassuranceSent = new Set<DashboardDemoState>([
+    "reassurance-sent",
+    "fulfillment-resolution",
+    "customer-update",
+    "sent-update",
+    "delivered-delight",
+  ]).has(state);
+
+  if (reassuranceSent) {
+    messages.push({
+      id: "message-reassurance",
+      direction: "outbound",
+      from: { name: "Northstar Support", email: "support@northstar.example" },
+      to: [{ name: "Maya Chen", email: "maya@example.test" }],
+      subject: "Re: Where is my order?",
+      bodyText: reassurance,
+      sanitizedBodyHtml: null,
+      sentAt: reassuranceSentAt,
+      attachments: [],
+    });
+  }
 
   if (state === "sent-update" || state === "delivered-delight") {
     messages.push({

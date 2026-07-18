@@ -41,6 +41,21 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       dashboard production build, HyperFrames lint, direct 1920x1080 Chrome
       acceptance frames across 17 beats (including all five corrected cursor
       targets), `git diff --check`, and `pnpm build`.
+- [x] **Clarify the HyperFrames resolution story and restore live drafting**
+      (2026-07-18). The approval result now visibly rises into the real customer
+      thread as the agent's reassuring reply before the escalation leaves the
+      merchant dashboard. A dedicated Northstar Support -> Acme Fulfillment
+      handoff card and persistent partner-view label make the portal and actor
+      change explicit. Undelivered, in-transit, and delivered beats now receive
+      a high-contrast delivery-status progression overlay. The customer-update
+      draft targets the actual approval composer and streams through an
+      iframe-realm `InputEvent`, so React owns every visible partial value; the
+      strongest light-safe beam follows live composer bounds. Demo-only focus
+      rings and the blue cursor click ring were removed. Verified red -> green
+      with 17 product-demo tests, the embedded dashboard production build,
+      HyperFrames lint, and direct Chrome frames across reassurance, handoff,
+      partner, drafting, in-transit, and delivered beats; the focused composer
+      reported only transparent shadows and the browser reported no errors.
 - [ ] **Tighten the HyperFrames animation after the current-motion review**
       (reviewed 2026-07-18 against a fresh 360-frame, 8fps Chrome proxy of the
       current composition; no runtime errors were observed).
@@ -50,8 +65,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         every click produce its result immediately.
   - [ ] Compress the story toward 30-34 seconds by removing post-click dead air
         and shortening the fulfillment and customer-drafting sequences.
-  - [ ] Reframe fulfillment and composer actions around their active controls;
-        derive the composer beam from live DOM bounds.
+  - [ ] Reframe fulfillment and composer actions more tightly around their
+        active controls.
   - [ ] Stage the ending as delivered tracking, happy-message rise, then the
         resolved payoff instead of presenting all three simultaneously.
   - [ ] Simplify the easing vocabulary and preserve cursor continuity,

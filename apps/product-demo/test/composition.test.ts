@@ -6,6 +6,12 @@ import { JSDOM } from "jsdom";
 const compositionPath = fileURLToPath(
   new URL("../index.html", import.meta.url),
 );
+const compositionCssPath = fileURLToPath(
+  new URL("../composition.css", import.meta.url),
+);
+const dashboardCssPath = fileURLToPath(
+  new URL("../site-src/demo-dashboard.css", import.meta.url),
+);
 
 const loadComposition = async (): Promise<Document> => {
   const html = await readFile(compositionPath, "utf8");
@@ -34,7 +40,7 @@ describe("HyperFrames support-resolution composition", () => {
         "iframe[data-dashboard-state]",
       ),
     ];
-    expect(plates).toHaveLength(11);
+    expect(plates).toHaveLength(12);
     expect(
       plates.every((plate) => plate.src.includes("./site/index.html?")),
     ).toBe(true);
@@ -56,6 +62,12 @@ describe("HyperFrames support-resolution composition", () => {
       "agent-investigation-order",
       "agent-investigation",
     ]);
+    expect(
+      plates.some(
+        (plate) =>
+          plate.getAttribute("data-dashboard-state") === "reassurance-sent",
+      ),
+    ).toBe(true);
   });
 
   it("contains every visible state in the merchant-to-fulfillment story", async () => {
@@ -89,5 +101,23 @@ describe("HyperFrames support-resolution composition", () => {
     );
     expect(cursor?.getAttribute("src")).toBe("./assets/macos-default.svg");
     expect(document.querySelector("[data-composer-beam]")).not.toBeNull();
+    expect(document.querySelector("[data-portal-handoff]")).not.toBeNull();
+    expect(document.querySelector("[data-partner-view-label]")).not.toBeNull();
+    expect(document.querySelector("[data-delivery-status]")).not.toBeNull();
+    expect(document.querySelector("[data-cursor-click]")).toBeNull();
+  });
+
+  it("uses a high-contrast beam and suppresses demo-only focus rings", async () => {
+    const [compositionCss, dashboardCss] = await Promise.all([
+      readFile(compositionCssPath, "utf8"),
+      readFile(dashboardCssPath, "utf8"),
+    ]);
+
+    expect(compositionCss).toContain("--beam-strength: 1");
+    expect(compositionCss).toContain("0 0 64px");
+    expect(compositionCss).not.toContain(".cursor span");
+    expect(dashboardCss).toContain("focus-within\\:ring-2:focus-within");
+    expect(dashboardCss).toContain("focus-visible\\:ring-2:focus-visible");
+    expect(dashboardCss).toContain("--tw-ring-shadow: 0 0 #0000");
   });
 });

@@ -4,6 +4,7 @@ import {
   cameraAt,
   cueProgress,
   dashboardPointToScreen,
+  deliveryStatusAt,
   openingMessageAnimationTime,
   openingMessageKeyframes,
   openingMessageOptions,
@@ -26,6 +27,14 @@ describe("product-demo choreography", () => {
     expect(plateAt(6.5)).toBe("agent-investigation-customer");
     expect(plateAt(8.5)).toBe("agent-investigation-order");
     expect(plateAt(10.5)).toBe("agent-investigation");
+    expect(plateAt(16.5)).toBe("reassurance-sent");
+  });
+
+  it("gives each shipment state its own emphatic story beat", () => {
+    expect(deliveryStatusAt(11)?.label).toBe("Undelivered");
+    expect(deliveryStatusAt(36)?.label).toBe("In transit");
+    expect(deliveryStatusAt(41)?.label).toBe("Delivered");
+    expect(deliveryStatusAt(20)).toBeNull();
   });
 
   it("drives the opening bubble through the SPA's 350ms rise animation", () => {

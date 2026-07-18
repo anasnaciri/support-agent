@@ -76,4 +76,20 @@ describe("dashboard product-demo data", () => {
     expect(detail.body.problem).toContain("appears undelivered");
     expect(detail.body.trackingNumber).toBe("DEMO-9400-1048");
   });
+
+  it("shows the reassuring customer reply before handing off to fulfillment", () => {
+    const response = dashboardDemoPayload(
+      "/dashboard/tickets/demo-ticket/conversation-thread",
+      "reassurance-sent",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.thread.messages).toHaveLength(2);
+    expect(response.body.thread.messages[1]).toMatchObject({
+      direction: "outbound",
+      bodyText: expect.stringContaining(
+        "checking this with our fulfillment partner",
+      ),
+    });
+  });
 });

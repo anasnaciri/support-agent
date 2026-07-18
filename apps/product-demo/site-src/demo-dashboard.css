@@ -8,6 +8,15 @@
    the same source font and rewrite its URL for this self-contained build. */
 @font-face {
   font-family: "Climate Crisis";
-  src: url("../../dashboard-spa/public/fonts/ClimateCrisis.ttf") format("truetype");
+  src: url("../../dashboard-spa/public/fonts/ClimateCrisis.ttf")
+    format("truetype");
   font-display: swap;
+}
+
+/* HyperFrames supplies its own high-contrast composer beam. Keep the exact
+   controls, but remove the nested blue focus rings that compete with it in the
+   light-mode marketing capture. */
+.focus-within\:ring-2:focus-within,
+.focus-visible\:ring-2:focus-visible {
+  --tw-ring-shadow: 0 0 #0000 !important;
 }
