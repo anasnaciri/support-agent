@@ -7,7 +7,7 @@ const mix = (from, to, amount) => from + (to - from) * amount;
 const plates = [...document.querySelectorAll("[data-plate]")];
 const frameFor = (plate) => plate.querySelector("iframe");
 const camera = document.querySelector("[data-camera]");
-const cursor = document.querySelector("[data-demo-cursor]");
+const cursor = document.querySelector("[data-cursor-shell]");
 const cursorClick = document.querySelector("[data-cursor-click]");
 const composerBeam = document.querySelector("[data-composer-beam]");
 const timeJump = document.querySelector("[data-shot='time-jump']");

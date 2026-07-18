@@ -25,7 +25,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       supplies synthetic Maya Chen / order #1048 data and deterministic ticket,
       approval, escalation, reshipment, tracking, delivered, and customer-
       delight states. HyperFrames owns only camera, cursor, crossfade, typing,
-      beam, and time-jump choreography. Verified with seven fixture/composition
+      beam, and time-jump choreography. The cursor overlay uses the supplied
+      black macOS `Default.svg` asset rather than the earlier white Windows-like
+      drawing. Verified with seven fixture/composition
       tests, the embedded dashboard production build, HyperFrames lint, strict
       runtime/layout/contrast checks at six beats, an 11-frame visual acceptance
       sheet covering both portals, `git diff --check`, and `pnpm build`.

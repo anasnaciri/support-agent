@@ -73,7 +73,10 @@ describe("HyperFrames support-resolution composition", () => {
     }
 
     expect(document.querySelector("[data-camera]")).not.toBeNull();
-    expect(document.querySelector("[data-demo-cursor]")).not.toBeNull();
+    const cursor = document.querySelector<HTMLImageElement>(
+      "img[data-demo-cursor]",
+    );
+    expect(cursor?.getAttribute("src")).toBe("./assets/macos-default.svg");
     expect(document.querySelector("[data-composer-beam]")).not.toBeNull();
   });
 });
