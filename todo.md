@@ -2002,6 +2002,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       entities, retention, transfer selections, and counsel review remain
       launch blockers. Verified with a clause/schedule inventory, placeholder
       inventory, whitespace checks, `git diff --check`, and `pnpm build`.
+      Visibility clarification (2026-07-19): all four `docs/legal/*.md`
+      agreements remain repository-only Markdown drafts; the deployed
+      `/legal/data-processing` route returns HTTP 200 but still renders only
+      the old short notice/DPA from `apps/api/src/features/system/legal.ts`.
 - [ ] **Finalize the legal launch set with qualified counsel and production
       facts.** Complete the identity/contact, billing/renewal, governing-law,
       liability/indemnity, hosting-region, log/backup/account-retention, and
