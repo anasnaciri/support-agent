@@ -2560,6 +2560,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       gate are. Produce the
       profile from this repo under `deploy/`; never create a repo or
       source branch per customer.
+- [ ] **Align the public Klos'd pricing copy with the dedicated-license model.**
+      Replace ownership/"lifetime functionality" language with a perpetual
+      right to run the purchased major version; package dedicated offers by
+      workspace entitlement inside one provisioned customer account; state
+      that members and fulfillment partners are invite-only; distinguish the
+      one-time license from installation, customer-funded infrastructure and
+      provider usage, optional maintenance, managed operations, support, and
+      future major upgrades; and update both visible FAQ copy and structured
+      offer/FAQ metadata. Public pricing CTAs may request a demo, sales contact,
+      or provisioned trial but must not imply self-service account creation.
 - [ ] **Build the dedicated fleet-operations appliance and management seam.**
       Keep each customer data plane autonomous: loss of the optional Licensor
       control plane may stop telemetry, updates, and support, but must not stop
