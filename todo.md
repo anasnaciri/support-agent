@@ -41,6 +41,21 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       dashboard production build, HyperFrames lint, direct 1920x1080 Chrome
       acceptance frames across 17 beats (including all five corrected cursor
       targets), `git diff --check`, and `pnpm build`.
+- [ ] **Tighten the HyperFrames animation after the current-motion review**
+      (reviewed 2026-07-18 against a fresh 360-frame, 8fps Chrome proxy of the
+      current composition; no runtime errors were observed).
+  - [ ] Keep every camera crop covering the full 1920x1080 frame; remove the
+        exposed canvas around the opening and right-rail shots.
+  - [ ] Replace whole-plate context crossfades with localized reveals, and make
+        every click produce its result immediately.
+  - [ ] Compress the story toward 30-34 seconds by removing post-click dead air
+        and shortening the fulfillment and customer-drafting sequences.
+  - [ ] Reframe fulfillment and composer actions around their active controls;
+        derive the composer beam from live DOM bounds.
+  - [ ] Stage the ending as delivered tracking, happy-message rise, then the
+        resolved payoff instead of presenting all three simultaneously.
+  - [ ] Simplify the easing vocabulary and preserve cursor continuity,
+        including a visible interaction with the tracking field.
 - [ ] **Export the final HyperFrames MP4.** Run `pnpm --filter
       @support-agent/product-demo render`. Because the composition deliberately
       embeds the exact dashboard in iframes, HyperFrames uses screenshot capture
