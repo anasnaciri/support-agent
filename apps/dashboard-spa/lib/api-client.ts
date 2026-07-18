@@ -1414,14 +1414,28 @@ export const api = {
     ticketId: string,
     bodyText: string,
     attachmentIds: ReadonlyArray<string> = [],
-  ): Promise<{ readonly kind: string }> => {
+  ): Promise<{
+    readonly kind: string;
+    /** On kind "sent": the provider message id — the SAME id the thread
+        read-back reports later, which lets the composer's optimistic bubble
+        hand off to the real message without a remount. */
+    readonly messageId?: string;
+    /** On kind "sent": ISO-8601 send time from the connector. */
+    readonly sentAt?: string;
+  }> => {
     const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/reply`, {
       method: "POST",
       body:
         attachmentIds.length > 0 ? { bodyText, attachmentIds } : { bodyText },
       ctx,
     });
-    return (body as { kind: string } | null) ?? { kind: "error" };
+    return (
+      (body as {
+        kind: string;
+        messageId?: string;
+        sentAt?: string;
+      } | null) ?? { kind: "error" }
+    );
   },
 
   // Upload a file (raw bytes, the file's own content type) onto a ticket so it

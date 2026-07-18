@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type QueryKey,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ChevronDown,
@@ -16,6 +11,7 @@ import {
 } from "lucide-react";
 import { BorderBeam } from "border-beam";
 import type {
+  DashboardConversationMessage,
   ModelsResponse,
   TicketAttachmentSummary,
   TicketConversationThreadResult,
@@ -30,9 +26,9 @@ import {
 import { formatAttachmentSize } from "@/lib/ticket-timeline";
 import {
   OPTIMISTIC_MESSAGE_ID_PREFIX,
-  appendOptimisticReply,
   buildOptimisticOutboundMessage,
 } from "@/lib/optimistic-reply";
+import type { ReplyPinHandlers } from "@/lib/pinned-replies";
 import { useApprovalDecision, useTicketMutation } from "@/lib/use-ticket-mutation";
 import { composerBeam } from "@/lib/composer-beam";
 import { useSystemPrefersDark, useThemePreference } from "@/lib/theme-store";
@@ -69,6 +65,8 @@ interface ChatComposerProps {
   readonly mode: ComposerMode;
   /** True while the agent is actively working the ticket — lights the beam. */
   readonly processing: boolean;
+  /** Reply-pin lifecycle (owned by the ticket page, merged into the thread). */
+  readonly replyPins: ReplyPinHandlers;
 }
 
 // The composer input grows with its content but is capped — past the cap it
@@ -251,6 +249,7 @@ export function ChatComposer({
   models,
   mode,
   processing,
+  replyPins,
 }: ChatComposerProps) {
   const ctx = { workspaceId };
   const qc = useQueryClient();
@@ -320,15 +319,17 @@ export function ChatComposer({
   const systemPrefersDark = useSystemPrefersDark();
   const approvalId = mode.kind === "approval" ? mode.approvalId : "";
 
-  // Optimistic send: drop a pulsing outbound bubble into the thread cache the
-  // instant Send is pressed, then either keep it (the ticket refetch on success
-  // swaps in the real message) or roll the cache back if the request fails.
+  // Optimistic send, via reply pins (page state merged into the thread at
+  // render time — see lib/pinned-replies.ts). The pin lives OUTSIDE the query
+  // cache, so the refetches that race the send (the success invalidation, the
+  // 2.5s live poll) can never clobber the bubble mid-flight. On success the
+  // pin swaps to the real provider message id — the bubble settles to full
+  // opacity, and when the thread read-back catches up the identical id makes
+  // the hand-off render nothing at all.
   const sendM = useTicketMutation<
     void,
-    {
-      readonly key: QueryKey;
-      readonly previous: TicketConversationThreadResult | undefined;
-    }
+    DashboardConversationMessage,
+    Awaited<ReturnType<typeof api.sendReply>>
   >({
     workspaceId,
     ticketId,
@@ -340,34 +341,42 @@ export function ChatComposer({
         text,
         attachments.map((a) => a.id),
       ),
-    onMutate: async () => {
-      const key = qk.ticketThread(workspaceId, ticketId);
-      // Stop any in-flight thread refetch from clobbering the placeholder.
-      await qc.cancelQueries({ queryKey: key });
-      const previous =
-        qc.getQueryData<TicketConversationThreadResult>(key);
-      const thread =
-        previous?.status === "available" ? previous.thread : null;
+    onMutate: () => {
+      const previous = qc.getQueryData<TicketConversationThreadResult>(
+        qk.ticketThread(workspaceId, ticketId),
+      );
       const optimistic = buildOptimisticOutboundMessage({
         id: `${OPTIMISTIC_MESSAGE_ID_PREFIX}${Date.now()}`,
         bodyText: text,
         customerEmail,
-        thread,
+        thread: previous?.status === "available" ? previous.thread : null,
         sentAt: new Date().toISOString(),
       });
-      qc.setQueryData<TicketConversationThreadResult>(key, (old) =>
-        appendOptimisticReply(old, optimistic),
-      );
-      return { key, previous };
+      replyPins.start(optimistic);
+      return optimistic;
     },
-    onError: (rollback) => {
-      if (rollback) qc.setQueryData(rollback.key, rollback.previous);
+    onError: (optimistic) => {
+      if (optimistic) replyPins.fail(optimistic.id);
     },
-    onDone: (kind) => {
+    onDone: (kind, result, optimistic) => {
       if (kind === "sent") {
+        if (optimistic) {
+          replyPins.confirm(optimistic.id, {
+            ...optimistic,
+            // Fall back to a synthetic id if the response somehow lacks one —
+            // the bubble still settles; only the seamless read-back hand-off
+            // is lost.
+            id: result.messageId ?? `sent:${optimistic.id}`,
+            sentAt: result.sentAt ?? optimistic.sentAt,
+          });
+        }
         setText("");
         setAttachments([]);
+        return;
       }
+      // Guarded outcomes (not_in_takeover, no_thread, …): nothing was sent,
+      // the toast explains — don't leave a phantom bubble behind.
+      if (optimistic) replyPins.fail(optimistic.id);
     },
   });
 

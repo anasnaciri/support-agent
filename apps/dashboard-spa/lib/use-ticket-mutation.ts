@@ -38,13 +38,19 @@ const toastFeedback = (fb: ActionFeedback): void => {
   toast[fb.tone](fb.text);
 };
 
-export const useTicketMutation = <TVars = void, TCtx = unknown>(opts: {
+export const useTicketMutation = <
+  TVars = void,
+  TCtx = unknown,
+  TRes extends TicketMutationResult = TicketMutationResult,
+>(opts: {
   readonly workspaceId: string;
   readonly ticketId: string;
   readonly action: TicketAction;
-  readonly mutationFn: (vars: TVars) => Promise<TicketMutationResult>;
-  /** Runs after the toast + invalidation on success (e.g. close a dialog). */
-  readonly onDone?: (kind: string) => void;
+  readonly mutationFn: (vars: TVars) => Promise<TRes>;
+  /** Runs after the toast + invalidation on success (e.g. close a dialog).
+      Receives the full result and the onMutate context for flows that need
+      more than the outcome kind (the composer's reply pin hand-off). */
+  readonly onDone?: (kind: string, result: TRes, ctx: TCtx | undefined) => void;
   /**
    * Optimistic pre-flight, run before the request. Its return value is handed
    * back to `onError` so an optimistic cache write can be rolled back on failure.
@@ -58,10 +64,10 @@ export const useTicketMutation = <TVars = void, TCtx = unknown>(opts: {
     mutationFn: opts.mutationFn,
     // Spread conditionally: exactOptionalPropertyTypes rejects `onMutate: undefined`.
     ...(opts.onMutate ? { onMutate: opts.onMutate } : {}),
-    onSuccess: (result) => {
+    onSuccess: (result, _vars, ctx) => {
       toastFeedback(ticketActionFeedback(opts.action, result.kind));
       invalidateTicketQueries(qc, opts.workspaceId, opts.ticketId);
-      opts.onDone?.(result.kind);
+      opts.onDone?.(result.kind, result, ctx as TCtx | undefined);
     },
     onError: (_err, _vars, ctx) => {
       opts.onError?.(ctx as TCtx | undefined);

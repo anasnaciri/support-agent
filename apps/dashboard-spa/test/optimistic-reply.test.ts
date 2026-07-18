@@ -1,12 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type {
-  DashboardConversationMessage,
-  TicketConversationThreadResult,
-} from "@support-agent/dashboard-contracts";
+import type { DashboardConversationMessage } from "@support-agent/dashboard-contracts";
 
 import {
   OPTIMISTIC_MESSAGE_ID_PREFIX,
-  appendOptimisticReply,
   buildOptimisticOutboundMessage,
   isOptimisticMessage,
 } from "../lib/optimistic-reply.js";
@@ -74,45 +70,5 @@ describe("buildOptimisticOutboundMessage", () => {
     });
     expect(msg.from).toEqual({ name: "You", email: "" });
     expect(msg.to).toEqual([]);
-  });
-});
-
-describe("appendOptimisticReply", () => {
-  const optimistic = buildOptimisticOutboundMessage({
-    id: `${OPTIMISTIC_MESSAGE_ID_PREFIX}3`,
-    bodyText: "Optimistic",
-    customerEmail: "jane@example.com",
-    thread: null,
-    sentAt: "2026-07-05T11:00:00.000Z",
-  });
-
-  it("appends to an available thread without mutating the original", () => {
-    const before: TicketConversationThreadResult = {
-      status: "available",
-      thread: { subject: "s", participants: [], messages: [inbound] },
-    };
-    const after = appendOptimisticReply(before, optimistic);
-    expect(after).not.toBe(before);
-    expect(before.status === "available" && before.thread.messages).toHaveLength(
-      1,
-    );
-    expect(
-      after?.status === "available" && after.thread.messages,
-    ).toHaveLength(2);
-    expect(
-      after?.status === "available" && after.thread.messages.at(-1)?.id,
-    ).toBe(optimistic.id);
-  });
-
-  it("leaves an unavailable thread untouched", () => {
-    const before: TicketConversationThreadResult = {
-      status: "unavailable",
-      reason: "no_thread",
-    };
-    expect(appendOptimisticReply(before, optimistic)).toBe(before);
-  });
-
-  it("returns undefined when there is no cached thread yet", () => {
-    expect(appendOptimisticReply(undefined, optimistic)).toBeUndefined();
   });
 });

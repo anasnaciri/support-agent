@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -7,7 +7,10 @@ import {
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 
-import type { ApprovalDetail } from "@support-agent/dashboard-contracts";
+import type {
+  ApprovalDetail,
+  DashboardConversationMessage,
+} from "@support-agent/dashboard-contracts";
 
 import { api } from "@/lib/api-client";
 import { ApiError } from "@/lib/errors";
@@ -54,6 +57,12 @@ import {
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { composerKey } from "@/lib/composer-key";
 import { isTicketProcessing } from "@/lib/ticket-processing";
+import {
+  confirmPin,
+  mergePinnedReplies,
+  removePin,
+  type ReplyPinHandlers,
+} from "@/lib/pinned-replies";
 import {
   addressEditDisabledReason,
   cancelOrderDisabledReason,
@@ -481,6 +490,46 @@ export function TicketDetailPage() {
   const order = shopify?.order ?? null;
   const shopDomain = shopify?.shopDomain ?? null;
   const conversationThread = threadQuery.data ?? null;
+
+  // Reply pins: the manager's in-flight sends, merged into the thread at
+  // render time so no refetch can flash or drop the bubble (the send's own
+  // invalidation races the live poll). Once the read-back contains a pin's id
+  // the merge reports it absorbed and we prune it — the updater returns the
+  // same array when nothing changed, so this can't render-loop.
+  const [replyPinState, setReplyPinState] = useState<
+    ReadonlyArray<DashboardConversationMessage>
+  >([]);
+  const replyPins = useMemo<ReplyPinHandlers>(
+    () => ({
+      start: (m) => setReplyPinState((pins) => [...pins, m]),
+      confirm: (optimisticId, confirmed) =>
+        setReplyPinState((pins) => confirmPin(pins, optimisticId, confirmed)),
+      fail: (optimisticId) =>
+        setReplyPinState((pins) => removePin(pins, optimisticId)),
+    }),
+    [],
+  );
+  const threadWithPins = useMemo(
+    () =>
+      mergePinnedReplies(
+        conversationThread ?? { status: "unavailable", reason: "no_thread" },
+        replyPinState,
+      ),
+    [conversationThread, replyPinState],
+  );
+  const absorbedPinIds = threadWithPins.absorbedPinIds;
+  useEffect(() => {
+    if (absorbedPinIds.length === 0) return;
+    setReplyPinState((pins) => {
+      const next = pins.filter((p) => !absorbedPinIds.includes(p.id));
+      return next.length === pins.length ? pins : next;
+    });
+  }, [absorbedPinIds]);
+  // Switching tickets in the sidebar keeps this component mounted — a pin
+  // from the previous ticket must not ride into the next one's thread.
+  useEffect(() => {
+    setReplyPinState([]);
+  }, [id]);
   const trackingResult = trackingQuery.data ?? null;
 
   const context = (ticketRow.context ?? {}) as Readonly<Record<string, unknown>>;
@@ -559,10 +608,12 @@ export function TicketDetailPage() {
           (m) => m.direction === "inbound",
         )?.from.name ?? null)
       : null;
+  // Keyed off the PIN-MERGED thread so the scroll also pins when an
+  // optimistic bubble appears, not only when the server thread changes.
   const threadKey =
-    conversationThread?.status === "available"
-      ? `${conversationThread.thread.messages.length}:${
-          conversationThread.thread.messages.at(-1)?.id ?? ""
+    threadWithPins.result.status === "available"
+      ? `${threadWithPins.result.thread.messages.length}:${
+          threadWithPins.result.thread.messages.at(-1)?.id ?? ""
         }`
       : "none";
   const customerFullName = (() => {
@@ -873,12 +924,7 @@ export function TicketDetailPage() {
           >
             <div className="mx-auto w-full max-w-3xl">
               <ChatThread
-                result={
-                  conversationThread ?? {
-                    status: "unavailable",
-                    reason: "no_thread",
-                  }
-                }
+                result={threadWithPins.result}
                 workspaceId={ctx.workspaceId}
                 ticketId={id}
                 processing={processing}
@@ -943,6 +989,7 @@ export function TicketDetailPage() {
                   models={replyModelsQuery.data ?? null}
                   mode={composerMode}
                   processing={processing}
+                  replyPins={replyPins}
                 />
               </>
             ) : pendingApprovals.length > 1 ? (

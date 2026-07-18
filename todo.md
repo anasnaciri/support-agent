@@ -2865,6 +2865,20 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       halo-pulses (`resolved-pop`) only when the status flips live — all driven
       by the existing 2.5s `TicketLiveBoundary` poll, no long-lived connection.
       All new animations stilled under `prefers-reduced-motion`.
+- [x] Reply pins fix the optimistic-send glitch (2026-07-18): the optimistic
+      bubble now lives in page state (`lib/pinned-replies.ts`), merged into the
+      thread at render time — never in the query cache, where the send's own
+      success invalidation raced the 2.5s live poll and could vanish/re-rise
+      the bubble. Lifecycle: `start` (translucent pin) → `confirm` swaps the
+      pin to the REAL provider message id from the reply response (Gmail
+      message id / IMAP RFC Message-ID — the same id the thread read-back
+      reports, verified in both connectors) so the bubble settles with no
+      remount and the eventual read-back absorbs the pin with an identical
+      React key → `fail`/guarded outcomes drop the pin. `sendReply` client type
+      now surfaces `messageId`/`sentAt`; `useTicketMutation.onDone` passes
+      `(kind, result, ctx)`; `appendOptimisticReply` (cache path) deleted.
+      Pins reset on ticket switch; absorbed pins prune with a same-reference
+      bail so no render loop.
 - [ ] Optional: pop the header status chip (scale-in) when the status changes
       live, mirroring the same live-transition tracking the resolved banner
       uses.
