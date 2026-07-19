@@ -162,7 +162,7 @@ export function SignOutButton({
               type="button"
               role="menuitem"
               onClick={() => void logout()}
-              className="flex-1 rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
+              className="flex-1 rounded-md bg-destructive-solid px-3 py-1.5 text-sm font-medium text-destructive-solid-foreground transition-colors hover:bg-destructive-solid/90"
             >
               Sign out
             </button>

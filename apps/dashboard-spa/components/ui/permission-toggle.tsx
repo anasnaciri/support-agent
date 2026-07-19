@@ -71,7 +71,7 @@ export const PermissionToggle = ({
           className={cn(
             segment,
             !isAuto
-              ? "bg-primary text-primary-foreground"
+              ? "bg-primary-solid text-primary-solid-foreground"
               : "bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground",
           )}
         >
@@ -85,7 +85,7 @@ export const PermissionToggle = ({
             aria-pressed
             className={cn(
               segment,
-              "border-l border-input bg-destructive text-destructive-foreground",
+              "border-l border-input bg-destructive-solid text-destructive-solid-foreground",
             )}
           >
             <AlertTriangle className="size-3.5" aria-hidden />

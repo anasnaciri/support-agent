@@ -12,6 +12,8 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-solid: var(--primary-solid);
+  --color-primary-solid-foreground: var(--primary-solid-foreground);
   --color-bubble: var(--bubble);
   --color-bubble-foreground: var(--bubble-foreground);
   --color-secondary: var(--secondary);
@@ -22,6 +24,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-solid: var(--destructive-solid);
+  --color-destructive-solid-foreground: var(--destructive-solid-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
@@ -90,6 +94,12 @@
   --primary: #0057ff;
   --primary-foreground: #ffffff;
 
+  /* Solid button fills — scoped like --sidebar-* so dark mode can keep
+     saturated Cloudflare-style buttons while --primary/--destructive stay
+     text-legible pastels there. Light mode has no split: plain aliases. */
+  --primary-solid: var(--primary);
+  --primary-solid-foreground: var(--primary-foreground);
+
   /* Outbound chat bubble — scoped like --sidebar-* so the bubble can keep
      white-on-blue in .dark, where --primary flips to light-blue/near-black
      ink and would render bubbles with black text. */
@@ -109,6 +119,8 @@
 
   --destructive: #d92d20;
   --destructive-foreground: #ffffff;
+  --destructive-solid: var(--destructive);
+  --destructive-solid-foreground: var(--destructive-foreground);
 
   --success: #15924f;
   --success-foreground: #ffffff;
@@ -149,7 +161,12 @@
      blue with near-black ink for --primary-foreground.
    - Badge text sits on a tint of itself, which forces the status colors
      lighter than their light-mode cousins. Darkening them re-fails the
-     badge pairings. */
+     badge pairings.
+   - Buttons opt OUT of the pastel ramp (2026-07-19, user decision): the
+     scoped *-solid tokens keep saturated brand fills under white text
+     (#0059ea blue 5.8:1, #dd1406 red 5:1) with a Cloudflare-style sheen
+     applied in button.tsx. Links, badges, and status text keep the AA
+     pastels above — don't point them at the solid tokens. */
 .dark {
   color-scheme: dark;
 
@@ -173,6 +190,10 @@
   --primary: #6d9aff;
   --primary-foreground: #10131a;
 
+  /* Saturated button fills (see header note) */
+  --primary-solid: #0059ea;
+  --primary-solid-foreground: #ffffff;
+
   /* Outbound chat bubble keeps the deep brand blue with white text
      (5.5:1 AA on #0057ff) — a large fill can afford the darker blue that
      link text on #1e1e1e cannot. */
@@ -190,6 +211,8 @@
 
   --destructive: #ff8a8d;
   --destructive-foreground: #200a0a;
+  --destructive-solid: #dd1406;
+  --destructive-solid-foreground: #ffffff;
 
   --success: #3ecf8e;
   --success-foreground: #06251a;

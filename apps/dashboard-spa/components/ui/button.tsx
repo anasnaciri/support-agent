@@ -9,10 +9,13 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
+        // In dark mode the blue/red fills get a Cloudflare-style sheen: a
+        // subtle top-lit gradient plus an inset top highlight over the solid
+        // token color. Light mode keeps the flat fill.
         default:
-          "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90",
+          "bg-primary-solid text-primary-solid-foreground shadow-sm hover:bg-primary-solid/90 dark:bg-linear-to-b dark:from-white/15 dark:to-white/0 dark:shadow-[inset_0_1px_0_0_rgb(255_255_255/0.25),0_1px_2px_0_rgb(0_0_0/0.35)]",
         destructive:
-          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
+          "bg-destructive-solid text-destructive-solid-foreground shadow-sm hover:bg-destructive-solid/90 dark:bg-linear-to-b dark:from-white/15 dark:to-white/0 dark:shadow-[inset_0_1px_0_0_rgb(255_255_255/0.25),0_1px_2px_0_rgb(0_0_0/0.35)]",
         outline:
           "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
         secondary:

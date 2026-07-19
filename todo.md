@@ -2830,6 +2830,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       and the outbound attachment chip in `AttachmentPreview`; guarded by a
       `ticket-timeline.test.ts` assertion that outbound chrome uses the
       bubble tokens, never `bg-primary`.
+- [x] Saturated dark-mode buttons (2026-07-19): new scoped `--primary-solid`
+      / `--destructive-solid` tokens (pattern of `--bubble`) give button
+      fills saturated brand colors in `.dark` — blue `#0059ea` (white 5.8:1)
+      and red `#dd1406` (white 5:1) — plus Cloudflare-style chrome (top-lit
+      gradient + inset highlight) in `button.tsx`. Light mode: the solid
+      tokens are plain aliases, no change. Consumers moved to solid: Button
+      default+destructive variants, SignOutButton confirm, permission-toggle
+      segments; pinned by `test/button-variants.test.ts` (buttons must never
+      use bare `bg-primary`/`bg-destructive`). Everything else keeps the
+      original AA graphite pastels — a full palette re-saturation + darker
+      surface ramp was tried the same day and REVERTED at the user's request
+      (blue link text on dark cards can't reach AA: ~2.9:1 at best-case
+      ceiling 3.6:1 on pure black); only the buttons survived.
 - [x] Queued-bundle approval ping fixed + magic-link review surface (2026-07-07).
       The bundle park's Telegram ping pointed `${APPROVAL_BASE_URL}/tickets/:id`
       (a dashboard path on the API host → `not_found`). Now: the ping lists each
