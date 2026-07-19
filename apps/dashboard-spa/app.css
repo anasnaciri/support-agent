@@ -12,6 +12,8 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-bubble: var(--bubble);
+  --color-bubble-foreground: var(--bubble-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -87,6 +89,12 @@
      active nav, focus ring. */
   --primary: #0057ff;
   --primary-foreground: #ffffff;
+
+  /* Outbound chat bubble — scoped like --sidebar-* so the bubble can keep
+     white-on-blue in .dark, where --primary flips to light-blue/near-black
+     ink and would render bubbles with black text. */
+  --bubble: var(--primary);
+  --bubble-foreground: var(--primary-foreground);
 
   --secondary: #ececec;
   --secondary-foreground: #191919;
@@ -164,6 +172,12 @@
   /* Bright brand blue; ink text (white tops out at 2.7:1 on this blue) */
   --primary: #6d9aff;
   --primary-foreground: #10131a;
+
+  /* Outbound chat bubble keeps the deep brand blue with white text
+     (5.5:1 AA on #0057ff) — a large fill can afford the darker blue that
+     link text on #1e1e1e cannot. */
+  --bubble: #0057ff;
+  --bubble-foreground: #ffffff;
 
   --secondary: #2a2a2a;
   --secondary-foreground: #ededed;

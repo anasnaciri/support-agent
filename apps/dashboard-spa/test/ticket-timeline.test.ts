@@ -134,6 +134,16 @@ describe("chatBubbleChromeClass", () => {
       }),
     ).not.toContain("email-paper");
   });
+
+  it("outbound bubbles use the scoped bubble tokens, not --primary", () => {
+    const cls = chatBubbleChromeClass({
+      direction: "outbound",
+      sanitizedBodyHtml: null,
+    });
+    expect(cls).toContain("bg-bubble");
+    expect(cls).toContain("text-bubble-foreground");
+    expect(cls).not.toContain("bg-primary");
+  });
 });
 
 // ------------------------------------------------------------

@@ -2819,6 +2819,17 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       Color transitions (track + refracted track copy) run 200ms ease-out
       (`COLOR_MOTION` / per-property `duration-[200ms,450ms]`) instead of the
       450ms slide spring, which read sluggish on color.
+- [x] Chat bubble dark-mode fix (2026-07-19): outbound bubbles rendered
+      near-black text on blue in `.dark` because they used
+      `bg-primary text-primary-foreground`, and dark `--primary-foreground`
+      is deliberately ink (`#10131a` — white fails AA on `#6d9aff`). New
+      scoped tokens `--bubble`/`--bubble-foreground` (pattern of
+      `--sidebar-*`): light aliases `--primary`, dark keeps deep brand
+      `#0057ff` with white text (5.5:1 AA). Swapped in
+      `chatBubbleChromeClass`, the outbound-link override in `ChatThread`,
+      and the outbound attachment chip in `AttachmentPreview`; guarded by a
+      `ticket-timeline.test.ts` assertion that outbound chrome uses the
+      bubble tokens, never `bg-primary`.
 - [x] Queued-bundle approval ping fixed + magic-link review surface (2026-07-07).
       The bundle park's Telegram ping pointed `${APPROVAL_BASE_URL}/tickets/:id`
       (a dashboard path on the API host → `not_found`). Now: the ping lists each

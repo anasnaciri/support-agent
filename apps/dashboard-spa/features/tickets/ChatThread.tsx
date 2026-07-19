@@ -75,7 +75,7 @@ const Bubble = ({
               "email-html max-w-full overflow-x-auto break-words",
               // Links/quotes inside an outbound (primary-colored) bubble need a
               // legible foreground; inbound bubbles use the normal palette.
-              outbound && "[&_a]:text-primary-foreground [&_a]:underline",
+              outbound && "[&_a]:text-bubble-foreground [&_a]:underline",
             )}
             dangerouslySetInnerHTML={{ __html: message.sanitizedBodyHtml }}
           />

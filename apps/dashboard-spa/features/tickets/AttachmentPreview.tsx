@@ -155,7 +155,7 @@ function FileAttachment({
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs transition-colors hover:bg-muted",
         outbound &&
-          "border-primary-foreground/40 text-primary-foreground hover:bg-primary-foreground/10",
+          "border-bubble-foreground/40 text-bubble-foreground hover:bg-bubble-foreground/10",
       )}
       title="Open this file"
     >

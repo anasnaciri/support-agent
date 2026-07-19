@@ -41,7 +41,7 @@ export const chatBubbleChromeClass = (
   return [
     "max-w-[85%] min-w-0 overflow-hidden rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm",
     outbound
-      ? "rounded-br-sm bg-primary text-primary-foreground"
+      ? "rounded-br-sm bg-bubble text-bubble-foreground"
       : [
           "rounded-bl-sm border border-border bg-card text-foreground",
           message.sanitizedBodyHtml &&
