@@ -3049,6 +3049,25 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Dashboard And SPA
 
+- [x] Flat, border-driven ticket view matching the marketing mockup's
+      "Our platform in action" frame (2026-07-19): dropped `shadow-sm` from
+      the shared `Card` primitive (affects every page that renders cards —
+      hairline borders now do all the separation), from chat bubbles
+      (`chatBubbleChromeClass`), and from the ⋮ header icon button; removed
+      `shadow-md` from the floating context card. Ticket header / composer /
+      details-panel hairlines went `border-border/60` → full `border-border`.
+      Active sidebar row is now a brand-blue tint + colored left accent bar
+      (`bg-primary/5` + `border-l-primary`) instead of a white card; inactive
+      unresolved rows sit flat (no `bg-muted/40` fill). Floating overlays
+      (popovers, menus, mobile drawer/tab, lightbox) keep their shadows —
+      elevation there is functional. Verified: SPA typecheck, all 689 SPA
+      tests, `pnpm build`.
+- [ ] Optional deeper mockup alignment for the ticket view: filled (muted,
+      borderless) sidebar search input; white `bg-card` chat stage instead of
+      the off-white field; pinned blue-tint one-line summary strip under the
+      ticket header; per-status sidebar tabs with counts (Pending/All/
+      Resolved); cool-tinted light border token (mockup `#e8eaee` vs current
+      neutral `#e4e4e4`).
 - [x] Chat-thread motion (2026-07-18): new bubbles rise into place
       (`msg-rise`, 0.35s translateY+fade); optimistic replies render translucent
       (`opacity-60`, "Sending…", pulse removed) and the confirmed reply that

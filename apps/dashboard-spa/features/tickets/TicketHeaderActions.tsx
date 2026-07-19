@@ -152,7 +152,7 @@ const HeaderMenu = ({
         aria-label={label}
         title={label}
         className={cn(
-          "inline-flex size-9 items-center justify-center rounded-md border border-input bg-transparent text-muted-foreground shadow-sm transition-[color,background-color,scale] duration-150 ease-out hover:bg-accent hover:text-accent-foreground active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+          "inline-flex size-9 items-center justify-center rounded-md border border-input bg-transparent text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out hover:bg-accent hover:text-accent-foreground active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
           hitAreaExtension,
         )}
       >

@@ -789,7 +789,7 @@ export function TicketDetailPage() {
     <div className="flex h-full min-h-0">
       {/* CENTER — conversation */}
       <section className="flex min-w-0 flex-1 flex-col bg-background">
-        <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 bg-card py-2.5 pl-4 pr-4 group-data-[sidebar-state=collapsed]/ticket:pl-14">
+        <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-card py-2.5 pl-4 pr-4 group-data-[sidebar-state=collapsed]/ticket:pl-14">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-base font-semibold tracking-tight">
@@ -918,7 +918,7 @@ export function TicketDetailPage() {
             aria-hidden={!showContext}
             aria-label="Ticket context"
             className={cn(
-              "thin-scrollbar absolute right-4 top-4 z-10 max-h-[calc(100%-2rem)] w-72 max-w-[85vw] overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-md transition-transform duration-300 ease-in-out",
+              "thin-scrollbar absolute right-4 top-4 z-10 max-h-[calc(100%-2rem)] w-72 max-w-[85vw] overflow-y-auto rounded-lg border border-border bg-card p-4 transition-transform duration-300 ease-in-out",
               showContext
                 ? "translate-x-0"
                 : "pointer-events-none translate-x-[calc(100%+1rem)]",
@@ -933,7 +933,7 @@ export function TicketDetailPage() {
           </aside>
         </div>
 
-        <div className="thin-scrollbar max-h-[60%] shrink-0 overflow-y-auto border-t border-border/60 bg-card px-4 py-3">
+        <div className="thin-scrollbar max-h-[60%] shrink-0 overflow-y-auto border-t border-border bg-card px-4 py-3">
           <div className="mx-auto w-full max-w-3xl">
             {composerMode ? (
               <>

@@ -195,20 +195,20 @@ export interface TicketRowClasses {
 }
 
 /**
- * Per-row appearance for the ticket switcher. The active row keeps its elevated,
- * medium-weight treatment regardless of status. Among inactive rows, resolved
+ * Per-row appearance for the ticket switcher. The active row gets the blue-tint
+ * + accent-bar treatment regardless of status. Among inactive rows, resolved
  * (done) tickets recede — lower opacity, thinner, muted — while everything still
- * needing work is bumped: semibold on a filled background.
+ * needing work is bumped to semibold.
  */
 export const ticketRowClasses = (args: {
   readonly status: string;
   readonly active: boolean;
 }): TicketRowClasses => {
   if (args.active) {
-    // Selected row: a bordered white card (no shadow — borders over shadows for
-    // consistency with the rest of the ticket view).
+    // Selected row: a brand-blue tint plus the colored left accent bar — flat,
+    // no elevation, matching the marketing mockup's selected inbox row.
     return {
-      container: "border-primary bg-card",
+      container: "border-l-primary bg-primary/5",
       subject: "font-medium text-foreground",
     };
   }
@@ -219,7 +219,7 @@ export const ticketRowClasses = (args: {
     };
   }
   return {
-    container: "bg-muted/40 hover:bg-accent",
+    container: "hover:bg-accent",
     subject: "font-semibold text-foreground",
   };
 };

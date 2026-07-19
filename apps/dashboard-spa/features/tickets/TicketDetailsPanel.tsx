@@ -43,7 +43,7 @@ export function TicketDetailsPanel({ children }: { readonly children: ReactNode 
         className={cn(
           // Opaque while it's an off-canvas drawer; the translucent muted wash
           // only works once it's an in-flow column over the page background.
-          "thin-scrollbar overflow-y-auto border-l border-border/60 bg-background lg:bg-muted/40",
+          "thin-scrollbar overflow-y-auto border-l border-border bg-background lg:bg-muted/40",
           // Mobile: fixed off-canvas drawer toggled by `open`.
           "fixed inset-y-0 right-0 z-40 w-80 max-w-[85vw] shadow-xl transition-transform duration-300 ease-in-out",
           open ? "translate-x-0" : "translate-x-full",

@@ -39,7 +39,7 @@ export const chatBubbleChromeClass = (
 ): string => {
   const outbound = message.direction === "outbound";
   return [
-    "max-w-[85%] min-w-0 overflow-hidden rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm",
+    "max-w-[85%] min-w-0 overflow-hidden rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
     outbound
       ? "rounded-br-sm bg-bubble text-bubble-foreground"
       : [
